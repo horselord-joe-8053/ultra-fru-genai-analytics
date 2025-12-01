@@ -1,6 +1,13 @@
 # 📦 FRU GenAI Analytics Overview 
 **(Spark + Delta + OpenAI Embeddings + pgvector + Bedrock + AWS)**
 
+## 📚 Documentation Guide
+
+- **[`README_RUN.md`](README_RUN.md)** - Detailed manual instructions for running FRU locally, in production simulation, and on AWS (ECS, EKS, Terraform)
+- **[`README_RUN_SCRIPTS.md`](README_RUN_SCRIPTS.md)** - Automated setup scripts for one-command deployment across all scenarios
+
+---
+
 FRU (**Friday aRe Us**) is a real, end-to-end **conversational analytics system** built over refrigerator sales data.
 
 It demonstrates:
@@ -187,7 +194,7 @@ python backend/etl/load_openai_embeddings_to_pgvector.py
 python backend/api/app.py
 ```
 
-Test:
+Test query endpoint:
 
 ```bash
 curl -X POST http://localhost:5000/query   -H "Content-Type: application/json"   -d '{"query": "Why are Samsung customers upset?"}'
@@ -200,6 +207,18 @@ The `/query` endpoint will:
 3. Compute simple stats (counts by brand/store/rating).
 4. Send structured JSON + your question to Claude via Bedrock.
 5. Return a grounded natural-language summary plus raw stats.
+
+**Batch Analytics Integration:**
+
+The API also includes an optional scheduler that runs Spark batch analytics every 5 minutes and stores results in PostgreSQL. Enable it by setting `ENABLE_ANALYTICS_SCHEDULER=true` in your `.env` file.
+
+Test analytics endpoint:
+
+```bash
+curl http://localhost:5000/analytics
+```
+
+This returns the latest batch analytics results from Spark + Delta, including sales by brand, store performance, feedback analysis, and more.
 
 ---
 

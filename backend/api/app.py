@@ -13,6 +13,7 @@ from openai import OpenAI
 from openai import APIError as OpenAIError
 
 from backend.llm.bedrock_client import claude_complete
+from backend.services.analytics_scheduler import start_analytics_scheduler
 
 # Configure logging
 logging.basicConfig(
@@ -26,6 +27,7 @@ app.logger = logging.getLogger(__name__)
 allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
 CORS(app, resources={
     r"/query": {"origins": allowed_origins},
+    r"/analytics": {"origins": allowed_origins},
     r"/health": {"origins": "*"}
 })
 
@@ -270,6 +272,61 @@ def build_claude_user_payload(
 
 # ---------- Flask routes ----------
 
+@app.route("/analytics", methods=["GET"])
+def get_analytics():
+    """Get latest batch analytics results from PostgreSQL."""
+    try:
+        conn = get_db_conn()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Get latest analytics result
+                cur.execute("""
+                    SELECT 
+                        id,
+                        created_at,
+                        sales_by_brand,
+                        store_performance,
+                        feedback_analysis,
+                        top_models,
+                        price_stats,
+                        total_records,
+                        total_revenue
+                    FROM batch_analytics
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """)
+                
+                row = cur.fetchone()
+                
+                if not row:
+                    return jsonify({
+                        "error": "No analytics data available yet. Analytics will be available after the first batch run."
+                    }), 404
+                
+                # Convert to dict and format
+                result = dict(row)
+                result["last_updated_at"] = result["created_at"].isoformat() if result["created_at"] else None
+                
+                # Parse JSONB fields (they come as strings or dicts depending on psycopg2 version)
+                for field in ["sales_by_brand", "store_performance", "feedback_analysis", "top_models", "price_stats"]:
+                    if isinstance(result[field], str):
+                        try:
+                            result[field] = json.loads(result[field])
+                        except:
+                            pass
+                
+                return jsonify(result)
+        finally:
+            return_db_conn(conn)
+            
+    except Psycopg2Error as e:
+        app.logger.error(f"Database error in /analytics: {e}")
+        return jsonify({"error": "Database error"}), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error in /analytics: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
+
+
 @app.route("/health", methods=["GET"])
 def health():
     """Health check endpoint with component status."""
@@ -363,5 +420,19 @@ def query():
 if __name__ == "__main__":
     # Initialize connection pool on startup
     init_db_pool()
+    
+    # Start analytics scheduler (if enabled)
+    enable_scheduler = os.environ.get("ENABLE_ANALYTICS_SCHEDULER", "false").lower() == "true"
+    scheduler_interval = int(os.environ.get("ANALYTICS_SCHEDULER_INTERVAL_MINUTES", "5"))
+    
+    if enable_scheduler:
+        try:
+            scheduler = start_analytics_scheduler(interval_minutes=scheduler_interval)
+            app.logger.info(f"Analytics scheduler enabled (runs every {scheduler_interval} minutes)")
+        except Exception as e:
+            app.logger.warning(f"Failed to start analytics scheduler: {e}. Analytics will not run automatically.")
+    else:
+        app.logger.info("Analytics scheduler disabled. Set ENABLE_ANALYTICS_SCHEDULER=true to enable.")
+    
     app.logger.info("Starting FRU API server...")
     app.run(host="0.0.0.0", port=5000)

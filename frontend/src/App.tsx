@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import Chat from "./components/Chat";
 import StatsPanel from "./components/StatsPanel";
+import BatchAnalyticsPanel from "./components/BatchAnalyticsPanel";
 
 export interface Message {
   role: "user" | "assistant";
@@ -72,8 +73,15 @@ const App: React.FC = () => {
       <div className="flex-1 border-r bg-white">
         <Chat messages={messages} onSend={sendQuery} loading={loading} />
       </div>
-      <div className="w-[380px] bg-gray-50">
-        <StatsPanel data={analytics} error={error} />
+      <div className="w-[380px] bg-gray-50 flex flex-col border-l">
+        {/* Batch Analytics Panel (Spark + Delta) */}
+        <div className="flex-1 border-b overflow-hidden">
+          <BatchAnalyticsPanel />
+        </div>
+        {/* Query Stats Panel (pgvector) */}
+        <div className="flex-1 overflow-hidden">
+          <StatsPanel data={analytics} error={error} />
+        </div>
       </div>
     </div>
   );

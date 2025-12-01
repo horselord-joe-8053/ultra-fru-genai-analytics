@@ -1,6 +1,14 @@
 # 📘 FRU – How to Run (Local, AWS, EKS, Terraform)  
 **GenAI Analytics – How to Run (Local, AWS, EKS, Terraform)**
 
+## 📚 Documentation Overview
+
+**This guide (`README_RUN.md`)** provides detailed manual instructions for running FRU in various environments.
+
+**For automated setup scripts**, see **[`README_RUN_SCRIPTS.md`](README_RUN_SCRIPTS.md)** - it contains idempotent shell scripts that automate the entire setup process with a single command per scenario (local dev, local prod, AWS deployments).
+
+---
+
 FRU (**Friday aRe Us**) is a GenAI analytics assistant over fridge sales data, built with:
 
 - OpenAI **embeddings** (text-embedding-3-small)
@@ -12,10 +20,22 @@ FRU (**Friday aRe Us**) is a GenAI analytics assistant over fridge sales data, b
 - Target production: **ECS Fargate + Aurora PostgreSQL + Bedrock**  
   (plus optional **EKS** and **Terraform** paths)
 
-This guide explains **how to run** FRU in:
+## 🚀 Quick Start (Automated Scripts)
+
+**For the fastest setup, use our automated scripts:**
+
+- **Local Development**: `./run_scripts/local/run.sh` - One command to set up everything
+- **Local Production**: `./run_scripts/local-prod/run.sh` - Docker-based production simulation
+- **AWS Deployment**: `./run_scripts/aws/run.sh` - Interactive menu for AWS deployments
+
+📖 **See `README_RUN_SCRIPTS.md` for complete script documentation.**
+
+---
+
+This guide explains **how to run** FRU manually in:
 
 1. Local Developer Mode (best for coding)
-2. Local “Production Simulation” (Docker-only)
+2. Local "Production Simulation" (Docker-only)
 3. AWS ECS Fargate + Aurora + Bedrock (primary prod path)
 4. Kubernetes / EKS deployment (optional path)
 5. Terraform-based IaC (optional path)
@@ -93,18 +113,58 @@ This is what you use for day-to-day hacking and interview prep.
 
 At repo root, create `.env`:
 
+**Option A: Use automated script (recommended)**
 ```bash
+./run_scripts/local/setup-env.sh
+```
+This will create `.env` from `.env.example` template.
+
+**Option B: Manual creation**
+
+Copy from `.env.example`:
+```bash
+cp .env.example .env
+```
+
+Or create manually with:
+
+```bash
+# Database Configuration
+PGHOST=localhost
+PGPORT=5432
 PGUSER=postgres
 PGPASSWORD=postgres
 PGDATABASE=fru_db
 
+# OpenAI Configuration
 OPENAI_API_KEY=sk-...
 
+# AWS Configuration
 AWS_REGION=us-east-1
 BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240229-v1:0
+
+# Optional: AWS Credentials (for local development only)
+# If not set, boto3 will use ~/.aws/credentials or IAM role
+# AWS_ACCESS_KEY_ID=your-access-key
+# AWS_SECRET_ACCESS_KEY=your-secret-key
+# AWS_SESSION_TOKEN=...  # If using temporary credentials
+
+# Optional: Data Paths
+# FRU_CSV_PATH=data/raw/fridge_sales_with_rating.csv
+
+# Optional: Analytics Scheduler (requires Spark + Delta table)
+# ENABLE_ANALYTICS_SCHEDULER=true
+# ANALYTICS_SCHEDULER_INTERVAL_MINUTES=5
+# SPARK_HOME=/path/to/spark  # Optional, if spark-submit not in PATH
+# DELTA_TABLE_PATH=data/delta/fru_sales
 ```
 
-> Tip: keep `.env` out of git or add it to `.gitignore`.
+**Important:** Fill in:
+- `OPENAI_API_KEY` (required)
+- `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (optional for local dev - can use `~/.aws/credentials` instead)
+- Other optional settings as needed
+
+> Tip: keep `.env` out of git (already in `.gitignore`). For production, use IAM roles instead of credentials.
 
 ---
 
@@ -157,6 +217,8 @@ curl http://localhost:5000/health
 
 You should see a small JSON `{ "status": "ok" }`.
 
+> **Note:** The API includes an optional analytics scheduler that runs Spark batch analytics every 5 minutes. To enable it, set `ENABLE_ANALYTICS_SCHEDULER=true` in your `.env` file. The scheduler requires Spark to be installed and the Delta table to exist (see Section 2.6).
+
 ---
 
 ### 2.4 Load CSV into the database
@@ -166,7 +228,7 @@ You should have `data/raw/fridge_sales_with_rating.csv` and:
 - a schema / init script (for example `docs/sql/schema_pgvector.sql`)
 - an ETL script like `backend/etl/load_openai_embeddings_to_pgvector.py`
 
-1. Initialize schema:
+1. Initialize schema (includes `batch_analytics` table for Spark analytics):
 
    Option A (if psql installed locally):
    ```bash
@@ -178,20 +240,30 @@ You should have `data/raw/fridge_sales_with_rating.csv` and:
    docker exec -i fru_db psql -U postgres -d fru_db < docs/sql/schema_pgvector.sql
    ```
 
+   This creates:
+   - `fru_sales_embeddings` table (for pgvector semantic search)
+   - `batch_analytics` table (for storing Spark + Delta analytics results)
+
 2. Run ETL (load CSV + compute embeddings + populate pgvector table):
 
+   From repo root, load environment variables from `.env` file and run ETL:
+
    ```bash
-   export OPENAI_API_KEY=sk-...
-   export PGHOST=localhost
-   export PGPORT=5432
-   export PGUSER=postgres
-   export PGPASSWORD=postgres
-   export PGDATABASE=fru_db
+   # Load .env file and export variables (works in bash/zsh)
+   set -a
+   source .env
+   set +a
+   
+   # Set CSV path (if not already in .env)
    export FRU_CSV_PATH="data/raw/fridge_sales_with_rating.csv"
 
    cd backend
    python etl/load_openai_embeddings_to_pgvector.py
    ```
+
+   > **Note:** The `.env` file created in Section 2.1 should already contain all required database and API configuration. The `set -a` command automatically exports all variables from the `.env` file, so you don't need to manually export them.
+   
+   > **Alternative:** If you prefer, you can install `python-dotenv` (`pip install python-dotenv`) and modify the ETL script to automatically load the `.env` file without needing to source it manually.
 
 This will:
 
@@ -222,40 +294,244 @@ server: {
       target: "http://localhost:5000",
       changeOrigin: true,
     },
+    "/analytics": {
+      target: "http://localhost:5000",
+      changeOrigin: true,
+    },
   },
 }
 ```
 
-So the frontend calls `fetch("/query")` and Vite forwards it to the Flask API.
+So the frontend calls `fetch("/query")` and `fetch("/analytics")` and Vite forwards them to the Flask API.
 
 Open `http://localhost:5173` and ask:
 
-- “Why are Samsung customers unhappy?”
-- “Which store has the most negative feedback?”
-- “How many LG fridges did we sell last month?”
+- "Why are Samsung customers unhappy?"
+- "Which store has the most negative feedback?"
+- "How many LG fridges did we sell last month?"
 
-You’ll see:
+You'll see:
 
-- left: chat (user + assistant)
-- right: stats (counts by brand/store/rating) + a mini table of sample records.
+- **Left**: Chat interface (user + assistant)
+- **Right (top)**: Batch Analytics panel (Spark + Delta offline analytics)
+  - Shows summary stats, top brands, store performance, top models
+  - Updates automatically every 60 seconds
+  - Displays "Last Updated At" timestamp
+- **Right (bottom)**: Query Stats panel (pgvector real-time stats)
+  - Shows counts by brand/store/rating for current query
+  - Sample records table
 
 ---
 
 ### 2.6 Using Spark + Delta locally (optional, for study / offline analytics)
 
-Run ingestion to Delta:
+> **Note:** This section is **optional** and separate from the main application. Spark + Delta is used for **offline batch analytics** and generating training data. The main application (Sections 2.1-2.5) works without Spark.
 
+**What is Spark + Delta?**
+- **Spark**: Distributed computing framework for processing large datasets
+- **Delta Lake**: Open-source storage layer that brings ACID transactions to data lakes
+- **Purpose in FRU**: Used for offline analytics and generating NLQ→SQL training pairs (not required for the main chat interface)
+
+**Why use it?**
+- Demonstrates enterprise "big data" architecture (useful for interviews)
+- Generates training data for fine-tuning NLQ→SQL models (optional enhancement)
+- Performs heavy batch analytics on large datasets
+
+**Prerequisites:**
+- Apache Spark installed locally (see Section 0 for installation)
+- Java 8 or 11 installed (required by Spark)
+
+**Step 1: Ingest CSV into Delta Lake format** (Optional - only if Delta table doesn't exist)
+
+This converts your CSV file into Delta Lake format (a more efficient, versioned format).
+
+> **Note:** You only need to run this if:
+> - The Delta table doesn't exist yet
+> - You've updated the source CSV and want to refresh the Delta table
+> - You want to recreate the Delta table from scratch
+
+**Check if Delta table exists:**
 ```bash
-spark-submit       --packages io.delta:delta-spark_2.12:3.2.0       spark_jobs/ingest_delta.py       data/raw/fridge_sales_with_rating.csv       data/delta/fru_sales
+# From repo root
+ls -la data/delta/fru_sales/ 2>/dev/null && echo "Delta table exists" || echo "Delta table does not exist"
 ```
 
-Generate NLQ→SQL synthetic training data (for future LoRA fine-tuning):
+**If Delta table doesn't exist or you want to regenerate:**
 
 ```bash
-spark-submit       --packages io.delta:delta-spark_2.12:3.2.0       spark_jobs/generate_training_data.py       data/delta/fru_sales       data/synthetic/nlq_training_pairs.jsonl
+# From repo root
+spark-submit \
+  --packages io.delta:delta-spark_2.12:3.2.0 \
+  spark_jobs/ingest_delta.py \
+  data/raw/fridge_sales_with_rating.csv \
+  data/delta/fru_sales
 ```
 
-You can later train an NLQ→SQL model using these pairs, but the core system already works without fine-tuning.
+**What this does:**
+- Reads the CSV file
+- Converts it to Delta Lake format
+- Saves to `data/delta/fru_sales/` directory
+- Creates a versioned, queryable table
+- **Overwrites** existing Delta table if it exists (uses `mode("overwrite")`)
+
+**Expected output:**
+```
+Wrote Delta table to data/delta/fru_sales
+```
+
+> **Note:** If you're just exploring the project and the Delta table already exists, you can skip to Step 2 (or skip both steps entirely if the training pairs file also exists).
+
+**Step 2: Generate NLQ→SQL training pairs** (Optional - only if file doesn't exist)
+
+This creates synthetic training data (question-SQL pairs) that could be used to fine-tune a model.
+
+> **Note:** If `data/synthetic/nlq_training_pairs.jsonl` already exists (as it does in the repo), you can skip this step. Only run it if:
+> - The file doesn't exist
+> - You want to regenerate with updated data from your Delta table
+> - You've modified the source CSV and want fresh training pairs
+
+**Check if file exists:**
+```bash
+# From repo root
+ls -la data/synthetic/nlq_training_pairs.jsonl
+```
+
+**If file doesn't exist or you want to regenerate:**
+
+```bash
+# From repo root
+spark-submit \
+  --packages io.delta:delta-spark_2.12:3.2.0 \
+  spark_jobs/generate_training_data.py \
+  data/delta/fru_sales \
+  data/synthetic/nlq_training_pairs.jsonl
+```
+
+**What this does:**
+- Reads the Delta table created in Step 1
+- Samples 200 unique records
+- Generates natural language questions and corresponding SQL queries
+- **Overwrites** the existing JSONL file (if it exists)
+- Saves as JSONL file (one question-SQL pair per line)
+
+**Expected output:**
+```
+Wrote 600 training pairs to data/synthetic/nlq_training_pairs.jsonl
+```
+
+> **Warning:** Running this will overwrite any existing `nlq_training_pairs.jsonl` file. The repo already includes a pre-generated file with 24 training pairs, so you typically don't need to run this unless you want to regenerate with your own data.
+
+**Example output format** (`data/synthetic/nlq_training_pairs.jsonl`):
+```json
+{"question":"How many LG fridges were sold at São Paulo West?","sql":"SELECT STORE_NAME, BRAND, COUNT(*) AS qty FROM fru_sales WHERE BRAND = 'LG' AND STORE_NAME = 'São Paulo West' GROUP BY STORE_NAME, BRAND;"}
+{"question":"What is the average price of model FR-4500 in São Paulo West?","sql":"SELECT STORE_NAME, FRIDGE_MODEL, AVG(PRICE) AS avg_price FROM fru_sales WHERE FRIDGE_MODEL = 'FR-4500' AND STORE_NAME = 'São Paulo West' GROUP BY STORE_NAME, FRIDGE_MODEL;"}
+```
+
+**What you can do with this:**
+- Fine-tune a small NLQ→SQL model (e.g., using LoRA on a base model)
+- Evaluate GPT-generated SQL offline
+- Use as a dataset for training custom models
+- **Note:** The main FRU application (Sections 2.1-2.5) works without this - it uses pgvector for semantic search instead
+
+**Step 3: Run Batch Analytics** (Demonstrates offline analytics)
+
+This step actually demonstrates **offline batch analytics** - the core use case for Spark + Delta. It performs heavy aggregations and statistical analysis that would be too slow or resource-intensive for the real-time API.
+
+**Run analytics:**
+
+```bash
+# From repo root
+spark-submit \
+  --packages io.delta:delta-spark_2.12:3.2.0 \
+  spark_jobs/run_analytics.py \
+  data/delta/fru_sales \
+  data/analytics
+```
+
+**What this does:**
+- Reads the Delta table created in Step 1
+- Performs multiple batch analytics operations:
+  1. **Sales Summary by Brand** - Total sales, revenue, average/min/max prices per brand
+  2. **Store Performance Metrics** - Sales volume, revenue, feedback rates per store
+  3. **Feedback Analysis by Brand** - Positive/negative feedback distribution
+  4. **Monthly Sales Trends** - Time-based sales patterns (if date column exists)
+  5. **Top Models by Sales Volume** - Best-selling fridge models
+  6. **Price Distribution Statistics** - Overall price statistics
+- Displays results in the console
+- Optionally saves summary to `data/analytics/analytics_summary.json`
+
+**Expected output:**
+```
+================================================================================
+FRU Batch Analytics Report
+================================================================================
+
+Total records in Delta table: 500
+
+================================================================================
+1. Sales Summary by Brand
+================================================================================
++--------+-----------+-------------+---------+---------+---------+
+|BRAND   |total_sales|total_revenue|avg_price|min_price|max_price|
++--------+-----------+-------------+---------+---------+---------+
+|Samsung |150        |450000.00    |3000.00  |2000.00  |4000.00  |
+|LG      |120        |360000.00    |3000.00  |2500.00  |3500.00  |
+...
+
+================================================================================
+2. Store Performance Metrics
+================================================================================
++------------------+-----------+-------------+-------------+------------------------+------------------------+------------------------+
+|STORE_NAME        |total_sales|total_revenue|avg_sale_price|negative_feedback_count|positive_feedback_count|negative_feedback_rate|
++------------------+-----------+-------------+-------------+------------------------+------------------------+------------------------+
+|New York Store    |100        |300000.00    |3000.00      |15                      |60                     |15.00                  |
+...
+
+[Additional analytics sections...]
+
+✓ Analytics summary saved to: data/analytics/analytics_summary.json
+================================================================================
+Analytics Complete!
+================================================================================
+```
+
+**Why this demonstrates "offline batch analytics":**
+- **Heavy aggregations**: Processes entire dataset with multiple GROUP BY operations
+- **Statistical analysis**: Computes averages, sums, counts across millions of records
+- **Time-based analysis**: Analyzes trends over time periods
+- **Resource-intensive**: Uses distributed computing for large-scale processing
+- **Batch processing**: Not real-time - runs on schedule or on-demand, not per-request
+
+**Comparison to online system:**
+- **Spark + Delta (offline)**: Heavy batch analytics, full dataset scans, scheduled jobs
+- **pgvector + PostgreSQL (online)**: Fast semantic search, real-time queries, per-request responses
+
+**When to use each:**
+- **Use Spark + Delta for**: Monthly reports, trend analysis, bulk data processing, training data generation
+- **Use pgvector for**: Real-time chat queries, interactive analytics, semantic search
+
+**Integration with Frontend:**
+
+The batch analytics results are automatically displayed in the frontend UI:
+
+- **Batch Analytics Panel** (top right): Shows Spark + Delta analytics
+  - Fetches from `/analytics` API endpoint
+  - Auto-refreshes every 60 seconds
+  - Displays "Last Updated At" timestamp
+  - Shows summary stats, top brands, store performance, top models
+
+- **Query Stats Panel** (bottom right): Shows pgvector real-time results
+  - Updates with each user query
+  - Shows query-specific statistics
+
+This demonstrates the **separation of concerns**:
+- **Offline batch intelligence** (Spark + Delta) → Batch Analytics Panel
+- **Interactive intelligence** (pgvector) → Query Stats Panel
+
+**Troubleshooting:**
+- **"spark-submit: command not found"**: Install Apache Spark (see Section 0 Prerequisites)
+- **"Java not found"**: Install Java 8 or 11: `brew install openjdk@11` (macOS) or `sudo apt-get install openjdk-11-jdk` (Linux)
+- **"Package not found"**: The `--packages` flag downloads Delta Lake automatically, but requires internet connection
 
 ---
 
