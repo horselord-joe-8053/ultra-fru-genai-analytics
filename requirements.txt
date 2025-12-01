@@ -1,0 +1,7 @@
+flask
+pyspark
+delta-spark
+boto3
+psycopg2-binary
+openai
+pandas

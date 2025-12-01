@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+  db:
+    image: ankane/pgvector:latest
+    container_name: fru_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PGUSER:-postgres}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-postgres}
+      POSTGRES_DB: ${PGDATABASE:-fru_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      # persistent local DB
+      - ./pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 8s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile.api
+    container_name: fru_api
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGUSER: ${PGUSER:-postgres}
+      PGPASSWORD: ${PGPASSWORD:-postgres}
+      PGDATABASE: ${PGDATABASE:-fru_db}
+
+      # OpenAI embeddings
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+      # Bedrock
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      BEDROCK_MODEL_ID: ${BEDROCK_MODEL_ID:-anthropic.claude-3-haiku-20240229-v1:0}
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    ports:
+      - "5000:5000"
