@@ -1,4 +1,4 @@
-# 📘 FRU – Friday aRe Us  
+# 📘 FRU – How to Run (Local, AWS, EKS, Terraform)  
 **GenAI Analytics – How to Run (Local, AWS, EKS, Terraform)**
 
 FRU (**Friday aRe Us**) is a GenAI analytics assistant over fridge sales data, built with:

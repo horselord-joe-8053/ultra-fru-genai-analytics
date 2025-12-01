@@ -1,4 +1,4 @@
-# 📦 FRU GenAI Analytics  
+# 📦 FRU GenAI Analytics Overview 
 **(Spark + Delta + OpenAI Embeddings + pgvector + Bedrock + AWS)**
 
 FRU (**Friday aRe Us**) is a real, end-to-end **conversational analytics system** built over refrigerator sales data.
