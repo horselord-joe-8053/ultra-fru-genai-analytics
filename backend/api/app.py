@@ -1,30 +1,101 @@
 import os
 import json
-from typing import List, Dict, Any
+import logging
+from typing import List, Dict, Any, Optional, Tuple
 
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import psycopg2
+from psycopg2 import pool
+from psycopg2 import Error as Psycopg2Error
 from psycopg2.extras import RealDictCursor
 from openai import OpenAI
+from openai import APIError as OpenAIError
 
 from backend.llm.bedrock_client import claude_complete
 
-
+# Configure logging
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 app = Flask(__name__)
+app.logger = logging.getLogger(__name__)
+
+# Configure CORS
+allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
+CORS(app, resources={
+    r"/query": {"origins": allowed_origins},
+    r"/health": {"origins": "*"}
+})
 
 
 # ---------- Infra helpers ----------
 
+# Connection pool for database connections
+_connection_pool: Optional[pool.SimpleConnectionPool] = None
+
+
+def init_db_pool():
+    """Initialize database connection pool."""
+    global _connection_pool
+    if _connection_pool is None:
+        try:
+            _connection_pool = psycopg2.pool.SimpleConnectionPool(
+                1, 20,  # minconn, maxconn
+                host=os.environ.get("PGHOST", "localhost"),
+                port=int(os.environ.get("PGPORT", "5432")),
+                user=os.environ.get("PGUSER", "postgres"),
+                password=os.environ.get("PGPASSWORD", "postgres"),
+                dbname=os.environ.get("PGDATABASE", "fru_db"),
+            )
+            app.logger.info("Database connection pool initialized")
+        except Exception as e:
+            app.logger.error(f"Failed to create connection pool: {e}")
+            _connection_pool = None
+
+
 def get_db_conn():
-    # Create a new Postgres connection using PG* env vars.
-    conn = psycopg2.connect(
-        host=os.environ.get("PGHOST", "localhost"),
-        port=int(os.environ.get("PGPORT", "5432")),
-        user=os.environ.get("PGUSER", "postgres"),
-        password=os.environ.get("PGPASSWORD", "postgres"),
-        dbname=os.environ.get("PGDATABASE", "fru_db"),
-    )
-    return conn
+    """Get a database connection from the pool or create a new one."""
+    global _connection_pool
+    
+    # Initialize pool if not already done
+    if _connection_pool is None:
+        init_db_pool()
+    
+    # Try to get connection from pool
+    if _connection_pool:
+        try:
+            return _connection_pool.getconn()
+        except Exception as e:
+            app.logger.warning(f"Failed to get connection from pool: {e}, creating new connection")
+    
+    # Fallback to direct connection
+    try:
+        conn = psycopg2.connect(
+            host=os.environ.get("PGHOST", "localhost"),
+            port=int(os.environ.get("PGPORT", "5432")),
+            user=os.environ.get("PGUSER", "postgres"),
+            password=os.environ.get("PGPASSWORD", "postgres"),
+            dbname=os.environ.get("PGDATABASE", "fru_db"),
+        )
+        return conn
+    except Psycopg2Error as e:
+        app.logger.error(f"Failed to connect to database: {e}")
+        raise
+
+
+def return_db_conn(conn):
+    """Return a connection to the pool."""
+    global _connection_pool
+    if _connection_pool and conn:
+        try:
+            _connection_pool.putconn(conn)
+        except Exception as e:
+            app.logger.warning(f"Failed to return connection to pool: {e}")
+            conn.close()
+    elif conn:
+        conn.close()
 
 
 _openai_client = None
@@ -38,14 +109,40 @@ def get_openai_client() -> OpenAI:
 
 
 def embed_text(text: str) -> List[float]:
-    # Get an OpenAI embedding for a single text string.
-    client = get_openai_client()
-    model = os.environ.get("OPENAI_EMBED_MODEL", "text-embedding-3-small")
-    resp = client.embeddings.create(model=model, input=[text])
-    return resp.data[0].embedding
+    """Get an OpenAI embedding for a single text string."""
+    try:
+        client = get_openai_client()
+        model = os.environ.get("OPENAI_EMBED_MODEL", "text-embedding-3-small")
+        resp = client.embeddings.create(model=model, input=[text])
+        return resp.data[0].embedding
+    except OpenAIError as e:
+        app.logger.error(f"OpenAI embedding error: {e}")
+        raise ValueError(f"Failed to generate embedding: {e}")
+    except Exception as e:
+        app.logger.error(f"Unexpected error in embed_text: {e}")
+        raise ValueError(f"Failed to generate embedding: {e}")
 
 
 # ---------- Domain helpers ----------
+
+def validate_query(question: str) -> Tuple[bool, Optional[str]]:
+    """Validate user query input."""
+    if not question or not question.strip():
+        return False, "Query cannot be empty"
+    
+    if len(question) > 1000:
+        return False, "Query too long (max 1000 characters)"
+    
+    # Basic sanitization check (prevent injection attempts)
+    dangerous_chars = [';', '--', '/*', '*/', 'DROP', 'DELETE', 'UPDATE', 'INSERT']
+    question_upper = question.upper()
+    for char in dangerous_chars:
+        if char in question_upper:
+            app.logger.warning(f"Potentially dangerous query detected: {question[:50]}...")
+            # Don't reject, just log - let the database handle it safely
+    
+    return True, None
+
 
 def is_qualitative(question: str) -> bool:
     q = question.lower()
@@ -85,8 +182,12 @@ def is_qualitative(question: str) -> bool:
 
 
 def pgvector_search_feedback(query_text: str, limit: int = 30) -> List[Dict[str, Any]]:
-    # ANN search over fru_sales_embeddings using pgvector.
-    vec = embed_text(query_text)
+    """ANN search over fru_sales_embeddings using pgvector."""
+    try:
+        vec = embed_text(query_text)
+    except Exception as e:
+        app.logger.error(f"Failed to generate embedding: {e}")
+        raise
 
     sql = (
         "SELECT id, brand, fridge_model, price, sales_date, store_name, "
@@ -96,15 +197,23 @@ def pgvector_search_feedback(query_text: str, limit: int = 30) -> List[Dict[str,
         "LIMIT %s;"
     )
 
-    conn = get_db_conn()
+    conn = None
     try:
+        conn = get_db_conn()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             # psycopg2 + pgvector accepts Python lists as vector parameters.
             cur.execute(sql, (vec, limit))
             rows = cur.fetchall()
             return [dict(r) for r in rows]
+    except Psycopg2Error as e:
+        app.logger.error(f"Database query error: {e}")
+        raise ValueError(f"Database query failed: {e}")
+    except Exception as e:
+        app.logger.error(f"Unexpected error in pgvector_search_feedback: {e}")
+        raise
     finally:
-        conn.close()
+        if conn:
+            return_db_conn(conn)
 
 
 def compute_simple_stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -163,39 +272,96 @@ def build_claude_user_payload(
 
 @app.route("/health", methods=["GET"])
 def health():
-    return {"status": "ok"}
+    """Health check endpoint with component status."""
+    status = {"status": "ok"}
+    
+    # Check database connection
+    try:
+        conn = get_db_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1;")
+        return_db_conn(conn)
+        status["database"] = "connected"
+    except Exception as e:
+        status["database"] = "disconnected"
+        status["database_error"] = str(e)
+        app.logger.warning(f"Database health check failed: {e}")
+        return jsonify(status), 503
+    
+    # Check OpenAI API key
+    if os.environ.get("OPENAI_API_KEY"):
+        status["openai"] = "configured"
+    else:
+        status["openai"] = "not_configured"
+    
+    # Check AWS credentials
+    try:
+        import boto3
+        boto3.Session().get_credentials()
+        status["aws"] = "configured"
+    except Exception:
+        status["aws"] = "not_configured"
+    
+    return jsonify(status)
 
 
 @app.route("/query", methods=["POST"])
 def query():
-    body = request.get_json(silent=True) or {}
-    question = body.get("query") or body.get("q") or ""
+    """Main query endpoint for natural language questions."""
+    try:
+        body = request.get_json(silent=True) or {}
+        question = body.get("query") or body.get("q") or ""
 
-    if not question:
-        return jsonify({"error": "Missing 'query' in JSON body"}), 400
+        # Validate input
+        is_valid, error_msg = validate_query(question)
+        if not is_valid:
+            app.logger.warning(f"Invalid query: {error_msg}")
+            return jsonify({"error": error_msg}), 400
 
-    qualitative = is_qualitative(question)
+        qualitative = is_qualitative(question)
 
-    # 1) Retrieve rows via pgvector
-    rows = pgvector_search_feedback(question, limit=50)
-    stats = compute_simple_stats(rows)
+        # 1) Retrieve rows via pgvector
+        try:
+            rows = pgvector_search_feedback(question, limit=50)
+        except ValueError as e:
+            app.logger.error(f"Database search error: {e}")
+            return jsonify({"error": "Failed to search database"}), 500
+        except Exception as e:
+            app.logger.error(f"Unexpected error in vector search: {e}")
+            return jsonify({"error": "Internal server error during search"}), 500
 
-    # 2) Build payload for Claude
-    system_prompt = build_claude_system_prompt()
-    user_payload = build_claude_user_payload(question, rows, stats)
+        stats = compute_simple_stats(rows)
 
-    # 3) Call Claude via Bedrock
-    answer_text = claude_complete(system_prompt, user_payload)
+        # 2) Build payload for Claude
+        system_prompt = build_claude_system_prompt()
+        user_payload = build_claude_user_payload(question, rows, stats)
 
-    response = {
-        "question": question,
-        "mode": "qualitative" if qualitative else "mixed",
-        "stats": stats,
-        "sample_records": rows[:5],
-        "answer": answer_text,
-    }
-    return jsonify(response)
+        # 3) Call Claude via Bedrock
+        try:
+            answer_text = claude_complete(system_prompt, user_payload)
+        except ValueError as e:
+            app.logger.error(f"Bedrock error: {e}")
+            return jsonify({"error": "Failed to generate answer from AI service"}), 500
+        except Exception as e:
+            app.logger.error(f"Unexpected error in Bedrock call: {e}")
+            return jsonify({"error": "Internal server error during AI processing"}), 500
+
+        response = {
+            "question": question,
+            "mode": "qualitative" if qualitative else "mixed",
+            "stats": stats,
+            "sample_records": rows[:5],
+            "answer": answer_text,
+        }
+        return jsonify(response)
+    
+    except Exception as e:
+        app.logger.error(f"Unexpected error in /query endpoint: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 if __name__ == "__main__":
+    # Initialize connection pool on startup
+    init_db_pool()
+    app.logger.info("Starting FRU API server...")
     app.run(host="0.0.0.0", port=5000)

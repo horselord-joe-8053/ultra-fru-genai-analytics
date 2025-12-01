@@ -28,8 +28,19 @@ This guide explains **how to run** FRU in:
 - Python 3.10+
 - Node.js 18+
 - Docker Desktop (or compatible)
+- **PostgreSQL client tools** (for `psql` command)
+  - macOS: `brew install postgresql@16` or `brew install libpq`
+  - Linux: `sudo apt-get install postgresql-client`
+  - Windows: Install PostgreSQL from https://www.postgresql.org/download/windows/ or use Docker exec alternative (see Section 2.3)
+- **Apache Spark** (optional, for Spark jobs in Section 2.5)
+  - Download from https://spark.apache.org/downloads.html
+  - Or use Databricks / EMR for cloud execution
 - OpenAI API key
 - AWS credentials configured (for Bedrock)
+- **AWS CLI** (optional, for AWS deployment sections)
+  - macOS: `brew install awscli`
+  - Linux: `sudo apt-get install awscli` or `pip install awscli`
+  - Windows: https://aws.amazon.com/cli/
 
 ### AWS (prod)
 - AWS Account with:
@@ -97,7 +108,34 @@ BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240229-v1:0
 
 ---
 
-### 2.2 Run Postgres + pgvector + API with Docker
+### 2.2 Install Python Dependencies
+
+Before running any Python scripts, install the required packages:
+
+Create a virtual environment (recommended):
+
+```bash
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+Install required packages:
+
+```bash
+pip install -r requirements.txt
+```
+
+Verify installation:
+
+```bash
+python -c "import flask, psycopg2, openai, boto3, pandas; print('✓ All dependencies installed')"
+```
+
+> **Note:** This step is required before running ETL scripts (Section 2.3) or the API locally.
+
+---
+
+### 2.3 Run Postgres + pgvector + API with Docker
 
 From repo root:
 
@@ -121,7 +159,7 @@ You should see a small JSON `{ "status": "ok" }`.
 
 ---
 
-### 2.3 Load CSV into the database
+### 2.4 Load CSV into the database
 
 You should have `data/raw/fridge_sales_with_rating.csv` and:
 
@@ -130,8 +168,14 @@ You should have `data/raw/fridge_sales_with_rating.csv` and:
 
 1. Initialize schema:
 
+   Option A (if psql installed locally):
    ```bash
-   psql "postgresql://postgres:postgres@localhost:5432/fru_db"          -f docs/sql/schema_pgvector.sql
+   psql "postgresql://postgres:postgres@localhost:5432/fru_db" -f docs/sql/schema_pgvector.sql
+   ```
+
+   Option B (using Docker, if psql not installed):
+   ```bash
+   docker exec -i fru_db psql -U postgres -d fru_db < docs/sql/schema_pgvector.sql
    ```
 
 2. Run ETL (load CSV + compute embeddings + populate pgvector table):
@@ -157,7 +201,7 @@ This will:
 
 ---
 
-### 2.4 Start frontend (React analytical chat UI)
+### 2.5 Start frontend (React analytical chat UI)
 
 ```bash
 cd frontend
@@ -197,7 +241,7 @@ You’ll see:
 
 ---
 
-### 2.5 Using Spark + Delta locally (optional, for study / offline analytics)
+### 2.6 Using Spark + Delta locally (optional, for study / offline analytics)
 
 Run ingestion to Delta:
 
@@ -543,23 +587,87 @@ If you want a concrete Terraform skeleton later, you can add it under `infra/ter
 
 # 🧯 7. Troubleshooting Checklist
 
-- **API 500 errors**  
-  - Missing or invalid `OPENAI_API_KEY`  
-  - Bedrock permission issues (`AccessDeniedException`)  
-  - Aurora security group not allowing ECS/EKS traffic
+## Common Errors and Solutions
 
-- **No matches / zero stats**  
-  - Embeddings not loaded (ETL didn’t run)  
-  - Wrong table name / schema mismatch
+### API 500 errors
+- **Missing or invalid `OPENAI_API_KEY`**
+  - Check `.env` file has `OPENAI_API_KEY=sk-...`
+  - Verify key is valid: `curl https://api.openai.com/v1/models -H "Authorization: Bearer $OPENAI_API_KEY"`
+  
+- **Bedrock permission issues (`AccessDeniedException`)**
+  - Verify AWS credentials: `aws sts get-caller-identity`
+  - Check IAM permissions include `bedrock:InvokeModel`
+  - Verify Bedrock model access in AWS Console (some models require enablement)
+  - Check `AWS_REGION` matches region where Bedrock is enabled
+  
+- **Database connection errors**
+  - Verify PostgreSQL is running: `docker ps | grep fru_db`
+  - Check connection string: `psql "postgresql://postgres:postgres@localhost:5432/fru_db" -c "SELECT 1;"`
+  - Verify environment variables: `echo $PGHOST $PGUSER $PGDATABASE`
+  - Check security groups (for Aurora) allow traffic from ECS/EKS
 
-- **CORS issues (in non-proxy setups)**  
-  - Use Vite dev proxy for local  
-  - Use Nginx/ALB path routing in prod
+### No matches / zero stats
+- **Embeddings not loaded (ETL didn't run)**
+  - Verify ETL completed: `psql ... -c "SELECT COUNT(*) FROM fru_sales_embeddings;"`
+  - Re-run ETL: `python backend/etl/load_openai_embeddings_to_pgvector.py`
+  - Check CSV file exists: `ls -la data/raw/fridge_sales_with_rating.csv`
+  
+- **Wrong table name / schema mismatch**
+  - Verify table exists: `psql ... -c "\dt fru_sales_embeddings"`
+  - Check schema: `psql ... -c "\d fru_sales_embeddings"`
+  - Re-run schema init: `psql ... -f docs/sql/schema_pgvector.sql`
 
-- **High latency**  
-  - Use smaller Claude model (Haiku)  
-  - Reduce `max_tokens`  
+### ModuleNotFoundError / Import errors
+- **Python dependencies not installed**
+  - Activate virtual environment: `source venv/bin/activate`
+  - Install dependencies: `pip install -r requirements.txt`
+  - Verify installation: `python -c "import flask, psycopg2, openai, boto3, pandas"`
+
+### CORS issues (in non-proxy setups)
+- **Local development**
+  - Use Vite dev proxy (already configured in `vite.config.ts`)
+  - Or enable CORS in Flask API (see code changes)
+  
+- **Production**
+  - Use Nginx/ALB path routing
+  - Configure CORS headers in API Gateway/ALB
+  - Set `ALLOWED_ORIGINS` environment variable in API
+
+### High latency
+- **Optimize model selection**
+  - Use smaller Claude model (Haiku instead of Sonnet)
+  - Reduce `max_tokens` in Bedrock calls
+  
+- **Database optimization**
   - Pre-filter rows (brand, date) before ANN search
+  - Ensure pgvector index exists: `CREATE INDEX ... USING ivfflat`
+  - Reduce `limit` parameter in vector search
+  
+- **Network issues**
+  - Use VPC endpoints for Bedrock (keeps traffic in AWS network)
+  - Check database connection pooling is enabled
+
+### Docker issues
+- **Container won't start**
+  - Check logs: `docker logs fru_api` or `docker logs fru_db`
+  - Verify `.env` file exists and has required variables
+  - Check port conflicts: `lsof -i :5000` or `lsof -i :5432`
+  
+- **Database connection from host fails**
+  - Verify port mapping: `docker ps` should show `0.0.0.0:5432->5432/tcp`
+  - Check container is running: `docker ps | grep fru_db`
+  - Try connecting via Docker: `docker exec -it fru_db psql -U postgres -d fru_db`
+
+### Environment variable issues
+- **Variables not loading**
+  - Check `.env` file location (should be at repo root)
+  - Verify Docker Compose uses `--env-file ../../.env`
+  - For local Python scripts, export variables or use `python-dotenv`
+  
+- **Missing required variables**
+  - Required: `OPENAI_API_KEY`, `PGHOST`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`
+  - Optional: `AWS_REGION`, `BEDROCK_MODEL_ID`, `OPENAI_EMBED_MODEL`
+  - Check with: `env | grep -E "(PG|OPENAI|AWS|BEDROCK)"`
 
 ---
 
