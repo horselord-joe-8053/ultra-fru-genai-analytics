@@ -672,26 +672,57 @@ docker push "$ECR_URL/fru-api:latest"
   - allow outbound to Aurora SG
   - allow outbound to Bedrock (via Internet or VPC endpoint)
 
-Environment variables in task definition:
+**Security Best Practices:**
+
+1. **IAM Role Separation:**
+   - **Execution Role**: Used by ECS service to start tasks
+     - ECR: Pull container images
+     - CloudWatch: Write logs
+     - Secrets Manager: Read secrets for task definition
+   - **Runtime Role**: Assumed by running containers
+     - Bedrock: Invoke models
+     - Secrets Manager: Read secrets at runtime
+     - RDS IAM Auth: Connect to Aurora (if enabled)
+
+2. **Secrets Management:**
+   - **Never store secrets in environment variables**
+   - All sensitive data stored in Secrets Manager
+   - Secrets referenced in ECS task definition via `secrets` block
+
+**Environment variables in task definition** (non-sensitive only):
 
 ```text
 PGHOST=<aurora-endpoint>
 PGPORT=5432
-PGUSER=fru_user
-PGPASSWORD=<password>
 PGDATABASE=fru_db
-
-OPENAI_API_KEY= (use Secrets Manager + task role IAM to fetch)
-
 AWS_REGION=us-east-1
 BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240229-v1:0
 ```
 
-Attach IAM role with:
+**Secrets** (from Secrets Manager, not environment variables):
 
-- `bedrock:InvokeModel`
-- `bedrock:InvokeModelWithResponseStream`
-- Permissions to read secret from Secrets Manager
+```text
+OPENAI_API_KEY=<from Secrets Manager>
+PGPASSWORD=<from Secrets Manager or use IAM database authentication>
+PGUSER=<from Secrets Manager, optional if using IAM auth>
+```
+
+**IAM Roles:**
+
+- **Execution Role** (attached to task definition):
+  - `ecr:GetAuthorizationToken`
+  - `ecr:BatchCheckLayerAvailability`
+  - `ecr:GetDownloadUrlForLayer`
+  - `ecr:BatchGetImage`
+  - `logs:CreateLogStream`
+  - `logs:PutLogEvents`
+  - `secretsmanager:GetSecretValue` (for task definition secrets)
+
+- **Runtime Role** (task role):
+  - `bedrock:InvokeModel`
+  - `bedrock:InvokeModelWithResponseStream`
+  - `secretsmanager:GetSecretValue` (for runtime secrets)
+  - `rds-db:connect` (if using IAM database authentication)
 
 Expose ECS service via either:
 
@@ -822,35 +853,66 @@ For interviews, you can explain:
 
 ---
 
-# 🏗️ 6. Terraform IaC (Option C – Sketch)
+# 🏗️ 6. Terraform IaC (Option C – Fully Implemented)
 
-To go fully IaC, you can:
+**Full Terraform + Terragrunt implementation is now available!**
 
-- use Terraform modules for:
-  - VPC
-  - Aurora PostgreSQL
-  - ECS cluster + service
-  - ECR repos
-  - IAM roles
-  - S3 + CloudFront
-- manage secrets via `aws_secretsmanager_secret`
+The infrastructure is organized as reusable modules with Terragrunt for environment management:
 
-Pseudo-structure:
+**Modules:**
+- `vpc/` — VPC, subnets, NAT gateways, VPC endpoints
+- `aurora/` — Aurora PostgreSQL with pgvector, IAM auth support
+- `iam/` — IAM roles (execution + runtime separation)
+- `secrets-manager/` — Secrets Manager for sensitive data
+- `ecs/` — ECS cluster, service, task definition
+- `alb/` — Application Load Balancer
+- `frontend/` — S3 + CloudFront for frontend
+
+**Structure:**
 
 ```text
 infra/terraform/
-  main.tf
-  vpc.tf
-  aurora.tf
-  ecs.tf
-  iam.tf
-  s3_cloudfront.tf
-  outputs.tf
+  modules/              # Reusable Terraform modules
+    vpc/
+    aurora/
+    iam/
+    secrets-manager/
+    ecs/
+    alb/
+    frontend/
+    infrastructure/     # Wrapper (VPC + Aurora + IAM + Secrets)
+    application/        # Wrapper (ECS + ALB + Frontend)
+  environments/         # Terragrunt configs
+    terragrunt.hcl     # Root config
+    dev/
+      infrastructure/
+      application/
+    prod/
+      infrastructure/
+      application/
 ```
 
-You don’t need full code for the interview; it’s enough to say:
+**Security Best Practices:**
+- Secrets stored in Secrets Manager (not environment variables)
+- IAM role separation (execution vs runtime)
+- IAM database authentication support
+- Private subnets for ECS tasks
 
-> "In production, I’d capture this in Terraform: one module for the network (VPC + subnets), one for the database (Aurora + pgvector), another for the ECS service (task def + service + ALB), and a final one for the frontend (S3 + CloudFront). Secrets live in Secrets Manager, referenced from task defs via IAM."
+**Deployment:**
+
+```bash
+# Deploy infrastructure layer
+./run_scripts/aws/terraform/deploy.sh dev infrastructure
+
+# Deploy application layer
+./run_scripts/aws/terraform/deploy.sh dev application
+```
+
+See `infra/terraform/README.md` for complete documentation.
+
+For interviews, you can explain:
+
+> "I've implemented a complete Terraform + Terragrunt setup with modular architecture. The infrastructure is organized into reusable modules (VPC, Aurora, ECS, ALB, Frontend) with Terragrunt managing environment-specific configurations. Security best practices are built in: secrets in Secrets Manager, IAM role separation (execution vs runtime), and support for IAM database authentication. The deployment is fully automated via scripts."
 
 If you want a concrete Terraform skeleton later, you can add it under `infra/terraform/` and model:
 

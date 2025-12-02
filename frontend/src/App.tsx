@@ -80,7 +80,7 @@ const App: React.FC = () => {
         </div>
         {/* Query Stats Panel (pgvector) */}
         <div className="flex-1 overflow-hidden">
-          <StatsPanel data={analytics} error={error} />
+        <StatsPanel data={analytics} error={error} />
         </div>
       </div>
     </div>

@@ -338,7 +338,7 @@ Claude returns:
   s3://fru-analytics-data-prod/delta/fru_sales/...
   ```
 
-Use `infra/terraform/main.tf` as a starting point (or create manually first, then backfill Terraform).
+Use the Terraform modules in `infra/terraform/modules/` with Terragrunt configurations in `infra/terraform/environments/`. See `infra/terraform/README.md` for detailed instructions.
 
 ---
 
