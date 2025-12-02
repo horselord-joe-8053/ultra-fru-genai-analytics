@@ -7,6 +7,8 @@
 
 **For automated setup scripts**, see **[`README_RUN_SCRIPTS.md`](README_RUN_SCRIPTS.md)** - it contains idempotent shell scripts that automate the entire setup process with a single command per scenario (local dev, local prod, AWS deployments).
 
+**For Infrastructure as Code**, see **[`infra/terraform/README.md`](../infra/terraform/README.md)** - complete Terraform + Terragrunt implementation with modular architecture, environment management (dev/prod), and security best practices (IAM role separation, Secrets Manager, IAM database authentication).
+
 ---
 
 FRU (**Friday aRe Us**) is a GenAI analytics assistant over fridge sales data, built with:
@@ -594,6 +596,8 @@ This is the **primary production story** for interviews and real deployments:
 - **S3 + CloudFront** – static frontend
 - **Bedrock Claude 3** – governed reasoning
 - **OpenAI embeddings** – high-quality vectors
+
+> **💡 Recommended**: Use the **Terraform IaC implementation** (`infra/terraform/`) for automated, reproducible deployments with security best practices. See [`infra/terraform/README.md`](../infra/terraform/README.md) for complete documentation. The manual steps below are for understanding the architecture.
 
 ## 4.1 Aurora PostgreSQL + pgvector
 

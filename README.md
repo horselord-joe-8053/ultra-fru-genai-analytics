@@ -5,6 +5,7 @@
 
 - **[`README_RUN.md`](README_RUN.md)** - Detailed manual instructions for running FRU locally, in production simulation, and on AWS (ECS, EKS, Terraform)
 - **[`README_RUN_SCRIPTS.md`](README_RUN_SCRIPTS.md)** - Automated setup scripts for one-command deployment across all scenarios
+- **[`infra/terraform/README.md`](infra/terraform/README.md)** - Complete Terraform Infrastructure as Code (IaC) implementation with modular architecture, Terragrunt for environment management, and security best practices
 
 ---
 
@@ -17,6 +18,7 @@ It demonstrates:
 - ✔️ **RAG over structured + unstructured data**
 - ✔️ **Low-cost inference at scale**
 - ✔️ **AWS-native deployment story**
+- ✔️ **Infrastructure as Code (Terraform + Terragrunt)** - Production-ready IaC with modular architecture, environment management, and security best practices
 
 It is built specifically to support a **Senior AWS GenAI Architect interview** and to be used as a working prototype.
 
