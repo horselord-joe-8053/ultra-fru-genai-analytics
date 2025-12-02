@@ -1,4 +1,4 @@
-version: "3.9"
+# version: "3.9"
 
 services:
   db:
@@ -23,7 +23,7 @@ services:
   api:
     build:
       context: ../../backend
-      dockerfile: Dockerfile.api
+      dockerfile: ../infra/docker/Dockerfile.api
     container_name: fru_api
     restart: unless-stopped
     environment:

@@ -52,3 +52,4 @@ check_all_dependencies() {
     return 0
 }
 
+check_all_dependencies
