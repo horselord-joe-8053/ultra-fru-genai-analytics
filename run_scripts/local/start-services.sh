@@ -11,6 +11,21 @@ source "$SCRIPT_DIR/../common/load-env.sh"
 
 DOCKER_DIR="$REPO_ROOT/infra/docker"
 
+BUILD_API=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --build-api)
+            BUILD_API=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            shift
+            ;;
+    esac
+done
+
 start_services() {
     log_step "Starting Docker services"
     
@@ -33,6 +48,10 @@ start_services() {
     fi
     
     log_info "Starting Docker Compose services..."
+    if $BUILD_API; then
+        log_info "Rebuilding API image..."
+        docker compose --env-file "$REPO_ROOT/.env" build api
+    fi
     docker compose --env-file "$REPO_ROOT/.env" up -d
     
     log_success "Docker services started"

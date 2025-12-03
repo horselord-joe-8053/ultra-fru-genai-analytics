@@ -2,6 +2,8 @@ import os
 import json
 import logging
 from typing import List, Dict, Any, Optional, Tuple
+from decimal import Decimal
+from datetime import datetime, date
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -195,7 +197,7 @@ def pgvector_search_feedback(query_text: str, limit: int = 30) -> List[Dict[str,
         "SELECT id, brand, fridge_model, price, sales_date, store_name, "
         "customer_feedback, feedback_rating "
         "FROM fru_sales_embeddings "
-        "ORDER BY embedding <-> %s "
+        "ORDER BY embedding <-> %s::vector "
         "LIMIT %s;"
     )
 
@@ -256,6 +258,18 @@ def build_claude_system_prompt() -> str:
         "- Use a professional but simple tone."
     )
 
+def _json_safe(value: Any) -> Any:
+    """Convert value to JSON-serializable form."""
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    
+    return value
 
 def build_claude_user_payload(
     question: str,
@@ -265,7 +279,7 @@ def build_claude_user_payload(
     payload = {
         "question": question,
         "stats": stats,
-        "sample_records": rows[:10],
+        "sample_records": [_json_safe(r) for r in rows[:10]],
     }
     return json.dumps(payload, ensure_ascii=False)
 

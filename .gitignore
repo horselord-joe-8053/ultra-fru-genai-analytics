@@ -46,4 +46,6 @@ logs/
 *.tfstate.backup
 .terraform.lock.hcl
 
+# PostgreSQL
+pgdata/
 
