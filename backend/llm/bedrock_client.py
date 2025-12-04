@@ -9,9 +9,14 @@ logger = logging.getLogger(__name__)
 
 def get_bedrock_client():
     """Return a Bedrock Runtime client using AWS_REGION or us-east-1."""
+    access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+    secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
     region = os.environ.get("AWS_REGION", "us-east-1")
     try:
-        return boto3.client("bedrock-runtime", region_name=region)
+        return boto3.client("bedrock-runtime",
+                            aws_access_key_id=access_key,
+                            aws_secret_access_key=secret_key,
+                            region_name=region)
     except Exception as e:
         logger.error(f"Failed to create Bedrock client: {e}")
         raise ValueError(f"Failed to initialize Bedrock client: {e}")
@@ -36,7 +41,7 @@ def claude_complete(system_prompt, user_message, model_id=None, max_tokens=800):
     if model_id is None:
         model_id = os.environ.get(
             "BEDROCK_MODEL_ID",
-            "anthropic.claude-3-haiku-20240229-v1:0",
+            "anthropic.claude-3-haiku-20240307-v1:0",
         )
 
     try:
