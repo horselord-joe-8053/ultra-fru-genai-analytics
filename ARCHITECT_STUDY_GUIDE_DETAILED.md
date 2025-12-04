@@ -236,11 +236,133 @@ A: Enterprise posture: IAM, VPC endpoints, model governance.
 
 ## 16. Summary you must memorize
 
-> “Embeddings for recall, pgvector for truth, Spark for batch,
+> "Embeddings for recall, pgvector for truth, Spark for batch,
 > Claude for interpretation, ECS for stateless scaling,
-> Aurora for enterprise-grade persistence.”
+> Aurora for enterprise-grade persistence."
 
 This sentence alone passes most screens.
+
+---
+
+## 17. Additional Interview Content from Project Documentation
+
+### 17.1 Project Purpose Statement
+
+**From README.md:**
+- FRU is built specifically to support a **Senior AWS GenAI Architect interview** and to be used as a working prototype.
+- It serves as a **storyboard** you can use in a **Senior AWS GenAI Architect** interview to demonstrate:
+  - architectural judgment  
+  - cost awareness  
+  - governance thinking  
+  - practical GenAI patterns  
+  - ability to ship a working prototype.
+
+### 17.2 Architecture Separation (Design Interview Core)
+
+**From README.md:**
+> **Spark does batch intelligence.  
+> pgvector does interactive intelligence.  
+> Claude explains it.**
+
+This separation is the core of the design interview.
+
+### 17.3 AWS Deployment Story
+
+**From README.md:**
+# 🏗 **8. Full AWS Deployment (Interview-Friendly Path)**
+
+> This is your "I can design and ship this on AWS" story.
+
+**Key points:**
+- S3 for raw + delta storage
+- Aurora PostgreSQL with pgvector
+- ECS Fargate for stateless API execution
+- Bedrock Claude 3 for governed reasoning
+- VPC endpoints for enterprise posture
+
+### 17.4 Interview Sound Bites (README.md)
+
+You can drop these sentences in system design / LP rounds:
+
+> *"Spark does batch intelligence; pgvector does interactive intelligence; Claude communicates it."*
+
+> *"We do not ask the LLM to guess the data.  
+> We retrieve the facts with embeddings + SQL, then ask the LLM to explain them."*
+
+> *"OpenAI gives us state-of-the-art embeddings; Bedrock gives us governed reasoning."*
+
+> *"Fine-tuning is optional here; RAG is mandatory. We first exhaust RAG + retrieval quality before spending on training."*
+
+> *"In production, all inference runs inside AWS: ECS + RDS + Bedrock + VPC endpoints."*
+
+### 17.5 Local Development Context
+
+**From README_RUN.md:**
+- Local Developer Mode is what you use for day-to-day hacking and interview prep.
+- Demonstrates enterprise "big data" architecture (useful for interviews)
+
+### 17.6 Production Deployment Story
+
+**From README_RUN.md:**
+# 🚀 4. AWS Production – ECS Fargate + Aurora + Bedrock (Option A1 + Aurora)
+
+This is the **primary production story** for interviews and real deployments:
+
+- **Aurora PostgreSQL + pgvector** – vectorized semantic store
+- **ECS Fargate** – serverless container backends
+- **S3 + CloudFront** – static frontend
+- **Bedrock Claude 3** – governed reasoning
+- **OpenAI embeddings** – high-quality vectors
+
+### 17.7 EKS Deployment Explanation
+
+**From README_RUN.md:**
+
+If the interviewer or your environment pushes for Kubernetes, you can deploy FRU to **EKS**.
+
+For interviews, you can explain:
+
+> "On EKS, the architecture is identical: Aurora + pgvector for embeddings, EKS pods for API, Bedrock for reasoning, S3/CloudFront or an Nginx ingress for SPA hosting."
+
+### 17.8 Terraform IaC Explanation
+
+**From README_RUN.md:**
+
+For interviews, you can explain:
+
+> "I've implemented a complete Terraform + Terragrunt setup with modular architecture. The infrastructure is organized into reusable modules (VPC, Aurora, ECS, ALB, Frontend) with Terragrunt managing environment-specific configurations. Security best practices are built in: secrets in Secrets Manager, IAM role separation (execution vs runtime), and support for IAM database authentication. The deployment is fully automated via scripts."
+
+### 17.9 Interview Sound Bites (README_RUN.md)
+
+You can use these while sketching the system:
+
+- "**Spark does batch intelligence; pgvector does interactive intelligence; Claude communicates it.**"
+- "We **never** ask the LLM to guess the data; we retrieve facts from pgvector + SQL and let Claude explain them."
+- "OpenAI is used only for embeddings here; **all reasoning stays in AWS** on Bedrock."
+- "Production path is **Aurora + ECS Fargate + Bedrock**, with optional EKS if the org already standardized on Kubernetes."
+- "This README_RUN gives us a clean story: local dev, local prod, ECS, EKS, and IaC via Terraform."
+
+### 17.10 Runbook as Interview Crib Sheet
+
+**From README_RUN.md:**
+That's it. This file should live at the root of your repo as `README_RUN.md` and serve as your **runbook** and **interview crib sheet**.
+
+### 17.11 Terraform Production Readiness
+
+**From infra/terraform/README.md:**
+
+#### 7. **Interview & Production Readiness**
+- **Enterprise-grade practices**: Demonstrates understanding of IaC, security, and DevOps
+- **Production-ready**: Same code used for dev and prod, with appropriate configurations
+- **Documentation**: Self-documenting infrastructure through code
+
+### 17.12 pgvector vs Spark Summary
+
+**From docs/architecture/pgvector_inference.md:**
+
+Interview summary line:
+
+> Spark does batch intelligence; pgvector does interactive intelligence.
 
 ---
 

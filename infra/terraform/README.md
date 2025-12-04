@@ -51,8 +51,8 @@ This implementation provides:
 - **State management**: Track resource relationships and dependencies
 - **Backup and restore**: Infrastructure can be recreated from state files
 
-#### 7. **Interview & Production Readiness**
-- **Enterprise-grade practices**: Demonstrates understanding of IaC, security, and DevOps
+#### 7. **Production Readiness**
+- **Enterprise-grade practices**: IaC, security, and DevOps best practices
 - **Production-ready**: Same code used for dev and prod, with appropriate configurations
 - **Documentation**: Self-documenting infrastructure through code
 

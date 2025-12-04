@@ -14,8 +14,40 @@ from psycopg2.extras import RealDictCursor
 from openai import OpenAI
 from openai import APIError as OpenAIError
 
-from backend.llm.bedrock_client import claude_complete
+from backend.llm.bedrock_client import claude_complete, get_bedrock_client
 from backend.services.analytics_scheduler import start_analytics_scheduler
+
+# Feature flag for agent-based query processing
+USE_AGENT_QUERY = os.environ.get('USE_AGENT_QUERY', 'false').lower() == 'true'
+
+# Agent will be initialized after DB pool is ready
+query_agent = None
+
+def init_agent():
+    """Initialize agent if feature flag is enabled."""
+    global query_agent
+    if USE_AGENT_QUERY and _connection_pool is not None:
+        try:
+            from backend.agents.query_agent import QueryAgent
+            from openai import OpenAI as OpenAIClient
+            
+            # Initialize OpenAI client for embeddings
+            openai_api_key = os.environ.get("OPENAI_API_KEY")
+            if not openai_api_key:
+                app.logger.warning("OPENAI_API_KEY not set, agent will not work properly")
+                return
+            
+            openai_client = OpenAIClient(api_key=openai_api_key)
+            
+            query_agent = QueryAgent(
+                db_pool=_connection_pool,
+                bedrock_client=get_bedrock_client(),
+                openai_client=openai_client
+            )
+            app.logger.info("Agent-based query processing enabled")
+        except Exception as e:
+            app.logger.error(f"Failed to initialize agent: {e}", exc_info=True)
+            query_agent = None
 
 # Configure logging
 logging.basicConfig(
@@ -29,7 +61,9 @@ app.logger = logging.getLogger(__name__)
 allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
 CORS(app, resources={
     r"/query": {"origins": allowed_origins},
+    r"/query-v2": {"origins": allowed_origins},
     r"/analytics": {"origins": allowed_origins},
+    r"/metrics/agent": {"origins": allowed_origins},
     r"/health": {"origins": "*"}
 })
 
@@ -66,6 +100,7 @@ def get_db_conn():
     # Initialize pool if not already done
     if _connection_pool is None:
         init_db_pool()
+        init_agent()
     
     # Try to get connection from pool
     if _connection_pool:
@@ -374,6 +409,64 @@ def health():
         status["aws"] = "not_configured"
     
     return jsonify(status)
+
+
+@app.route("/query-v2", methods=["POST"])
+def query_v2():
+    """New agent-based query endpoint."""
+    if not USE_AGENT_QUERY or query_agent is None:
+        return jsonify({
+            "error": "Agent-based query processing is disabled",
+            "use_endpoint": "/query",
+            "message": "Set USE_AGENT_QUERY=true to enable"
+        }), 404
+    
+    try:
+        body = request.get_json(silent=True) or {}
+        question = body.get("query") or body.get("q") or ""
+        
+        # Validate input
+        is_valid, error_msg = validate_query(question)
+        if not is_valid:
+            app.logger.warning(f"Invalid query: {error_msg}")
+            return jsonify({"error": error_msg}), 400
+        
+        # Process with agent
+        result = query_agent.process_query(question)
+        
+        # Build response
+        response = {
+            "question": question,
+            "answer": result.get("answer", ""),
+            "method": result.get("method", "agentic"),
+            "iterations": result.get("iterations", 0),
+            "execution_time_ms": result.get("execution_time_ms", 0),
+        }
+        
+        # Add debug info if in debug mode
+        if app.debug:
+            response["debug_info"] = result.get("debug_info")
+            response["tool_calls"] = result.get("tool_calls", [])
+        
+        return jsonify(response)
+    
+    except Exception as e:
+        app.logger.error(f"Agent query error: {e}", exc_info=True)
+        return jsonify({"error": "Failed to process query with agent"}), 500
+
+
+@app.route("/metrics/agent", methods=["GET"])
+def agent_metrics_endpoint():
+    """Get agent performance metrics."""
+    if not USE_AGENT_QUERY:
+        return jsonify({"error": "Agent not enabled"}), 404
+    
+    try:
+        from backend.agents.metrics import agent_metrics
+        return jsonify(agent_metrics.get_stats())
+    except Exception as e:
+        app.logger.error(f"Failed to get agent metrics: {e}")
+        return jsonify({"error": "Failed to retrieve metrics"}), 500
 
 
 @app.route("/query", methods=["POST"])

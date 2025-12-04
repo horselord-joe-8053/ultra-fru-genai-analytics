@@ -19,8 +19,9 @@ It demonstrates:
 - ✔️ **Low-cost inference at scale**
 - ✔️ **AWS-native deployment story**
 - ✔️ **Infrastructure as Code (Terraform + Terragrunt)** - Production-ready IaC with modular architecture, environment management, and security best practices
+- ✔️ **Agent-based query processing** (optional) - Autonomous ReAct agent for complex queries (see `docs/architecture/query_processing_evolution.md`)
 
-It is built specifically to support a **Senior AWS GenAI Architect interview** and to be used as a working prototype.
+It is designed as a working prototype that demonstrates production-ready GenAI architecture patterns.
 
 ---
 
@@ -44,7 +45,7 @@ The system produces grounded insights using **real sales + feedback data**, not 
 > pgvector does interactive intelligence.  
 > Claude explains it.**
 
-This separation is the core of the design interview.
+This separation is a fundamental architectural principle that enables scalable, cost-effective analytics.
 
 ### System layers
 
@@ -327,9 +328,7 @@ Claude returns:
 
 ---
 
-# 🏗 **8. Full AWS Deployment (Interview-Friendly Path)**
-
-> This is your “I can design and ship this on AWS” story.
+# 🏗 **8. Full AWS Deployment**
 
 ### 8.1 S3 (raw + delta storage)
 
@@ -453,21 +452,6 @@ Add:
 
 ---
 
-# 🧭 **10. Interview Sound Bites**
-
-You can drop these sentences in system design / LP rounds:
-
-> *“Spark does batch intelligence; pgvector does interactive intelligence; Claude communicates it.”*
-
-> *“We do not ask the LLM to guess the data.  
-> We retrieve the facts with embeddings + SQL, then ask the LLM to explain them.”*
-
-> *“OpenAI gives us state-of-the-art embeddings; Bedrock gives us governed reasoning.”*
-
-> *“Fine-tuning is optional here; RAG is mandatory. We first exhaust RAG + retrieval quality before spending on training.”*
-
-> *“In production, all inference runs inside AWS: ECS + RDS + Bedrock + VPC endpoints.”*
-
 ---
 
 # 📌 **11. Next Steps (Roadmap)**
@@ -484,14 +468,12 @@ You can drop these sentences in system design / LP rounds:
 
 # 🙌 Summary
 
-FRU is both:
+FRU is a **real playground** for experimenting with Spark, Delta, OpenAI embeddings, pgvector, and Bedrock. It demonstrates production-ready GenAI architecture patterns with:
 
-1. A **real playground** for experimenting with Spark, Delta, OpenAI embeddings, pgvector, and Bedrock.
-2. A **storyboard** you can use in a **Senior AWS GenAI Architect** interview to demonstrate:
-   - architectural judgment  
-   - cost awareness  
-   - governance thinking  
-   - practical GenAI patterns  
-   - ability to ship a working prototype.
+- architectural judgment  
+- cost awareness  
+- governance thinking  
+- practical GenAI patterns  
+- ability to ship a working prototype
 
-Use it, extend it, and mine it for examples when talking through RAG, embeddings, and hybrid AWS + LLM architectures.
+Use it, extend it, and explore RAG, embeddings, and hybrid AWS + LLM architectures.

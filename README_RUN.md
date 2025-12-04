@@ -109,7 +109,7 @@ Grounded narrative answer
 
 # 🧪 2. Local Developer Mode (Option A – Recommended)
 
-This is what you use for day-to-day hacking and interview prep.
+This is what you use for day-to-day development and testing.
 
 ### 2.1 Set up environment
 
@@ -335,7 +335,7 @@ You'll see:
 - **Purpose in FRU**: Used for offline analytics and generating NLQ→SQL training pairs (not required for the main chat interface)
 
 **Why use it?**
-- Demonstrates enterprise "big data" architecture (useful for interviews)
+- Demonstrates enterprise "big data" architecture
 - Generates training data for fine-tuning NLQ→SQL models (optional enhancement)
 - Performs heavy batch analytics on large datasets
 
@@ -589,7 +589,7 @@ and then manually configure Nginx later.
 
 # 🚀 4. AWS Production – ECS Fargate + Aurora + Bedrock (Option A1 + Aurora)
 
-This is the **primary production story** for interviews and real deployments:
+This is the **primary production deployment path**:
 
 - **Aurora PostgreSQL + pgvector** – vectorized semantic store
 - **ECS Fargate** – serverless container backends
@@ -775,7 +775,7 @@ For full enterprise posture:
 
 # ☸️ 5. Kubernetes / EKS Deployment (Option B)
 
-If the interviewer or your environment pushes for Kubernetes, you can deploy FRU to **EKS**.  
+If your environment requires Kubernetes, you can deploy FRU to **EKS**.  
 The building blocks:
 
 - EKS cluster
@@ -851,9 +851,8 @@ Then Ingress (ALB Ingress Controller) to expose `/query` externally.
 
 Frontend: same S3 + CloudFront setup as ECS, or host frontend as a separate `Deployment + Service + Ingress`.
 
-For interviews, you can explain:
-
-> "On EKS, the architecture is identical: Aurora + pgvector for embeddings, EKS pods for API, Bedrock for reasoning, S3/CloudFront or an Nginx ingress for SPA hosting."
+**Architecture notes:**
+On EKS, the architecture is identical: Aurora + pgvector for embeddings, EKS pods for API, Bedrock for reasoning, S3/CloudFront or an Nginx ingress for SPA hosting.
 
 ---
 
@@ -914,9 +913,8 @@ infra/terraform/
 
 See `infra/terraform/README.md` for complete documentation.
 
-For interviews, you can explain:
-
-> "I've implemented a complete Terraform + Terragrunt setup with modular architecture. The infrastructure is organized into reusable modules (VPC, Aurora, ECS, ALB, Frontend) with Terragrunt managing environment-specific configurations. Security best practices are built in: secrets in Secrets Manager, IAM role separation (execution vs runtime), and support for IAM database authentication. The deployment is fully automated via scripts."
+**Architecture highlights:**
+The Terraform + Terragrunt setup uses modular architecture. The infrastructure is organized into reusable modules (VPC, Aurora, ECS, ALB, Frontend) with Terragrunt managing environment-specific configurations. Security best practices are built in: secrets in Secrets Manager, IAM role separation (execution vs runtime), and support for IAM database authentication. The deployment is fully automated via scripts.
 
 If you want a concrete Terraform skeleton later, you can add it under `infra/terraform/` and model:
 
@@ -1013,16 +1011,4 @@ If you want a concrete Terraform skeleton later, you can add it under `infra/ter
 
 ---
 
-# 🧭 8. Interview Sound Bites (Tied to This Runbook)
-
-You can use these while sketching the system:
-
-- “**Spark does batch intelligence; pgvector does interactive intelligence; Claude communicates it.**”
-- “We **never** ask the LLM to guess the data; we retrieve facts from pgvector + SQL and let Claude explain them.”
-- “OpenAI is used only for embeddings here; **all reasoning stays in AWS** on Bedrock.”
-- “Production path is **Aurora + ECS Fargate + Bedrock**, with optional EKS if the org already standardized on Kubernetes.”
-- “This README_RUN gives us a clean story: local dev, local prod, ECS, EKS, and IaC via Terraform.”
-
----
-
-That’s it. This file should live at the root of your repo as `README_RUN.md` and serve as your **runbook** and **interview crib sheet**.
+That's it. This file should live at the root of your repo as `README_RUN.md` and serve as your **runbook** for running FRU in various environments.

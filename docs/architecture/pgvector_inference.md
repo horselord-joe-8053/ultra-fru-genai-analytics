@@ -128,6 +128,6 @@ Where Spark still shines:
 - building curated training datasets
 - feature engineering for downstream models
 
-Interview summary line:
+**Summary:**
 
 > Spark does batch intelligence; pgvector does interactive intelligence.
