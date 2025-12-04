@@ -1,6 +1,47 @@
 # 📘 FRU – How to Run (Local, AWS, EKS, Terraform)  
 **GenAI Analytics – How to Run (Local, AWS, EKS, Terraform)**
 
+This guide provides detailed manual instructions for running FRU in various environments (local development, local production simulation, AWS ECS, EKS, and Terraform deployments).
+
+## 📋 Table of Contents
+
+1. [🧩 Prerequisites](#🧩-0-prerequisites)
+   - [Local](#local)
+   - [AWS (prod)](#aws-prod)
+2. [🧠 Architecture Overview (High Level)](#🧠-1-architecture-overview-high-level)
+3. [🧪 Local Developer Mode (Option A – Recommended)](#🧪-2-local-developer-mode-option-a--recommended)
+   - [2.1 Set up environment](#21-set-up-environment)
+   - [2.2 Install Python Dependencies](#22-install-python-dependencies)
+   - [2.3 Run Postgres + pgvector + API with Docker](#23-run-postgres--pgvector--api-with-docker)
+   - [2.4 Load CSV into the database](#24-load-csv-into-the-database)
+   - [2.5 Start frontend (React analytical chat UI)](#25-start-frontend-react-analytical-chat-ui)
+   - [2.6 Using Spark + Delta locally (optional, for study / offline analytics)](#26-using-spark--delta-locally-optional-for-study--offline-analytics)
+     - [Step 1: Ingest CSV into Delta Lake format](#step-1-ingest-csv-into-delta-lake-format)
+     - [Step 2: Generate NLQ→SQL training pairs](#step-2-generate-nlqsql-training-pairs)
+     - [Step 3: Run Batch Analytics](#step-3-run-batch-analytics)
+4. [🧪 Local "Prod Simulation" Mode (Option A – Docker Only)](#🧪-3-local-prod-simulation-mode-option-a--docker-only)
+   - [3.1 Build backend image](#31-build-backend-image)
+5. [🚀 AWS Production – ECS Fargate + Aurora + Bedrock (Option A1 + Aurora)](#🚀-4-aws-production--ecs-fargate--aurora--bedrock-option-a1--aurora)
+   - [4.1 Aurora PostgreSQL + pgvector](#41-aurora-postgresql--pgvector)
+   - [4.2 Build & push backend image to ECR](#42-build--push-backend-image-to-ecr)
+   - [4.3 Create ECS Fargate Service](#43-create-ecs-fargate-service)
+   - [4.4 Frontend in AWS](#44-frontend-in-aws)
+   - [4.5 Bedrock networking (VPC endpoint, optional but recommended)](#45-bedrock-networking-vpc-endpoint-optional-but-recommended)
+6. [☸️ Kubernetes / EKS Deployment (Option B)](#☸️-5-kubernetes--eks-deployment-option-b)
+   - [5.1 Backend deployment YAML (simplified)](#51-backend-deployment-yaml-simplified)
+7. [🏗️ Terraform IaC (Option C – Fully Implemented)](#🏗️-6-terraform-iac-option-c--fully-implemented)
+8. [🧯 Troubleshooting Checklist](#🧯-7-troubleshooting-checklist)
+   - [Common Errors and Solutions](#common-errors-and-solutions)
+     - [API 500 errors](#api-500-errors)
+     - [No matches / zero stats](#no-matches--zero-stats)
+     - [ModuleNotFoundError / Import errors](#modulenotfounderror--import-errors)
+     - [CORS issues (in non-proxy setups)](#cors-issues-in-non-proxy-setups)
+     - [High latency](#high-latency)
+     - [Docker issues](#docker-issues)
+     - [Environment variable issues](#environment-variable-issues)
+
+---
+
 ## 📚 Documentation Overview
 
 **This guide (`README_RUN.md`)** provides detailed manual instructions for running FRU in various environments.
@@ -31,19 +72,6 @@ FRU (**Friday aRe Us**) is a GenAI analytics assistant over fridge sales data, b
 - **AWS Deployment**: `./run_scripts/aws/run.sh` - Interactive menu for AWS deployments
 
 📖 **See `README_RUN_SCRIPTS.md` for complete script documentation.**
-
----
-
-## 📋 Table of Contents
-
-1. [🧩 Prerequisites](#🧩-0-prerequisites)
-2. [🧠 Architecture Overview](#🧠-1-architecture-overview-high-level)
-3. [🧪 Local Developer Mode](#🧪-2-local-developer-mode-option-a--recommended)
-4. [🧪 Local "Prod Simulation" Mode](#🧪-3-local-prod-simulation-mode-option-a--docker-only)
-5. [🚀 AWS Production – ECS Fargate + Aurora + Bedrock](#🚀-4-aws-production--ecs-fargate--aurora--bedrock-option-a1--aurora)
-6. [☸️ Kubernetes / EKS Deployment](#☸️-5-kubernetes--eks-deployment-option-b)
-7. [🏗️ Terraform IaC](#🏗️-6-terraform-iac-option-c--fully-implemented)
-8. [🧯 Troubleshooting Checklist](#🧯-7-troubleshooting-checklist)
 
 ---
 

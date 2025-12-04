@@ -1,6 +1,64 @@
 # 📦 FRU GenAI Analytics Overview 
 **(Spark + Delta + OpenAI Embeddings + pgvector + Bedrock + AWS)**
 
+FRU (**Friday aRe Us**) is a real, end-to-end **conversational analytics system** built over refrigerator sales data.
+
+## 📋 Table of Contents
+
+1. [🧠 Concept](#🧠-1-concept)
+2. [🧩 Architecture Overview](#🧩-2-architecture-overview)
+   - [🔵 The Golden Separation](#🔵-the-golden-separation)
+   - [System layers](#system-layers)
+   - [📐 Architecture Diagram (Textual)](#📐-architecture-diagram-textual)
+3. [🗂 Project Layout](#🗂-3-project-layout)
+4. [⚡️ Local Quickstart (Works Without AWS)](#⚡️-4-local-quickstart-works-without-aws)
+   - [4.1 Install dependencies](#41-install-dependencies)
+   - [4.2 Run pgvector locally](#42-run-pgvector-locally)
+   - [4.3 Initialize pgvector schema](#43-initialize-pgvector-schema)
+   - [4.4 Load embeddings into pgvector](#44-load-embeddings-into-pgvector)
+   - [4.5 Run API locally](#45-run-api-locally)
+   - [4.6 Start Frontend (Optional)](#46-start-frontend-optional)
+5. [🔥 Analytics with Spark + Delta](#🔥-5-analytics-with-spark--delta)
+   - [5.1 Ingest CSV → Delta Lake](#51-ingest-csv--delta-lake)
+   - [5.2 Generate NLQ→SQL examples for LoRA](#52-generate-nlqsql-examples-for-lora)
+6. [🧠 Intelligence Model: OpenAI Embeddings + pgvector](#🧠-6-intelligence-model-openai-embeddings--pgvector)
+   - [6.1 Overview](#61-overview)
+   - [6.2 Embedding Generation (Offline Factory)](#62-embedding-generation-offline-factory)
+   - [6.3 pgvector Schema](#63-pgvector-schema)
+   - [6.4 Inference-Time Flow](#64-inference-time-flow)
+   - [6.5 LLM Prompt Pattern](#65-llm-prompt-pattern)
+   - [6.6 Why pgvector vs Spark SQL?](#66-why-pgvector-vs-spark-sql)
+7. [🦾 Integrating Bedrock Claude](#🦾-7-integrating-bedrock-claude)
+   - [Prompt logic (conceptual)](#prompt-logic-conceptual)
+8. [🏗 Full AWS Deployment](#🏗-8-full-aws-deployment)
+   - [8.1 S3 (raw + delta storage)](#81-s3-raw--delta-storage)
+   - [8.2 RDS (or Aurora) PostgreSQL with pgvector](#82-rds-or-aurora-postgresql-with-pgvector)
+   - [8.3 Embedding ETL in AWS](#83-embedding-etl-in-aws)
+   - [8.4 Containerize API + push to ECR](#84-containerize-api--push-to-ecr)
+   - [8.5 ECS Fargate Service](#85-ecs-fargate-service)
+   - [8.6 Bedrock Access](#86-bedrock-access)
+9. [🛡 Governance & Safety](#🛡-9-governance--safety)
+10. [🤖 Query Processing Architecture](#🤖-10-query-processing-architecture) ⭐
+   - [10.1 Current Implementation](#101-current-implementation)
+     - [Architecture](#architecture)
+     - [Flow](#flow)
+   - [10.2 Evolution Path: Enhancement_A → B → C](#102-evolution-path-enhancement_a--b--c)
+     - [Enhancement_A: LLM Classification + SQL Generation](#enhancement_a-llm-classification--sql-generation)
+     - [Enhancement_B: Hybrid Query Processing](#enhancement_b-hybrid-query-processing)
+     - [Enhancement_C: Agent-Based Autonomous Planning (Implemented)](#enhancement_c-agent-based-autonomous-planning-implemented)
+   - [10.3 Agent-Based System (Enhancement_C) - Implementation](#103-agent-based-system-enhancement_c---implementation)
+     - [Components](#components)
+     - [Usage](#usage)
+     - [Feature Flags](#feature-flags)
+     - [Debugging](#debugging)
+     - [Performance Considerations](#performance-considerations)
+     - [Migration Path](#migration-path)
+     - [Rollback](#rollback)
+11. [📌 Next Steps (Roadmap)](#📌-11-next-steps-roadmap)
+12. [🙌 Summary](#🙌-summary)
+
+---
+
 ## 📚 Documentation Guide
 
 - **[`README_RUN.md`](README_RUN.md)** - Detailed manual instructions for running FRU locally, in production simulation, and on AWS (ECS, EKS, Terraform)
@@ -8,24 +66,6 @@
 - **[`README_INFRA.md`](README_INFRA.md)** - Complete Infrastructure as Code (IaC) documentation for Terraform + Terragrunt deployment with modular architecture, environment management, and security best practices
 
 ---
-
-## 📋 Table of Contents
-
-1. [🧠 Concept](#🧠-1-concept)
-2. [🧩 Architecture Overview](#🧩-2-architecture-overview)
-3. [🗂 Project Layout](#🗂-3-project-layout)
-4. [⚡️ Local Quickstart](#⚡️-4-local-quickstart-works-without-aws)
-5. [🔥 Analytics with Spark + Delta](#🔥-5-analytics-with-spark--delta)
-6. [🧠 Intelligence Model: OpenAI Embeddings + pgvector](#🧠-6-intelligence-model-openai-embeddings--pgvector)
-7. [🦾 Integrating Bedrock Claude](#🦾-7-integrating-bedrock-claude)
-8. [🏗 Full AWS Deployment](#🏗-8-full-aws-deployment)
-9. [🛡 Governance & Safety](#🛡-9-governance--safety)
-10. [🤖 Query Processing Architecture](#🤖-10-query-processing-architecture) ⭐
-11. [📌 Next Steps (Roadmap)](#📌-11-next-steps-roadmap)
-
----
-
-FRU (**Friday aRe Us**) is a real, end-to-end **conversational analytics system** built over refrigerator sales data.
 
 It demonstrates:
 
