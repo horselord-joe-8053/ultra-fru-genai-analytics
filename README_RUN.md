@@ -7,7 +7,7 @@
 
 **For automated setup scripts**, see **[`README_RUN_SCRIPTS.md`](README_RUN_SCRIPTS.md)** - it contains idempotent shell scripts that automate the entire setup process with a single command per scenario (local dev, local prod, AWS deployments).
 
-**For Infrastructure as Code**, see **[`README_INFRA.md`](../README_INFRA.md)** - complete Terraform + Terragrunt implementation with modular architecture, environment management (dev/prod), and security best practices (IAM role separation, Secrets Manager, IAM database authentication).
+**For Infrastructure as Code**, see **[`README_INFRA.md`](README_INFRA.md)** - complete Terraform + Terragrunt implementation with modular architecture, environment management (dev/prod), and security best practices (IAM role separation, Secrets Manager, IAM database authentication).
 
 ---
 
@@ -597,7 +597,7 @@ This is the **primary production deployment path**:
 - **Bedrock Claude 3** – governed reasoning
 - **OpenAI embeddings** – high-quality vectors
 
-> **💡 Recommended**: Use the **Terraform IaC implementation** (`infra/terraform/`) for automated, reproducible deployments with security best practices. See [`README_INFRA.md`](../README_INFRA.md) for complete documentation. The manual steps below are for understanding the architecture.
+> **💡 Recommended**: Use the **Terraform IaC implementation** (`infra/terraform/`) for automated, reproducible deployments with security best practices. See [`README_INFRA.md`](README_INFRA.md) for complete documentation. The manual steps below are for understanding the architecture.
 
 ## 4.1 Aurora PostgreSQL + pgvector
 
@@ -911,7 +911,7 @@ infra/terraform/
 ./run_scripts/aws/terraform/deploy.sh dev application
 ```
 
-See [`README_INFRA.md`](../README_INFRA.md) for complete documentation.
+See [`README_INFRA.md`](README_INFRA.md) for complete documentation.
 
 **Architecture highlights:**
 The Terraform + Terragrunt setup uses modular architecture. The infrastructure is organized into reusable modules (VPC, Aurora, ECS, ALB, Frontend) with Terragrunt managing environment-specific configurations. Security best practices are built in: secrets in Secrets Manager, IAM role separation (execution vs runtime), and support for IAM database authentication. The deployment is fully automated via scripts.
