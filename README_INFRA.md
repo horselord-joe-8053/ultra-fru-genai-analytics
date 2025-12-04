@@ -4,18 +4,18 @@ This document provides comprehensive documentation for deploying FRU infrastruct
 
 ## 📋 Table of Contents
 
-1. [📖 Overview](#📖-1-overview)
-2. [💡 Why Terraform IaC? Necessity and Benefits](#💡-2-why-terraform-iac-necessity-and-benefits)
-3. [📁 Structure](#📁-3-structure)
-4. [🔒 Security Best Practices](#🔒-4-security-best-practices)
-5. [✅ Prerequisites](#✅-5-prerequisites)
-6. [🚀 Usage](#🚀-6-usage)
-7. [📚 Module Documentation](#📚-7-module-documentation)
-8. [🌍 Environment-Specific Configuration](#🌍-8-environment-specific-configuration)
-9. [🎯 After Deployment](#🎯-9-after-deployment)
-10. [🐛 Troubleshooting](#🐛-10-troubleshooting)
-11. [🗑️ Destroying Infrastructure](#🗑️-11-destroying-infrastructure)
-12. [🐳 Local Development (Docker)](#🐳-12-local-development-docker)
+1. [📖 Overview](#-1-overview)
+2. [💡 Why Terraform IaC? Necessity and Benefits](#-2-why-terraform-iac-necessity-and-benefits)
+3. [📁 Structure](#-3-structure)
+4. [🔒 Security Best Practices](#-4-security-best-practices)
+5. [✅ Prerequisites](#-5-prerequisites)
+6. [🚀 Usage](#-6-usage)
+7. [📚 Module Documentation](#-7-module-documentation)
+8. [🌍 Environment-Specific Configuration](#-8-environment-specific-configuration)
+9. [🎯 After Deployment](#-9-after-deployment)
+10. [🐛 Troubleshooting](#-10-troubleshooting)
+11. [🗑️ Destroying Infrastructure](#-11-destroying-infrastructure)
+12. [🐳 Local Development (Docker)](#-12-local-development-docker)
 
 ---
 

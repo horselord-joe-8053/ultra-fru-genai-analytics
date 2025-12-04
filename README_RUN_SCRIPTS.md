@@ -4,14 +4,14 @@ This directory contains **idempotent shell scripts** to automate setup and deplo
 
 ## 📋 Table of Contents
 
-1. [🎯 Quick Start](#🎯-1-quick-start)
-2. [📁 Script Structure](#📁-2-script-structure)
-3. [🧪 Local Development](#🧪-3-local-development)
-4. [🐳 Local Production Simulation](#🐳-4-local-production-simulation)
-5. [☁️ AWS Deployment](#☁️-5-aws-deployment)
-6. [🛠️ Common Utilities](#🛠️-6-common-utilities)
-7. [🔧 Script Features](#🔧-7-script-features)
-8. [🐛 Troubleshooting](#🐛-8-troubleshooting)
+1. [🎯 Quick Start](#-1-quick-start)
+2. [📁 Script Structure](#-2-script-structure)
+3. [🧪 Local Development](#-3-local-development)
+4. [🐳 Local Production Simulation](#-4-local-production-simulation)
+5. [☁️ AWS Deployment](#-5-aws-deployment)
+6. [🛠️ Common Utilities](#-6-common-utilities)
+7. [🔧 Script Features](#-7-script-features)
+8. [🐛 Troubleshooting](#-8-troubleshooting)
 
 ---
 
