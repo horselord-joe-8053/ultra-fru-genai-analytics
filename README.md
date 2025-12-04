@@ -5,7 +5,7 @@
 
 - **[`README_RUN.md`](README_RUN.md)** - Detailed manual instructions for running FRU locally, in production simulation, and on AWS (ECS, EKS, Terraform)
 - **[`README_RUN_SCRIPTS.md`](README_RUN_SCRIPTS.md)** - Automated setup scripts for one-command deployment across all scenarios
-- **[`infra/terraform/README.md`](infra/terraform/README.md)** - Complete Terraform Infrastructure as Code (IaC) implementation with modular architecture, Terragrunt for environment management, and security best practices
+- **[`README_INFRA.md`](README_INFRA.md)** - Complete Infrastructure as Code (IaC) documentation for Terraform + Terragrunt deployment with modular architecture, environment management, and security best practices
 
 ---
 
@@ -19,7 +19,7 @@ It demonstrates:
 - ✔️ **Low-cost inference at scale**
 - ✔️ **AWS-native deployment story**
 - ✔️ **Infrastructure as Code (Terraform + Terragrunt)** - Production-ready IaC with modular architecture, environment management, and security best practices
-- ✔️ **Agent-based query processing** (optional) - Autonomous ReAct agent for complex queries (see `docs/architecture/query_processing_evolution.md`)
+- ✔️ **Agent-based query processing** (optional) - Autonomous ReAct agent for complex queries (see Section 10)
 
 It is designed as a working prototype that demonstrates production-ready GenAI architecture patterns.
 
@@ -111,11 +111,8 @@ fru-genai-analytics/
 │   └─ synthetic/
 │       └─ nlq_training_pairs.jsonl
 │
-├─ docs/
-│   ├─ architecture/
-│   │   └─ pgvector_inference.md
-│   └─ sql/
-│       └─ schema_pgvector.sql
+├─ sql/
+│   └─ schema_pgvector.sql
 │
 ├─ backend/
 │   ├─ api/
@@ -168,7 +165,7 @@ You now have:
 ## 4.3 Initialize pgvector schema
 
 ```bash
-psql "postgresql://postgres:postgres@localhost:5432/fru_db"   -f docs/sql/schema_pgvector.sql
+psql "postgresql://postgres:postgres@localhost:5432/fru_db"   -f sql/schema_pgvector.sql
 ```
 
 ---
@@ -261,34 +258,125 @@ You can later use this JSONL to:
 
 > The beating heart of FRU.
 
-1. Convert user text → **OpenAI embedding** (`text-embedding-3-small`).
-2. ANN search with pgvector: `embedding <-> query_vector`.
-3. Apply relational filters if needed (brand, date, rating).
-4. Compute counts and basic stats.
-5. Feed **facts** to Claude.
+pgvector serves as the **inference-time semantic engine** for FRU. It enables low-latency nearest-neighbor retrieval over embeddings inside a transactional database, complementing Spark + Delta Lake for batch processing.
 
-This keeps inference:
-- **fast**
-- **cheap**
-- **non-hallucinatory**
-- **governable**
+## 6.1 Overview
 
-### SQL Example
+FRU separates concerns into three major layers:
+
+- **Spark + Delta Lake** → offline analytics, ETL/ELT, feature & training data generation
+- **OpenAI embeddings + PostgreSQL pgvector** → real-time semantic retrieval
+- **LLM (Bedrock Claude)** → reasoning and answer generation over structured + retrieved context
+
+> **Key Principle**: Spark does batch intelligence; pgvector does interactive intelligence.
+
+## 6.2 Embedding Generation (Offline Factory)
+
+1. Ingest `data/raw/fridge_sales_with_rating.csv` into a Delta table via Spark.
+2. Use an OpenAI embedding model (`text-embedding-3-small`) over `CUSTOMER_FEEDBACK`.
+3. Write rows plus embeddings into a Postgres table with pgvector enabled.
+
+The ETL process (`backend/etl/load_openai_embeddings_to_pgvector.py`) handles this offline, generating embeddings for all customer feedback before queries arrive.
+
+## 6.3 pgvector Schema
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS fru_sales_embeddings (
+    id TEXT PRIMARY KEY,
+    brand TEXT,
+    fridge_model TEXT,
+    price NUMERIC,
+    sales_date DATE,
+    store_name TEXT,
+    customer_feedback TEXT,
+    feedback_rating TEXT,
+    embedding VECTOR(1536)
+);
+
+CREATE INDEX IF NOT EXISTS fru_sales_embeddings_ivfflat
+ON fru_sales_embeddings
+USING ivfflat (embedding vector_cosine_ops)
+WITH (lists = 100);
+```
+
+The `ivfflat` index enables fast approximate nearest neighbor (ANN) search for semantic similarity queries.
+
+## 6.4 Inference-Time Flow
+
+**Example user question:**
+> "Which LG fridge do customers complain the most about delivery problems?"
+
+**High-level flow:**
+
+1. **Classify query** as qualitative (complaints / feedback).
+2. **Embed the query text** with the same OpenAI embedding model.
+3. **Run pgvector similarity query** with optional relational filters:
 
 ```sql
 WITH nearest AS (
-  SELECT id FROM fru_sales_embeddings
-  WHERE brand='LG'
+  SELECT id
+  FROM fru_sales_embeddings
+  WHERE brand = 'LG'
   ORDER BY embedding <-> $query_vector
   LIMIT 50
 )
-SELECT fridge_model, COUNT(*) complaints
+SELECT fridge_model,
+       COUNT(*) AS complaints
 FROM fru_sales_embeddings
 WHERE id IN (SELECT id FROM nearest)
-  AND feedback_rating='Negative'
+  AND feedback_rating = 'Negative'
 GROUP BY fridge_model
 ORDER BY complaints DESC;
 ```
+
+4. **Take result rows** and sample `customer_feedback` snippets.
+5. **Ask Bedrock Claude** to summarize the findings, using numbers from SQL and context from snippets.
+
+## 6.5 LLM Prompt Pattern
+
+Instead of letting the LLM invent SQL or guess facts, we:
+
+- Generate SQL via templates or a fine-tuned NLQ→SQL model (see Section 10 for agent-based approach).
+- Execute SQL against Postgres.
+- Feed structured JSON + snippets into the LLM and ask for a concise, grounded answer.
+
+**Prompt structure:**
+
+```text
+System:
+You are a retail analytics assistant for fridge sales. You receive structured JSON (metrics)
+and feedback snippets. Use JSON for numeric facts; use snippets for qualitative context.
+Never make up numbers not present in JSON.
+
+User:
+{ "question": "...", "structured": {...}, "snippets": [ ... ] }
+```
+
+## 6.6 Why pgvector vs Spark SQL?
+
+**Spark + Delta Lake** remains the backbone for:
+- large-scale ETL / ELT
+- heavy aggregations (e.g. multi-year sales by brand)
+- generating NLQ→SQL training data
+- building feature tables for models
+
+**pgvector** is the serving-time engine:
+- fast similarity search in milliseconds
+- transactional semantics
+- easy integration with SQL filters and joins
+
+**What if we used Spark SQL for inference instead?**
+
+You could attempt to use Spark SQL directly at inference time, but downsides include:
+- **Latency**: Spark is optimized for batch, not per-request chat UX
+- **Complexity**: Implementing approximate nearest neighbor search in Spark is non-trivial
+- **Cost**: Keeping clusters warm just for interactive queries is more expensive
+- **Operational risk**: Ties interactive traffic to batch infrastructure
+
+**Summary:**
+> Spark does batch intelligence; pgvector does interactive intelligence.
 
 ---
 
@@ -339,7 +427,7 @@ Claude returns:
   s3://fru-analytics-data-prod/delta/fru_sales/...
   ```
 
-Use the Terraform modules in `infra/terraform/modules/` with Terragrunt configurations in `infra/terraform/environments/`. See `infra/terraform/README.md` for detailed instructions.
+Use the Terraform modules in `infra/terraform/modules/` with Terragrunt configurations in `infra/terraform/environments/`. See [`README_INFRA.md`](README_INFRA.md) for detailed instructions.
 
 ---
 
@@ -353,7 +441,7 @@ Use the Terraform modules in `infra/terraform/modules/` with Terragrunt configur
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
-\i docs/sql/schema_pgvector.sql
+\i sql/schema_pgvector.sql
 ```
 
 FRU now has a semantic store inside AWS.
@@ -451,6 +539,222 @@ Add:
   - store inputs/outputs (with redaction) for evaluation.
 
 ---
+
+---
+
+# 🤖 **10. Query Processing Architecture**
+
+FRU's query processing has evolved from a simple keyword-based system to an intelligent, agent-based autonomous system. This section describes the current implementation and the evolution path.
+
+## 10.1 Current Implementation
+
+### Architecture
+- **Classification**: Simple keyword-based (`is_qualitative()` function)
+- **Query Processing**: Single path - pgvector semantic search only
+- **Limitations**:
+  - All queries default to semantic search over feedback data
+  - Quantitative queries (e.g., "which region has biggest sales?") perform poorly
+  - No SQL generation capability
+  - Fixed execution path
+
+### Flow
+```
+User Query → Keyword Check → pgvector Search → Stats → Claude Explanation
+```
+
+**Example Problem:**
+Query: "Which region has the biggest sales?"
+- Current: Searches feedback semantically, returns 50 records
+- Problem: Doesn't aggregate all sales data, only samples
+- Result: Inaccurate or incomplete answer
+
+## 10.2 Evolution Path: Enhancement_A → B → C
+
+### Enhancement_A: LLM Classification + SQL Generation
+
+**What It Adds:**
+- **LLM-based classification**: Claude/Bedrock classifies queries as `quantitative`, `qualitative`, or `hybrid`
+- **SQL generation**: LLM generates SQL from natural language for quantitative queries
+- **Dual execution paths**: Different handling for quantitative vs qualitative queries
+
+**Architecture:**
+```
+User Query → LLM Classify → Route Decision
+                │
+    ┌───────────┴───────────┐
+    │                       │
+Quantitative          Qualitative
+    │                       │
+LLM Generate SQL    pgvector Search
+    │                       │
+Execute SQL         Claude Explain
+    │                       │
+Claude Explain      Return Answer
+    │
+Return Answer
+```
+
+**Benefits:**
+- Accurate quantitative queries: SQL aggregations over full dataset
+- Maintains qualitative strength: Still uses pgvector for feedback queries
+- Schema-aware: LLM receives table structure for accurate SQL generation
+
+### Enhancement_B: Hybrid Query Processing
+
+**What It Adds:**
+- **Two-phase execution**: Quantitative analysis first, then qualitative analysis filtered by results
+- **Result fusion**: Combines quantitative metrics with qualitative insights
+- **Coordinated execution**: SQL results guide semantic search
+
+**Architecture:**
+```
+User Query → Classify as "hybrid"
+    │
+    ├─ Phase 1: Quantitative
+    │   └─ Generate & Execute SQL → Get low-sales stores
+    │
+    ├─ Phase 2: Qualitative (Filtered)
+    │   └─ Semantic Search (filtered by SQL results) → Get feedback
+    │
+    └─ Phase 3: Synthesis
+        └─ Claude combines both → Generate recommendations
+```
+
+**Example:**
+Query: "How to improve sales where sales were low?"
+1. **Phase 1**: SQL finds stores with below-average sales → ["Store A", "Store B"]
+2. **Phase 2**: Semantic search for feedback ONLY from Store A and Store B
+3. **Phase 3**: Claude synthesizes recommendations based on both quantitative and qualitative findings
+
+### Enhancement_C: Agent-Based Autonomous Planning (Implemented)
+
+**What It Adds:**
+- **Autonomous planning**: LLM decides what analysis is needed
+- **Tool-based execution**: Agent uses tools (SQL, semantic search, SQL generation)
+- **Iterative refinement**: Agent can iterate multiple times based on results
+- **Dynamic adaptation**: Adapts to novel queries without fixed patterns
+
+**Architecture:**
+```
+User Query → Agent Planning
+    │
+    ├─ Agent thinks: "What do I need?"
+    │   └─ Plans tool sequence
+    │
+    ├─ Execute Tool 1 (e.g., SQL)
+    │   └─ Agent observes results
+    │
+    ├─ Agent decides: "Do I need more?"
+    │   └─ If yes → Execute Tool 2 (e.g., Semantic Search)
+    │
+    └─ Agent synthesizes final answer
+```
+
+**Available Tools:**
+1. **`execute_sql`**: Run SQL queries directly
+2. **`semantic_search`**: pgvector search with optional filters
+3. **`generate_sql`**: LLM generates SQL from natural language
+
+**Benefits:**
+- **Autonomous**: LLM decides approach, not hardcoded logic
+- **Flexible**: Adapts to novel query patterns
+- **Iterative**: Can refine based on intermediate results
+- **Extensible**: Easy to add new tools
+
+## 10.3 Agent-Based System (Enhancement_C) - Implementation
+
+### Components
+
+1. **Tools** (`backend/agents/tools/`)
+   - `SQLTool`: Execute SQL queries safely
+   - `SemanticSearchTool`: pgvector semantic search with filters
+   - `SQLGeneratorTool`: LLM generates SQL from natural language
+
+2. **Agent** (`backend/agents/query_agent.py`)
+   - ReAct pattern implementation
+   - Autonomous planning and execution
+   - Iterative refinement (max 5 iterations)
+
+3. **Logging** (`backend/agents/logger.py`)
+   - Structured logging for debugging
+   - Tool call tracking
+   - Reasoning traces
+
+4. **Metrics** (`backend/agents/metrics.py`)
+   - Performance tracking
+   - Success/failure rates
+   - Latency monitoring
+
+5. **API Integration** (`backend/api/app.py`)
+   - `/query-v2` endpoint (agent-based)
+   - `/metrics/agent` endpoint
+   - Feature flag: `USE_AGENT_QUERY`
+
+### Usage
+
+**Enable Agent:**
+Set environment variable:
+```bash
+USE_AGENT_QUERY=true
+```
+
+**API Endpoints:**
+
+**Agent Query:**
+```bash
+curl -X POST http://localhost:5000/query-v2 \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Which region has the biggest sales?"}'
+```
+
+**Metrics:**
+```bash
+curl http://localhost:5000/metrics/agent
+```
+
+### Feature Flags
+
+- `USE_AGENT_QUERY`: Master switch (default: false)
+- `USE_AGENT_QUERY_PERCENTAGE`: Gradual rollout percentage (0-100)
+- `USE_AGENT_QUERY_WHITELIST`: Comma-separated user IDs for testing
+
+### Debugging
+
+When `FLASK_DEBUG=true`, the `/query-v2` response includes:
+- `debug_info`: Complete execution trace
+- `tool_calls`: All tool executions with inputs/outputs
+- `agent_thoughts`: Agent reasoning
+
+### Performance Considerations
+
+**Latency:**
+- **Current**: ~500-800ms (single pgvector search)
+- **Enhancement_A**: ~800-1200ms (LLM classification + SQL generation)
+- **Enhancement_B**: ~1200-2000ms (two-phase execution)
+- **Enhancement_C**: ~1500-3000ms (multiple tool calls, iterations)
+
+**Cost:**
+- **Current**: OpenAI embeddings + Bedrock (1 call)
+- **Enhancement_A**: +1 Bedrock call (classification/SQL generation)
+- **Enhancement_B**: +1 Bedrock call (synthesis)
+- **Enhancement_C**: +2-5 Bedrock calls (planning + tool calls + synthesis)
+
+**Optimization Strategies:**
+- Cache common SQL queries
+- Batch tool executions when possible
+- Use Claude Haiku for planning, Sonnet for synthesis
+- Limit agent iterations (max 5 steps)
+
+### Migration Path
+
+1. **Phase 1**: Test with feature flag disabled (default)
+2. **Phase 2**: Enable for specific users (whitelist)
+3. **Phase 3**: Gradual rollout (percentage)
+4. **Phase 4**: Full rollout (if metrics are good)
+
+### Rollback
+
+Set `USE_AGENT_QUERY=false` to disable agent and fall back to original `/query` endpoint.
 
 ---
 

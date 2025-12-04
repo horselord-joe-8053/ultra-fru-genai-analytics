@@ -32,3 +32,4 @@ CREATE TABLE IF NOT EXISTS batch_analytics (
 
 CREATE INDEX IF NOT EXISTS batch_analytics_created_at_idx
 ON batch_analytics(created_at DESC);
+

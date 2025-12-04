@@ -7,7 +7,7 @@
 
 **For automated setup scripts**, see **[`README_RUN_SCRIPTS.md`](README_RUN_SCRIPTS.md)** - it contains idempotent shell scripts that automate the entire setup process with a single command per scenario (local dev, local prod, AWS deployments).
 
-**For Infrastructure as Code**, see **[`infra/terraform/README.md`](../infra/terraform/README.md)** - complete Terraform + Terragrunt implementation with modular architecture, environment management (dev/prod), and security best practices (IAM role separation, Secrets Manager, IAM database authentication).
+**For Infrastructure as Code**, see **[`README_INFRA.md`](../README_INFRA.md)** - complete Terraform + Terragrunt implementation with modular architecture, environment management (dev/prod), and security best practices (IAM role separation, Secrets Manager, IAM database authentication).
 
 ---
 
@@ -227,19 +227,19 @@ You should see a small JSON `{ "status": "ok" }`.
 
 You should have `data/raw/fridge_sales_with_rating.csv` and:
 
-- a schema / init script (for example `docs/sql/schema_pgvector.sql`)
+- a schema / init script (for example `sql/schema_pgvector.sql`)
 - an ETL script like `backend/etl/load_openai_embeddings_to_pgvector.py`
 
 1. Initialize schema (includes `batch_analytics` table for Spark analytics):
 
    Option A (if psql installed locally):
    ```bash
-   psql "postgresql://postgres:postgres@localhost:5432/fru_db" -f docs/sql/schema_pgvector.sql
+   psql "postgresql://postgres:postgres@localhost:5432/fru_db" -f sql/schema_pgvector.sql
    ```
 
    Option B (using Docker, if psql not installed):
    ```bash
-   docker exec -i fru_db psql -U postgres -d fru_db < docs/sql/schema_pgvector.sql
+   docker exec -i fru_db psql -U postgres -d fru_db < sql/schema_pgvector.sql
    ```
 
    This creates:
@@ -597,7 +597,7 @@ This is the **primary production deployment path**:
 - **Bedrock Claude 3** – governed reasoning
 - **OpenAI embeddings** – high-quality vectors
 
-> **💡 Recommended**: Use the **Terraform IaC implementation** (`infra/terraform/`) for automated, reproducible deployments with security best practices. See [`infra/terraform/README.md`](../infra/terraform/README.md) for complete documentation. The manual steps below are for understanding the architecture.
+> **💡 Recommended**: Use the **Terraform IaC implementation** (`infra/terraform/`) for automated, reproducible deployments with security best practices. See [`README_INFRA.md`](../README_INFRA.md) for complete documentation. The manual steps below are for understanding the architecture.
 
 ## 4.1 Aurora PostgreSQL + pgvector
 
@@ -608,7 +608,7 @@ This is the **primary production deployment path**:
    CREATE EXTENSION IF NOT EXISTS vector;
    ```
 
-3. Apply schema similar to `docs/sql/schema_pgvector.sql`:
+3. Apply schema similar to `sql/schema_pgvector.sql`:
 
    ```sql
    -- basic example, adapt to your actual schema
@@ -911,7 +911,7 @@ infra/terraform/
 ./run_scripts/aws/terraform/deploy.sh dev application
 ```
 
-See `infra/terraform/README.md` for complete documentation.
+See [`README_INFRA.md`](../README_INFRA.md) for complete documentation.
 
 **Architecture highlights:**
 The Terraform + Terragrunt setup uses modular architecture. The infrastructure is organized into reusable modules (VPC, Aurora, ECS, ALB, Frontend) with Terragrunt managing environment-specific configurations. Security best practices are built in: secrets in Secrets Manager, IAM role separation (execution vs runtime), and support for IAM database authentication. The deployment is fully automated via scripts.
@@ -955,7 +955,7 @@ If you want a concrete Terraform skeleton later, you can add it under `infra/ter
 - **Wrong table name / schema mismatch**
   - Verify table exists: `psql ... -c "\dt fru_sales_embeddings"`
   - Check schema: `psql ... -c "\d fru_sales_embeddings"`
-  - Re-run schema init: `psql ... -f docs/sql/schema_pgvector.sql`
+  - Re-run schema init: `psql ... -f sql/schema_pgvector.sql`
 
 ### ModuleNotFoundError / Import errors
 - **Python dependencies not installed**

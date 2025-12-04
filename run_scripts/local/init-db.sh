@@ -9,7 +9,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/../common/logger.sh"
 source "$SCRIPT_DIR/../common/load-env.sh"
 
-SCHEMA_FILE="$REPO_ROOT/docs/sql/schema_pgvector.sql"
+SCHEMA_FILE="$REPO_ROOT/sql/schema_pgvector.sql"
 
 init_database() {
     log_step "Initializing database schema"

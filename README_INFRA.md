@@ -1,6 +1,23 @@
-# Terraform Infrastructure as Code
+# Infrastructure as Code (IaC) for FRU
 
-This directory contains Terraform modules and Terragrunt configurations for deploying the FRU project to AWS.
+This document provides comprehensive documentation for deploying FRU infrastructure to AWS using Terraform and Terragrunt.
+
+## Overview
+
+The `infra/` folder contains infrastructure code for FRU:
+
+- **`docker/`**: Local development stack
+  - `Dockerfile.api` — container for the Flask API
+  - `docker-compose.yml` — local stack: Postgres with pgvector + API
+
+- **`terraform/`**: Production infrastructure
+  - **Complete Infrastructure as Code (IaC) implementation** using Terraform + Terragrunt
+  - **Modular architecture**: 7 reusable modules (VPC, Aurora, IAM, Secrets Manager, ECS, ALB, Frontend)
+  - **Environment management**: Terragrunt configurations for dev/prod with infrastructure/application layers
+  - **Security best practices**: IAM role separation, Secrets Manager integration, IAM database authentication
+  - **Production-ready**: Automated deployments, version-controlled infrastructure, disaster recovery support
+
+---
 
 ## Why Terraform IaC? Necessity and Benefits
 
@@ -70,31 +87,39 @@ This implementation provides:
 - Security best practices enforced
 - Easy to scale, replicate, and maintain
 
+---
+
 ## Structure
 
 ```
-infra/terraform/
-├── modules/              # Reusable Terraform modules
-│   ├── vpc/             # VPC, subnets, NAT gateways, VPC endpoints
-│   ├── aurora/           # Aurora PostgreSQL cluster with pgvector
-│   ├── iam/              # IAM roles (execution + runtime)
-│   ├── secrets-manager/  # Secrets Manager for sensitive data
-│   ├── ecs/              # ECS cluster, service, task definition
-│   ├── alb/              # Application Load Balancer
-│   ├── frontend/         # S3 + CloudFront for frontend
-│   ├── infrastructure/   # Wrapper module (VPC + Aurora + IAM + Secrets)
-│   └── application/      # Wrapper module (ECS + ALB + Frontend)
-└── environments/         # Terragrunt environment configurations
-    ├── terragrunt.hcl   # Root configuration
-    ├── dev/
-    │   ├── terragrunt.hcl
-    │   ├── infrastructure/
-    │   └── application/
-    └── prod/
-        ├── terragrunt.hcl
-        ├── infrastructure/
-        └── application/
+infra/
+├── docker/                    # Local development
+│   ├── Dockerfile.api
+│   └── docker-compose.yml
+└── terraform/                 # Production infrastructure
+    ├── modules/               # Reusable Terraform modules
+    │   ├── vpc/               # VPC, subnets, NAT gateways, VPC endpoints
+    │   ├── aurora/            # Aurora PostgreSQL cluster with pgvector
+    │   ├── iam/               # IAM roles (execution + runtime)
+    │   ├── secrets-manager/   # Secrets Manager for sensitive data
+    │   ├── ecs/               # ECS cluster, service, task definition
+    │   ├── alb/               # Application Load Balancer
+    │   ├── frontend/           # S3 + CloudFront for frontend
+    │   ├── infrastructure/    # Wrapper module (VPC + Aurora + IAM + Secrets)
+    │   └── application/       # Wrapper module (ECS + ALB + Frontend)
+    └── environments/          # Terragrunt environment configurations
+        ├── terragrunt.hcl     # Root configuration
+        ├── dev/
+        │   ├── terragrunt.hcl
+        │   ├── infrastructure/
+        │   └── application/
+        └── prod/
+            ├── terragrunt.hcl
+            ├── infrastructure/
+            └── application/
 ```
+
+---
 
 ## Security Best Practices
 
@@ -129,6 +154,8 @@ infra/terraform/
   - Reference in ECS task definition
   - Rotate regularly
 
+---
+
 ## Prerequisites
 
 1. **Terraform** >= 1.5.0
@@ -154,6 +181,8 @@ infra/terraform/
      export TF_STATE_BUCKET="fru-terraform-state-<account-id>"
      export TF_STATE_LOCK_TABLE="fru-terraform-locks"
      ```
+
+---
 
 ## Usage
 
@@ -208,6 +237,8 @@ cd ../application
 terragrunt output
 ```
 
+---
+
 ## Module Documentation
 
 Each module has its own README.md with:
@@ -217,7 +248,9 @@ Each module has its own README.md with:
 - Outputs
 - Security considerations
 
-See individual module directories for details.
+See individual module directories in `infra/terraform/modules/` for details.
+
+---
 
 ## Environment-Specific Configuration
 
@@ -236,6 +269,8 @@ See individual module directories for details.
 - IAM auth enabled
 - Enhanced monitoring
 
+---
+
 ## After Deployment
 
 1. **Enable pgvector Extension**
@@ -245,7 +280,13 @@ See individual module directories for details.
    CREATE EXTENSION IF NOT EXISTS vector;
    ```
 
-2. **Set Up IAM Database User** (if using IAM auth)
+2. **Apply Database Schema**
+
+   ```sql
+   \i sql/schema_pgvector.sql
+   ```
+
+3. **Set Up IAM Database User** (if using IAM auth)
 
    ```sql
    CREATE USER fru_app_user;
@@ -253,7 +294,7 @@ See individual module directories for details.
    GRANT ALL ON DATABASE fru_db TO fru_app_user;
    ```
 
-3. **Run ETL Script**
+4. **Run ETL Script**
 
    ```bash
    export PGHOST=<aurora-endpoint>
@@ -261,10 +302,12 @@ See individual module directories for details.
    export PGUSER=fru_user
    export PGPASSWORD=<password>  # Or use IAM auth
    export PGDATABASE=fru_db
+   export FRU_CSV_PATH=data/raw/fridge_sales_with_rating.csv
+
    python backend/etl/load_openai_embeddings_to_pgvector.py
    ```
 
-4. **Deploy Frontend**
+5. **Deploy Frontend**
 
    ```bash
    cd frontend
@@ -274,6 +317,8 @@ See individual module directories for details.
      --distribution-id $(terragrunt output -raw cloudfront_distribution_id) \
      --paths "/*"
    ```
+
+---
 
 ## Troubleshooting
 
@@ -302,6 +347,8 @@ cd infra/terraform/environments/dev/infrastructure
 terragrunt apply
 ```
 
+---
+
 ## Destroying Infrastructure
 
 ```bash
@@ -313,4 +360,21 @@ terragrunt destroy
 ```
 
 **Warning**: This will delete all resources. Ensure you have backups!
+
+---
+
+## Local Development (Docker)
+
+For local development, use the Docker setup:
+
+```bash
+cd infra/docker
+docker compose --env-file ../../.env up -d
+```
+
+This provides:
+- Postgres + pgvector on `localhost:5432`
+- Flask API on `localhost:5000`
+
+See `README_RUN.md` for detailed local setup instructions.
 

@@ -9,7 +9,7 @@ This guide prepares you for interviews as a **Senior AWS GenAI Architect**, usin
 
 **Business need (FRU case):**
 Retail wants a system where stakeholders can type questions like:
-> “Why are Samsung customers unhappy in São Paulo?”
+> "Why are Samsung customers unhappy in São Paulo?"
 
 They expect:
 - grounded answers based on **real sales + feedback**
@@ -59,8 +59,8 @@ This combination is what a bar‑raiser expects.
 
 ## 4. Why Embeddings ≠ Reasoning
 
-OpenAI embeddings “index” real‑world customer feedback.
-Claude “explains" those records.
+OpenAI embeddings "index" real‑world customer feedback.
+Claude "explains" those records.
 
 **Do not ask LLM for facts.  
 Ask LLM to interpret facts.**
@@ -71,9 +71,9 @@ Ask LLM to interpret facts.**
 
 The strongest phrasing:
 
-> “RAG lets us decouple general intelligence from business truth.
+> "RAG lets us decouple general intelligence from business truth.
 > We retrieve real corporate data using embeddings and vector search,
-> then ask the model to reason over that factual context.”
+> then ask the model to reason over that factual context."
 
 Then point to FRU.
 
@@ -101,7 +101,7 @@ Spark solves:
 - table-level analytics
 
 ### Interview line:
-> “Spark does batch intelligence; pgvector does interactive intelligence.”
+> "Spark does batch intelligence; pgvector does interactive intelligence."
 
 ---
 
@@ -177,19 +177,19 @@ This earns instant respect from AWS interview loops.
 ## 13. Leadership Principles (FRU)
 
 **Customer Obsession**
-> “We grounded insights in real sales records to avoid hallucination.”
+> "We grounded insights in real sales records to avoid hallucination."
 
 **Dive Deep**
-> “We examined vector recall before scaling.”
+> "We examined vector recall before scaling."
 
 **Invent & Simplify**
-> “Combining embeddings + pgvector replaced brittle SQL heuristics.”
+> "Combining embeddings + pgvector replaced brittle SQL heuristics."
 
 **Bias for Action**
-> “We shipped the UI with analytics panel in 48 hours.”
+> "We shipped the UI with analytics panel in 48 hours."
 
 **Insist on High Standards**
-> “We rejected answer-only models that fabricate numbers.”
+> "We rejected answer-only models that fabricate numbers."
 
 ---
 
@@ -197,7 +197,7 @@ This earns instant respect from AWS interview loops.
 
 ### Samsung Complaints Surge
 - **Situation**: sudden spike in Samsung fridge sentiment
-- **Task**: stakeholders demanded “why”
+- **Task**: stakeholders demanded "why"
 - **Action**: ANN search across feedback + brand slice
 - **Result**: delivery delay cluster discovered; reorder logistics
 
@@ -349,7 +349,7 @@ That's it. This file should live at the root of your repo as `README_RUN.md` and
 
 ### 17.11 Terraform Production Readiness
 
-**From infra/terraform/README.md:**
+**From README_INFRA.md:**
 
 #### 7. **Interview & Production Readiness**
 - **Enterprise-grade practices**: Demonstrates understanding of IaC, security, and DevOps
@@ -358,7 +358,7 @@ That's it. This file should live at the root of your repo as `README_RUN.md` and
 
 ### 17.12 pgvector vs Spark Summary
 
-**From docs/architecture/pgvector_inference.md:**
+**From README.md Section 6:**
 
 Interview summary line:
 

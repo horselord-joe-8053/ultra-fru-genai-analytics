@@ -475,7 +475,7 @@ DELTA_TABLE_PATH=data/delta/fru_sales
 
 - **Main README**: `README.md` - Project overview
 - **Run Guide**: `README_RUN.md` - Detailed manual setup instructions
-- **Architecture**: `docs/architecture/` - System design docs
+- **Architecture**: See README.md Section 6 (pgvector) and Section 10 (Query Processing)
 
 ---
 
