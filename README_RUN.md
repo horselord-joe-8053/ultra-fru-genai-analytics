@@ -34,6 +34,19 @@ FRU (**Friday aRe Us**) is a GenAI analytics assistant over fridge sales data, b
 
 ---
 
+## 📋 Table of Contents
+
+1. [🧩 Prerequisites](#🧩-0-prerequisites)
+2. [🧠 Architecture Overview](#🧠-1-architecture-overview-high-level)
+3. [🧪 Local Developer Mode](#🧪-2-local-developer-mode-option-a--recommended)
+4. [🧪 Local "Prod Simulation" Mode](#🧪-3-local-prod-simulation-mode-option-a--docker-only)
+5. [🚀 AWS Production – ECS Fargate + Aurora + Bedrock](#🚀-4-aws-production--ecs-fargate--aurora--bedrock-option-a1--aurora)
+6. [☸️ Kubernetes / EKS Deployment](#☸️-5-kubernetes--eks-deployment-option-b)
+7. [🏗️ Terraform IaC](#🏗️-6-terraform-iac-option-c--fully-implemented)
+8. [🧯 Troubleshooting Checklist](#🧯-7-troubleshooting-checklist)
+
+---
+
 This guide explains **how to run** FRU manually in:
 
 1. Local Developer Mode (best for coding)
@@ -71,7 +84,7 @@ This guide explains **how to run** FRU manually in:
 
 ---
 
-## 🧠 1. Architecture Overview (High Level)
+# 🧠 1. Architecture Overview (High Level)
 
 Textual architecture:
 

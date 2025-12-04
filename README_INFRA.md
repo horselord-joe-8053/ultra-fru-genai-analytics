@@ -1,8 +1,25 @@
-# Infrastructure as Code (IaC) for FRU
+# 🏗️ Infrastructure as Code (IaC) for FRU
 
 This document provides comprehensive documentation for deploying FRU infrastructure to AWS using Terraform and Terragrunt.
 
-## Overview
+## 📋 Table of Contents
+
+1. [📖 Overview](#📖-1-overview)
+2. [💡 Why Terraform IaC? Necessity and Benefits](#💡-2-why-terraform-iac-necessity-and-benefits)
+3. [📁 Structure](#📁-3-structure)
+4. [🔒 Security Best Practices](#🔒-4-security-best-practices)
+5. [✅ Prerequisites](#✅-5-prerequisites)
+6. [🚀 Usage](#🚀-6-usage)
+7. [📚 Module Documentation](#📚-7-module-documentation)
+8. [🌍 Environment-Specific Configuration](#🌍-8-environment-specific-configuration)
+9. [🎯 After Deployment](#🎯-9-after-deployment)
+10. [🐛 Troubleshooting](#🐛-10-troubleshooting)
+11. [🗑️ Destroying Infrastructure](#🗑️-11-destroying-infrastructure)
+12. [🐳 Local Development (Docker)](#🐳-12-local-development-docker)
+
+---
+
+## 📖 1. Overview
 
 The `infra/` folder contains infrastructure code for FRU:
 
@@ -19,7 +36,7 @@ The `infra/` folder contains infrastructure code for FRU:
 
 ---
 
-## Why Terraform IaC? Necessity and Benefits
+# 💡 2. Why Terraform IaC? Necessity and Benefits
 
 ### The Problem: Manual Infrastructure Management
 
@@ -89,7 +106,7 @@ This implementation provides:
 
 ---
 
-## Structure
+# 📁 3. Structure
 
 ```
 infra/
@@ -121,7 +138,7 @@ infra/
 
 ---
 
-## Security Best Practices
+# 🔒 4. Security Best Practices
 
 ### IAM Role Separation
 
@@ -156,7 +173,7 @@ infra/
 
 ---
 
-## Prerequisites
+# ✅ 5. Prerequisites
 
 1. **Terraform** >= 1.5.0
    ```bash
@@ -184,7 +201,7 @@ infra/
 
 ---
 
-## Usage
+# 🚀 6. Usage
 
 ### Quick Start (Using Scripts)
 
@@ -239,7 +256,7 @@ terragrunt output
 
 ---
 
-## Module Documentation
+# 📚 7. Module Documentation
 
 Each module has its own README.md with:
 - Purpose and features
@@ -252,7 +269,7 @@ See individual module directories in `infra/terraform/modules/` for details.
 
 ---
 
-## Environment-Specific Configuration
+# 🌍 8. Environment-Specific Configuration
 
 ### Dev Environment
 
@@ -271,7 +288,7 @@ See individual module directories in `infra/terraform/modules/` for details.
 
 ---
 
-## After Deployment
+# 🎯 9. After Deployment
 
 1. **Enable pgvector Extension**
 
@@ -320,7 +337,7 @@ See individual module directories in `infra/terraform/modules/` for details.
 
 ---
 
-## Troubleshooting
+# 🐛 10. Troubleshooting
 
 ### State Lock Issues
 
@@ -349,7 +366,7 @@ terragrunt apply
 
 ---
 
-## Destroying Infrastructure
+# 🗑️ 11. Destroying Infrastructure
 
 ```bash
 cd infra/terraform/environments/dev/application
@@ -363,7 +380,7 @@ terragrunt destroy
 
 ---
 
-## Local Development (Docker)
+# 🐳 12. Local Development (Docker)
 
 For local development, use the Docker setup:
 

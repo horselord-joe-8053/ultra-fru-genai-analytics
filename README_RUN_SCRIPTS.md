@@ -4,17 +4,18 @@ This directory contains **idempotent shell scripts** to automate setup and deplo
 
 ## 📋 Table of Contents
 
-1. [Quick Start](#quick-start)
-2. [Script Structure](#script-structure)
-3. [Local Development](#local-development)
-4. [Local Production Simulation](#local-production-simulation)
-5. [AWS Deployment](#aws-deployment)
-6. [Common Utilities](#common-utilities)
-7. [Troubleshooting](#troubleshooting)
+1. [🎯 Quick Start](#🎯-1-quick-start)
+2. [📁 Script Structure](#📁-2-script-structure)
+3. [🧪 Local Development](#🧪-3-local-development)
+4. [🐳 Local Production Simulation](#🐳-4-local-production-simulation)
+5. [☁️ AWS Deployment](#☁️-5-aws-deployment)
+6. [🛠️ Common Utilities](#🛠️-6-common-utilities)
+7. [🔧 Script Features](#🔧-7-script-features)
+8. [🐛 Troubleshooting](#🐛-8-troubleshooting)
 
 ---
 
-## 🎯 Quick Start
+# 🎯 1. Quick Start
 
 ### Local Development (Recommended for coding)
 
@@ -56,7 +57,7 @@ This will:
 
 ---
 
-## 📁 Script Structure
+# 📁 2. Script Structure
 
 ```
 run_scripts/
@@ -103,7 +104,7 @@ run_scripts/
 
 ---
 
-## 🧪 Local Development
+# 🧪 3. Local Development
 
 ### Full Setup (One Command)
 
@@ -157,7 +158,7 @@ run_scripts/
 
 ---
 
-## 🐳 Local Production Simulation
+# 🐳 4. Local Production Simulation
 
 ### Full Deployment
 
@@ -197,7 +198,7 @@ docker compose down
 
 ---
 
-## ☁️ AWS Deployment
+# ☁️ 5. AWS Deployment
 
 ### Prerequisites
 
@@ -282,7 +283,7 @@ You can provide AWS credentials in **three ways** (in order of preference):
 
 ---
 
-## 🛠️ Common Utilities
+# 🛠️ 6. Common Utilities
 
 ### Logger (`common/logger.sh`)
 
@@ -317,7 +318,7 @@ wait_for_service "http://localhost:5000/health" 30 2
 
 ---
 
-## 🔧 Script Features
+# 🔧 7. Script Features
 
 All scripts are:
 
@@ -329,7 +330,7 @@ All scripts are:
 
 ---
 
-## 🐛 Troubleshooting
+# 🐛 8. Troubleshooting
 
 ### "Command not found" errors
 

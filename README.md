@@ -9,6 +9,22 @@
 
 ---
 
+## 📋 Table of Contents
+
+1. [🧠 Concept](#🧠-1-concept)
+2. [🧩 Architecture Overview](#🧩-2-architecture-overview)
+3. [🗂 Project Layout](#🗂-3-project-layout)
+4. [⚡️ Local Quickstart](#⚡️-4-local-quickstart-works-without-aws)
+5. [🔥 Analytics with Spark + Delta](#🔥-5-analytics-with-spark--delta)
+6. [🧠 Intelligence Model: OpenAI Embeddings + pgvector](#🧠-6-intelligence-model-openai-embeddings--pgvector)
+7. [🦾 Integrating Bedrock Claude](#🦾-7-integrating-bedrock-claude)
+8. [🏗 Full AWS Deployment](#🏗-8-full-aws-deployment)
+9. [🛡 Governance & Safety](#🛡-9-governance--safety)
+10. [🤖 Query Processing Architecture](#🤖-10-query-processing-architecture) ⭐
+11. [📌 Next Steps (Roadmap)](#📌-11-next-steps-roadmap)
+
+---
+
 FRU (**Friday aRe Us**) is a real, end-to-end **conversational analytics system** built over refrigerator sales data.
 
 It demonstrates:
@@ -19,13 +35,13 @@ It demonstrates:
 - ✔️ **Low-cost inference at scale**
 - ✔️ **AWS-native deployment story**
 - ✔️ **Infrastructure as Code (Terraform + Terragrunt)** - Production-ready IaC with modular architecture, environment management, and security best practices
-- ✔️ **Agent-based query processing** (optional) - Autonomous ReAct agent for complex queries (see Section 10)
+- ⭐ **Agent-based query processing** (optional) - Autonomous ReAct agent for complex queries - **See [Section 10](#🤖-10-query-processing-architecture) for detailed architecture**
 
 It is designed as a working prototype that demonstrates production-ready GenAI architecture patterns.
 
 ---
 
-# 🧠 **1. Concept**
+# 🧠 1. Concept
 FRU (**Friday aRe Us**) is a **conversational analytics assistant** for fridge sales.
 
 Typical user asks:
@@ -37,7 +53,7 @@ The system produces grounded insights using **real sales + feedback data**, not 
 
 ---
 
-# 🧩 **2. Architecture Overview**
+# 🧩 2. Architecture Overview
 
 ### 🔵 *The Golden Separation*
 
@@ -97,12 +113,15 @@ This separation is a fundamental architectural principle that enables scalable, 
 
 ---
 
-# 🗂 **3. Suggested Repository Layout**
+# 🗂 3. Project Layout
 
 ```text
-fru-genai-analytics/
+fru-genai-analytics-all/
 │
 ├─ README.md                     # ← This file
+├─ README_RUN.md                 # Manual runbook
+├─ README_RUN_SCRIPTS.md         # Automated scripts guide
+├─ README_INFRA.md               # Infrastructure as Code docs
 ├─ requirements.txt
 │
 ├─ data/
@@ -112,32 +131,73 @@ fru-genai-analytics/
 │       └─ nlq_training_pairs.jsonl
 │
 ├─ sql/
-│   └─ schema_pgvector.sql
+│   └─ schema_pgvector.sql       # Database schema
 │
 ├─ backend/
 │   ├─ api/
-│   │   └─ app.py
+│   │   └─ app.py                # Flask API with /query and /query-v2 endpoints
 │   ├─ etl/
 │   │   └─ load_openai_embeddings_to_pgvector.py
-│   └─ llm/
-│       └─ bedrock_client.py
+│   ├─ llm/
+│   │   └─ bedrock_client.py
+│   ├─ agents/                   # Agent-based query processing (Enhancement_C)
+│   │   ├─ query_agent.py
+│   │   ├─ logger.py
+│   │   ├─ metrics.py
+│   │   ├─ prompts.py
+│   │   └─ tools/
+│   │       ├─ sql_tool.py
+│   │       ├─ semantic_search_tool.py
+│   │       └─ sql_generator_tool.py
+│   └─ services/
+│       ├─ analytics_scheduler.py
+│       ├─ save_analytics_to_db.py
+│       └─ feature_flags.py
+│
+├─ frontend/
+│   ├─ src/
+│   │   ├─ App.tsx
+│   │   └─ components/
+│   │       ├─ Chat.tsx
+│   │       ├─ BatchAnalyticsPanel.tsx
+│   │       └─ StatsPanel.tsx
+│   └─ package.json
 │
 ├─ spark_jobs/
-│   ├─ ingest_delta.py
-│   └─ generate_training_data.py
+│   ├─ ingest_delta.py           # CSV → Delta Lake
+│   ├─ generate_training_data.py  # NLQ→SQL training pairs
+│   └─ run_analytics.py           # Batch analytics
 │
-└─ infra/
-    ├─ docker/
-    │   ├─ Dockerfile.api
-    │   └─ docker-compose.yml
-    ├─ terraform/
-    │   └─ main.tf
-    └─ README_INFRA.md
+├─ run_scripts/                   # Automated setup/deployment scripts
+│   ├─ local/                     # Local development
+│   ├─ local-prod/                # Local production simulation
+│   ├─ aws/                       # AWS deployments (ECS, EKS, Terraform)
+│   └─ common/                    # Shared utilities
+│
+├─ infra/
+│   ├─ docker/
+│   │   ├─ Dockerfile.api
+│   │   └─ docker-compose.yml
+│   └─ terraform/
+│       ├─ modules/               # Reusable Terraform modules
+│       │   ├─ vpc/
+│       │   ├─ aurora/
+│       │   ├─ iam/
+│       │   ├─ secrets-manager/
+│       │   ├─ ecs/
+│       │   ├─ alb/
+│       │   ├─ frontend/
+│       │   ├─ infrastructure/    # Wrapper module
+│       │   └─ application/      # Wrapper module
+│       └─ environments/          # Terragrunt configs (dev/prod)
+│
+└─ study/
+    └─ ARCHITECT_STUDY_GUIDE_DETAILED.md
 ```
 
 ---
 
-# ⚡️ **4. Local Quickstart (Works Without AWS)**
+# ⚡️ 4. Local Quickstart (Works Without AWS)
 
 > Easiest way to play with FRU and test embeddings.
 
@@ -222,7 +282,26 @@ This returns the latest batch analytics results from Spark + Delta, including sa
 
 ---
 
-# 🔥 **5. Analytics with Spark + Delta**
+## 4.6 Start Frontend (Optional)
+
+The project includes a React + Vite frontend with a chat interface, batch analytics panel, and query statistics.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The frontend will be available at `http://localhost:5173` and includes:
+- **Chat interface** - Interactive query interface
+- **Batch Analytics Panel** - Displays Spark batch analytics results with auto-refresh
+- **Query Stats Panel** - Shows query statistics and performance metrics
+
+> **Note**: For automated setup, use `./run_scripts/local/run.sh` which handles frontend setup and startup automatically.
+
+---
+
+# 🔥 5. Analytics with Spark + Delta
 
 > This is your enterprise “big data platform” story.
 
@@ -254,7 +333,7 @@ You can later use this JSONL to:
 
 ---
 
-# 🧠 **6. Intelligence Model: OpenAI Embeddings + pgvector**
+# 🧠 6. Intelligence Model: OpenAI Embeddings + pgvector
 
 > The beating heart of FRU.
 
@@ -380,7 +459,7 @@ You could attempt to use Spark SQL directly at inference time, but downsides inc
 
 ---
 
-# 🦾 **7. Integrating Bedrock Claude**
+# 🦾 7. Integrating Bedrock Claude
 
 Claude sees:
 
@@ -416,7 +495,7 @@ Claude returns:
 
 ---
 
-# 🏗 **8. Full AWS Deployment**
+# 🏗 8. Full AWS Deployment
 
 ### 8.1 S3 (raw + delta storage)
 
@@ -517,7 +596,7 @@ And, optionally, restrict to the Claude model ID you use.
 
 ---
 
-# 🛡 **9. Governance & Safety**
+# 🛡 9. Governance & Safety
 
 - **OpenAI** only used for **offline + query-time embeddings**, not for final narrative.
 - **Claude** (Bedrock) used for answers:
@@ -542,7 +621,23 @@ Add:
 
 ---
 
-# 🤖 **10. Query Processing Architecture**
+# 🤖 10. Query Processing Architecture
+
+<div align="center">
+
+**⭐ FEATURED ARCHITECTURE ⭐**
+
+</div>
+
+> **🎯 Key Innovation**: FRU's query processing has evolved from a simple keyword-based system to an **autonomous agent-based system** using the ReAct pattern. This section describes the complete evolution path (Current → Enhancement_A → Enhancement_B → Enhancement_C) and the implementation details of the agent-based system that enables intelligent, multi-step query processing.
+
+**What makes this special:**
+- 🤖 **Autonomous Planning**: LLM decides the analysis approach dynamically
+- 🔧 **Tool-Based Architecture**: Modular tools (SQL, semantic search, SQL generation)
+- 🔄 **Iterative Refinement**: Agent can iterate and refine based on results
+- 📊 **Production-Ready**: Feature flags, metrics, logging, and gradual rollout support
+
+---
 
 FRU's query processing has evolved from a simple keyword-based system to an intelligent, agent-based autonomous system. This section describes the current implementation and the evolution path.
 
@@ -758,15 +853,17 @@ Set `USE_AGENT_QUERY=false` to disable agent and fall back to original `/query` 
 
 ---
 
-# 📌 **11. Next Steps (Roadmap)**
+# 📌 11. Next Steps (Roadmap)
 
-- Wire `/query` into a **simple React UI** for business stakeholders.
-- Implement:
-  - SQL generation using the NLQ→SQL dataset (`data/synthetic/nlq_training_pairs.jsonl`).
-  - A LoRA training script (SageMaker or local) for a small NLQ→SQL model.
-- Add:
-  - Canary deployments for new models.
-  - Evaluation harness: “Golden questions” + acceptance thresholds.
+- ✅ **React UI** - Already implemented with Chat interface, Batch Analytics Panel, and Query Stats
+- ✅ **Agent-based query processing** - Implemented (Enhancement_C) with ReAct pattern
+- ✅ **Batch analytics integration** - Spark analytics scheduled and displayed in UI
+- **Future enhancements:**
+  - Fine-tune NLQ→SQL model using the training dataset (`data/synthetic/nlq_training_pairs.jsonl`)
+  - LoRA training script (SageMaker or local) for a small NLQ→SQL model
+  - Canary deployments for new models
+  - Evaluation harness: "Golden questions" + acceptance thresholds
+  - Enhanced agent tools (e.g., data visualization, report generation)
 
 ---
 
