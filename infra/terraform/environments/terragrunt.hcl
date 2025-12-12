@@ -10,7 +10,12 @@ remote_state {
     key            = "${path_relative_to_include()}/terraform.tfstate"
     region         = get_env("AWS_REGION", "us-east-1")
     encrypt        = true
-    dynamodb_table = get_env("TF_STATE_LOCK_TABLE", "fru-terraform-locks")
+    
+    # AWS S3 now provides a native state lock table. Therefore it is prefered
+    # that we use a lockfile from S3 as a single service, instead of managing 
+    # 2 services (S3 bucket and DynamoDB table). Still, needs testing.
+    # dynamodb_table = get_env("TF_STATE_LOCK_TABLE", "fru-terraform-locks")
+    use_lockfile   = true
   }
 
   generate = {

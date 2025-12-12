@@ -2,7 +2,7 @@
 # Utility to load .env file and export variables
 # Usage: source load-env.sh [path/to/.env]
 
-ENV_FILE="${1:-.env}"
+ENV_FILE=".env"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 

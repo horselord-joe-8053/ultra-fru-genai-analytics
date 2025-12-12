@@ -30,11 +30,12 @@ fi
 
 deploy_terragrunt() {
     log_step "Deploying infrastructure with Terragrunt"
+    log_info "REPO_ROOT: $REPO_ROOT"
     log_info "Environment: $ENVIRONMENT"
     log_info "Layer: $LAYER"
     
     # Check AWS credentials
-    "$SCRIPT_DIR/../check-aws-credentials.sh" || exit 1
+    "$SCRIPT_DIR/../aws/check-aws-credentials.sh" || exit 1
     
     # Check if Terragrunt is installed
     if ! command_exists terragrunt; then
@@ -62,8 +63,8 @@ deploy_terragrunt() {
         export OPENAI_API_KEY
     fi
     
-    if [ -n "$DB_PASSWORD" ]; then
-        export DB_PASSWORD
+    if [ -n "$PGPASSWORD" ]; then
+        export PGPASSWORD
     fi
     
     ENV_DIR="$TERRAFORM_DIR/$ENVIRONMENT"

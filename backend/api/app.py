@@ -318,6 +318,12 @@ def build_claude_user_payload(
     }
     return json.dumps(payload, ensure_ascii=False)
 
+# Trying to ensure agent is initialized
+def ensure_agent():
+    if _connection_pool is None:
+        init_db_pool()
+    if query_agent is None:
+        init_agent()
 
 # ---------- Flask routes ----------
 
@@ -414,6 +420,12 @@ def health():
 @app.route("/query-v2", methods=["POST"])
 def query_v2():
     """New agent-based query endpoint."""
+    
+    # Trying to ensure agent is initialized
+    global query_agent
+    if USE_AGENT_QUERY and query_agent is None:
+        ensure_agent()
+    
     if not USE_AGENT_QUERY or query_agent is None:
         return jsonify({
             "error": "Agent-based query processing is disabled",
@@ -527,6 +539,8 @@ def query():
 if __name__ == "__main__":
     # Initialize connection pool on startup
     init_db_pool()
+
+    init_agent()
     
     # Start analytics scheduler (if enabled)
     enable_scheduler = os.environ.get("ENABLE_ANALYTICS_SCHEDULER", "false").lower() == "true"

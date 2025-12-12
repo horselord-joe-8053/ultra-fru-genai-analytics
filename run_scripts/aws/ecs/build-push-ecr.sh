@@ -16,7 +16,7 @@ build_and_push_ecr() {
     log_step "Building and pushing Docker image to ECR"
     
     # Check AWS credentials
-    "$SCRIPT_DIR/../check-aws-credentials.sh" || exit 1
+    "$SCRIPT_DIR/../aws/check-aws-credentials.sh" || exit 1
     
     # Load environment variables
     load_env_file
@@ -46,8 +46,8 @@ build_and_push_ecr() {
     
     # Build Docker image
     log_info "Building Docker image..."
-    cd "$REPO_ROOT/backend"
-    docker build -t "$ECR_REPO_NAME:$IMAGE_TAG" -f ../infra/docker/Dockerfile.api .
+    cd "$REPO_ROOT"
+    docker build -t "$ECR_REPO_NAME:$IMAGE_TAG" -f $REPO_ROOT/infra/docker/Dockerfile.api .
     
     # Tag image
     log_info "Tagging image..."
