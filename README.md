@@ -9,7 +9,7 @@
 
 ---
 
-FRU (**Friday aRe Us**) is a real, end-to-end **conversational analytics system** built over refrigerator sales data.
+FRU (**Fridges R Us**) is a real, end-to-end **conversational analytics system** built over refrigerator sales data.
 
 It demonstrates:
 
@@ -25,7 +25,7 @@ It is built specifically to support a **Senior AWS GenAI Architect interview** a
 ---
 
 # 🧠 **1. Concept**
-FRU (**Friday aRe Us**) is a **conversational analytics assistant** for fridge sales.
+FRU (**Fridges R Us**) is a **conversational analytics assistant** for fridge sales.
 
 Typical user asks:
 > _“Why are Samsung customers unhappy?”_  

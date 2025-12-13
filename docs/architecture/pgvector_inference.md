@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-FRU (Friday aRe Us) ingests refrigerator sales and customer feedback data.
+FRU (Fridges R Us) ingests refrigerator sales and customer feedback data.
 We separate concerns into three major layers:
 
 - **Spark + Delta Lake** → offline analytics, ETL/ELT, feature & training data generation
