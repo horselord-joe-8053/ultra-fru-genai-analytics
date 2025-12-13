@@ -52,7 +52,7 @@ This guide provides detailed manual instructions for running FRU in various envi
 
 ---
 
-FRU (**Friday aRe Us**) is a GenAI analytics assistant over fridge sales data, built with:
+FRU (**Fridges R Us**) is a GenAI analytics assistant over fridge sales data, built with:
 
 - OpenAI **embeddings** (text-embedding-3-small)
 - Postgres + **pgvector** (semantic store)

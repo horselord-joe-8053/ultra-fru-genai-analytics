@@ -1,7 +1,7 @@
 # 📦 FRU GenAI Analytics Overview 
 **(Spark + Delta + OpenAI Embeddings + pgvector + Bedrock + AWS)**
 
-FRU (**Friday aRe Us**) is a real, end-to-end **conversational analytics system** built over refrigerator sales data.
+FRU (**Fridges R Us**) is a real, end-to-end **conversational analytics system** built over refrigerator sales data.
 
 ## 📋 Table of Contents
 
@@ -82,7 +82,7 @@ It is designed as a working prototype that demonstrates production-ready GenAI a
 ---
 
 # 🧠 1. Concept
-FRU (**Friday aRe Us**) is a **conversational analytics assistant** for fridge sales.
+FRU (**Fridges R Us**) is a **conversational analytics assistant** for fridge sales.
 
 Typical user asks:
 > _“Why are Samsung customers unhappy?”_  

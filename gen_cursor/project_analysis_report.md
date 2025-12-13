@@ -5,7 +5,7 @@
 
 ## Executive Summary
 
-This report analyzes the FRU (Friday aRe Us) GenAI Analytics project to verify:
+This report analyzes the FRU (Fridges R Us) GenAI Analytics project to verify:
 1. Completeness of `requirements.txt`
 2. Completeness of `README_RUN.md` setup instructions
 3. Missing steps or dependencies in the runbook

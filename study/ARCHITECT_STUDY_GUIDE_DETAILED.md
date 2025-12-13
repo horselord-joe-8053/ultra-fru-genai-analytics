@@ -1,7 +1,7 @@
 # STUDY GUIDE FOR ARCHITECT FOR AWS GENAI TIED TO THIS PROJECT.md
 
 ## 🎯 Goal
-This guide prepares you for interviews as a **Senior AWS GenAI Architect**, using the **FRU (Friday aRe Us)** fridge sales analytics project as the concrete, end‑to‑end example.
+This guide prepares you for interviews as a **Senior AWS GenAI Architect**, using the **FRU (Fridges R Us)** fridge sales analytics project as the concrete, end‑to‑end example.
 
 ---
 

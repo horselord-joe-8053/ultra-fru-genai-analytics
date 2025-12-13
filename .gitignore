@@ -36,6 +36,9 @@ build/
 *.swo
 *~
 
+# Generated files
+cursor_gen/
+
 # Logs
 *.log
 logs/
