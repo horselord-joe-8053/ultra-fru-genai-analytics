@@ -148,6 +148,20 @@ TF_STATE_BUCKET=fru-terraform-state-<your-account-id>
 CONTAINER_IMAGE=<ecr-repository-uri>:latest
 ```
 
+**Why Use Bedrock-Admin Credentials Instead of Admin Credentials?**
+
+This follows the **principle of least privilege** for security:
+
+- **`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (bedrock-admin)**: Used by the **application code** (Flask API) to call Bedrock APIs. The application only needs Bedrock access, not full admin permissions. If the application is compromised, the damage is limited to Bedrock operations only.
+
+- **`AWS_PROFILE=admin`**: Used by **infrastructure tools** (Terraform, AWS CLI, ECR scripts) for managing AWS resources. These tools need admin access to create/modify infrastructure, but this is separate from application runtime.
+
+**Separation of Concerns:**
+- **Admin credentials** → Infrastructure management (Terraform, ECR, S3, etc.)
+- **Bedrock-admin credentials** → Application runtime (Bedrock API calls)
+
+**Note:** In production (ECS deployment), the application should use **IAM roles** instead of access keys in `.env`. The access keys in `.env` are primarily for local development and initial setup.
+
 **Important Notes:**
 - Replace `<your-account-id>` with your AWS account ID (get it with: `aws sts get-caller-identity --profile admin --query Account --output text`)
 - The `BEDROCK_MODEL_ID` can be changed to other Claude models if needed:
