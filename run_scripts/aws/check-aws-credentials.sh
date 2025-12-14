@@ -29,18 +29,50 @@ check_aws_credentials_from_env() {
     
     local missing_vars=0
     
-    # Check AWS_ACCESS_KEY_ID
-    if [ -z "$AWS_ACCESS_KEY_ID" ]; then
-        log_warning "AWS_ACCESS_KEY_ID not set in .env (optional for AWS deployment, required for local)"
+    # Check new credential variables (for profile setup)
+    if [ -z "${AWS_ADMIN_ACCESS_KEY_ID:-}" ]; then
+        log_warning "AWS_ADMIN_ACCESS_KEY_ID not set in .env"
+        missing_vars=1
     else
-        log_success "AWS_ACCESS_KEY_ID is set"
+        log_success "AWS_ADMIN_ACCESS_KEY_ID is set"
     fi
     
-    # Check AWS_SECRET_ACCESS_KEY
-    if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
-        log_warning "AWS_SECRET_ACCESS_KEY not set in .env (optional for AWS deployment, required for local)"
+    if [ -z "${AWS_ADMIN_SECRET_ACCESS_KEY:-}" ]; then
+        log_warning "AWS_ADMIN_SECRET_ACCESS_KEY not set in .env"
+        missing_vars=1
     else
-        log_success "AWS_SECRET_ACCESS_KEY is set"
+        log_success "AWS_ADMIN_SECRET_ACCESS_KEY is set"
+    fi
+    
+    if [ -z "${AWS_BEDROCK_ACCESS_KEY_ID:-}" ]; then
+        log_warning "AWS_BEDROCK_ACCESS_KEY_ID not set in .env"
+        missing_vars=1
+    else
+        log_success "AWS_BEDROCK_ACCESS_KEY_ID is set"
+    fi
+    
+    if [ -z "${AWS_BEDROCK_SECRET_ACCESS_KEY:-}" ]; then
+        log_warning "AWS_BEDROCK_SECRET_ACCESS_KEY not set in .env"
+        missing_vars=1
+    else
+        log_success "AWS_BEDROCK_SECRET_ACCESS_KEY is set"
+    fi
+    
+    # Check for old variables (deprecated)
+    if [ -n "${AWS_ACCESS_KEY_ID:-}" ] || [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+        log_warning "Old AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY found in .env (deprecated)"
+        log_info "  Please migrate to AWS_ADMIN_* and AWS_BEDROCK_* variables"
+        log_info "  Run: ./run_scripts/aws/setup-aws-profiles.sh to set up profiles"
+    fi
+    
+    if [ $missing_vars -eq 1 ]; then
+        log_error "Missing required AWS credential variables in .env"
+        log_info "Required variables:"
+        log_info "  - AWS_ADMIN_ACCESS_KEY_ID (for infrastructure operations)"
+        log_info "  - AWS_ADMIN_SECRET_ACCESS_KEY"
+        log_info "  - AWS_BEDROCK_ACCESS_KEY_ID (for application runtime)"
+        log_info "  - AWS_BEDROCK_SECRET_ACCESS_KEY"
+        log_info "Run: ./run_scripts/aws/setup-aws-profiles.sh after setting these variables"
     fi
     
     # Check AWS_REGION
@@ -60,17 +92,26 @@ check_aws_credentials_from_env() {
     fi
     
     # Check AWS_PROFILE
-    if [ -z "$AWS_PROFILE" ]; then
-        log_info "AWS_PROFILE not set in .env (will use default AWS credentials)"
+    if [ -z "${AWS_PROFILE:-}" ]; then
+        log_info "AWS_PROFILE not set in .env (will default to 'admin' for infrastructure scripts)"
     else
         log_success "AWS_PROFILE is set: $AWS_PROFILE"
-        # Verify profile exists
-        if ! aws configure list-profiles 2>/dev/null | grep -q "^$AWS_PROFILE$"; then
-            log_warning "AWS profile '$AWS_PROFILE' not found in ~/.aws/credentials"
-            log_info "  Run: aws configure --profile $AWS_PROFILE"
-        else
-            log_success "AWS profile '$AWS_PROFILE' exists"
-        fi
+    fi
+    
+    # Verify profiles exist
+    log_info "Checking AWS profiles..."
+    if aws configure list-profiles 2>/dev/null | grep -q "^admin$"; then
+        log_success "AWS profile 'admin' exists (for infrastructure operations)"
+    else
+        log_warning "AWS profile 'admin' not found in ~/.aws/credentials"
+        log_info "  Run: ./run_scripts/aws/setup-aws-profiles.sh to set up profiles"
+    fi
+    
+    if aws configure list-profiles 2>/dev/null | grep -q "^bedrock$"; then
+        log_success "AWS profile 'bedrock' exists (for application runtime)"
+    else
+        log_warning "AWS profile 'bedrock' not found in ~/.aws/credentials"
+        log_info "  Run: ./run_scripts/aws/setup-aws-profiles.sh to set up profiles"
     fi
     
     return 0

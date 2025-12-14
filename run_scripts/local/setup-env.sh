@@ -5,11 +5,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/../common/logger.sh"
-
-ENV_FILE="$REPO_ROOT/.env"
-ENV_TEMPLATE="$REPO_ROOT/.env.example"
+source "$SCRIPT_DIR/../common/load-env.sh"
+# Now REPO_ROOT, ENV_FILE, and ENV_TEMPLATE are available from load-env.sh
 
 setup_env_file() {
     log_step "Setting up .env file"
@@ -43,11 +41,17 @@ OPENAI_API_KEY=sk-...
 AWS_REGION=us-east-1
 BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240229-v1:0
 
-# Optional: AWS Credentials (for local development only)
-# If not set, boto3 will use ~/.aws/credentials or IAM role
-# AWS_ACCESS_KEY_ID=your-access-key
-# AWS_SECRET_ACCESS_KEY=your-secret-key
-# AWS_SESSION_TOKEN=...  # If using temporary credentials
+# AWS Credentials for Profiles (required for AWS operations)
+# These are used to populate ~/.aws/credentials profiles
+# Run: ./run_scripts/aws/setup-aws-profiles.sh after setting these
+# AWS_ADMIN_ACCESS_KEY_ID=your-admin-access-key
+# AWS_ADMIN_SECRET_ACCESS_KEY=your-admin-secret-key
+# AWS_BEDROCK_ACCESS_KEY_ID=your-bedrock-access-key
+# AWS_BEDROCK_SECRET_ACCESS_KEY=your-bedrock-secret-key
+
+# AWS Profile Selection
+# AWS_PROFILE=admin  # For infrastructure scripts (default: admin)
+# For application runtime in Docker, set AWS_PROFILE=admin in docker-compose.yml
 
 # Optional: Data Paths
 # FRU_CSV_PATH=data/raw/fridge_sales_with_rating.csv

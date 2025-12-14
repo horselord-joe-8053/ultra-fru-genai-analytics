@@ -620,11 +620,14 @@ Later evolution:
 **Manual steps (for reference):**
 ```bash
 docker build -f infra/docker/Dockerfile.api -t fru-api .
-aws ecr create-repository --repository-name fru-api
+aws ecr create-repository --repository-name fru-api --profile admin
 # tag & push
 ```
 
-> **Note:** The automated script checks if the image already exists in ECR before building, making it idempotent and faster for repeated runs.
+> **Note:** 
+> - The automated script checks if the image already exists in ECR before building, making it idempotent and faster for repeated runs
+> - Uses `admin` profile for infrastructure operations (ECR, S3, etc.)
+> - Application runtime uses `bedrock` profile (or `admin` for local Docker development)
 
 ---
 

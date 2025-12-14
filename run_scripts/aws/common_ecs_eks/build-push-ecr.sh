@@ -7,7 +7,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$SCRIPT_DIR/../../common/logger.sh"
+# Save SCRIPT_DIR before sourcing load-env.sh (which sets its own SCRIPT_DIR)
+BUILD_SCRIPT_DIR="$SCRIPT_DIR"
 source "$SCRIPT_DIR/../../common/load-env.sh"
+# Restore our SCRIPT_DIR
+SCRIPT_DIR="$BUILD_SCRIPT_DIR"
 
 ECR_REPO_NAME="fru-api"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
@@ -21,8 +25,12 @@ build_and_push_ecr() {
     # Load environment variables
     load_env_file
     
+    # Use admin profile for infrastructure operations (ECR)
+    AWS_PROFILE="${AWS_PROFILE:-admin}"
+    log_info "Using AWS profile: $AWS_PROFILE (for infrastructure operations)"
+    
     # Get AWS account and region
-    AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+    AWS_ACCOUNT_ID=$(aws sts get-caller-identity --profile "$AWS_PROFILE" --query Account --output text)
     AWS_REGION="${AWS_REGION:-us-east-1}"
     ECR_URL="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
     ECR_REPO_URI="$ECR_URL/$ECR_REPO_NAME"
@@ -31,9 +39,9 @@ build_and_push_ecr() {
     log_info "Image Tag: $IMAGE_TAG"
     
     # Check if ECR repository exists, create if not
-    if ! aws ecr describe-repositories --repository-names "$ECR_REPO_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+    if ! aws ecr describe-repositories --profile "$AWS_PROFILE" --repository-names "$ECR_REPO_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
         log_info "ECR repository does not exist, creating..."
-        aws ecr create-repository --repository-name "$ECR_REPO_NAME" --region "$AWS_REGION"
+        aws ecr create-repository --profile "$AWS_PROFILE" --repository-name "$ECR_REPO_NAME" --region "$AWS_REGION"
         log_success "ECR repository created"
     else
         log_info "ECR repository already exists"
@@ -41,7 +49,7 @@ build_and_push_ecr() {
     
     # Login to ECR
     log_info "Logging in to ECR..."
-    aws ecr get-login-password --region "$AWS_REGION" | \
+    aws ecr get-login-password --profile "$AWS_PROFILE" --region "$AWS_REGION" | \
         docker login --username AWS --password-stdin "$ECR_URL"
     
     # Build Docker image

@@ -194,7 +194,13 @@ infra/
    aws configure
    ```
 
-4. **S3 Bucket for Terraform State**
+4. **AWS Credentials Setup**
+   - **Two profiles required**: `admin` (infrastructure) and `bedrock` (application runtime)
+   - **Why both?** Separation of concerns: infrastructure scripts need admin permissions (ECR, S3, Terraform), while application code only needs Bedrock access (least privilege)
+   - **Setup**: Add `AWS_ADMIN_*` and `AWS_BEDROCK_*` credentials to `.env`, then run `./run_scripts/aws/setup-aws-profiles.sh`
+   - **Note**: Scripts automatically use `admin` profile; application uses `bedrock` profile (or `admin` for local Docker)
+
+5. **S3 Bucket for Terraform State**
    - **Automated**: The deployment scripts automatically create the S3 bucket if it doesn't exist
    - **Manual** (optional): Create an S3 bucket for storing Terraform state
    - Set environment variable in `.env`:

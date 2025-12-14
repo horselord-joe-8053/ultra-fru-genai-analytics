@@ -193,11 +193,16 @@ OPENAI_API_KEY=sk-...
 AWS_REGION=us-east-1
 BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240229-v1:0
 
-# Optional: AWS Credentials (for local development only)
-# If not set, boto3 will use ~/.aws/credentials or IAM role
-# AWS_ACCESS_KEY_ID=your-access-key
-# AWS_SECRET_ACCESS_KEY=your-secret-key
-# AWS_SESSION_TOKEN=...  # If using temporary credentials
+# AWS Credentials for Profiles (required for AWS operations)
+# These are synced to ~/.aws/credentials profiles via setup-aws-profiles.sh
+# AWS_ADMIN_ACCESS_KEY_ID=your-admin-access-key (for infrastructure)
+# AWS_ADMIN_SECRET_ACCESS_KEY=your-admin-secret-key
+# AWS_BEDROCK_ACCESS_KEY_ID=your-bedrock-access-key (for application)
+# AWS_BEDROCK_SECRET_ACCESS_KEY=your-bedrock-secret-key
+
+# AWS Profile Selection
+# AWS_PROFILE=admin  # For infrastructure scripts (default)
+# For application runtime, boto3 uses AWS_PROFILE environment variable
 
 # Optional: Data Paths
 # FRU_CSV_PATH=data/raw/fridge_sales_with_rating.csv
@@ -211,8 +216,13 @@ BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240229-v1:0
 
 **Important:** Fill in:
 - `OPENAI_API_KEY` (required)
-- `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (optional for local dev - can use `~/.aws/credentials` instead)
-- Other optional settings as needed
+- `AWS_ADMIN_ACCESS_KEY_ID` and `AWS_ADMIN_SECRET_ACCESS_KEY` (for infrastructure operations)
+- `AWS_BEDROCK_ACCESS_KEY_ID` and `AWS_BEDROCK_SECRET_ACCESS_KEY` (for application runtime)
+- Run `./run_scripts/aws/setup-aws-profiles.sh` to sync credentials to `~/.aws/credentials` profiles
+
+**Why Two Sets of Credentials?**
+- **Admin credentials**: Infrastructure scripts (Terraform, ECR, S3) need full admin permissions
+- **Bedrock credentials**: Application code only needs Bedrock access (least privilege security)
 
 > Tip: keep `.env` out of git (already in `.gitignore`). For production, use IAM roles instead of credentials.
 

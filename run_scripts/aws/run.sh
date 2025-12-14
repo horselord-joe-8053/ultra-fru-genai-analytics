@@ -18,7 +18,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/../common/logger.sh"
+# Save SCRIPT_DIR before sourcing load-env.sh (which sets its own SCRIPT_DIR)
+AWS_SCRIPT_DIR="$SCRIPT_DIR"
 source "$SCRIPT_DIR/../common/load-env.sh"
+# Restore our SCRIPT_DIR
+SCRIPT_DIR="$AWS_SCRIPT_DIR"
 
 # ============================================================================
 # DEFAULT VALUES (can be overridden via arguments or environment variables)
@@ -221,6 +225,11 @@ main() {
         show_usage
         exit 0
     fi
+    
+    # Setup AWS profiles from .env (must be done before credential checks)
+    log_step "Setting up AWS profiles from .env"
+    "$SCRIPT_DIR/setup-aws-profiles.sh" || exit 1
+    echo ""
     
     # Check AWS credentials for actual deployments
     "$SCRIPT_DIR/check-aws-credentials.sh" || exit 1

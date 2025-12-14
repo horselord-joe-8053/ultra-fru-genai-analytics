@@ -34,9 +34,8 @@ services:
       # OpenAI embeddings
       OPENAI_API_KEY: ${OPENAI_API_KEY}
 
-      # Bedrock
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      # Bedrock (uses AWS profile for credentials)
+      AWS_PROFILE: ${AWS_PROFILE:-admin}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       BEDROCK_MODEL_ID: ${BEDROCK_MODEL_ID:-anthropic.claude-3-haiku-20240307-v1:0}
 

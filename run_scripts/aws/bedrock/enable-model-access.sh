@@ -23,7 +23,7 @@ DEFAULT_REGION="us-east-1"
 PROVIDER="${DEFAULT_PROVIDER}"
 MODEL_ID="${BEDROCK_MODEL_ID:-$DEFAULT_MODEL}"
 AWS_REGION="${AWS_REGION:-$DEFAULT_REGION}"
-AWS_PROFILE="${AWS_PROFILE:-}"
+AWS_PROFILE="${AWS_PROFILE:-admin}"  # Default to admin for infrastructure operations
 
 # ============================================================================
 # Helper Functions (defined early for use in argument parsing)

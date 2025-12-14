@@ -15,7 +15,7 @@ load_env_file
 
 # Get configuration
 AWS_REGION="${AWS_REGION:-us-east-1}"
-AWS_PROFILE="${AWS_PROFILE:-}"
+AWS_PROFILE="${AWS_PROFILE:-admin}"  # Default to admin for infrastructure operations
 
 # Build AWS CLI profile flag
 get_aws_profile_flag() {

@@ -7,7 +7,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$SCRIPT_DIR/../../common/logger.sh"
+# Save SCRIPT_DIR before sourcing load-env.sh (which sets its own SCRIPT_DIR)
+FRONTEND_SCRIPT_DIR="$SCRIPT_DIR"
 source "$SCRIPT_DIR/../../common/load-env.sh"
+# Restore our SCRIPT_DIR
+SCRIPT_DIR="$FRONTEND_SCRIPT_DIR"
 
 S3_BUCKET_NAME="${S3_BUCKET_NAME:-fru-frontend-bucket}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
@@ -21,6 +25,10 @@ deploy_frontend() {
     # Load environment variables
     load_env_file
     
+    # Use admin profile for infrastructure operations (S3)
+    AWS_PROFILE="${AWS_PROFILE:-admin}"
+    log_info "Using AWS profile: $AWS_PROFILE (for infrastructure operations)"
+    
     # Check if frontend is built
     if [ ! -d "$REPO_ROOT/frontend/dist" ]; then
         log_error "Frontend not built. Please run build first."
@@ -29,18 +37,18 @@ deploy_frontend() {
     fi
     
     # Check if S3 bucket exists, create if not
-    if ! aws s3 ls "s3://$S3_BUCKET_NAME" >/dev/null 2>&1; then
+    if ! aws s3 ls --profile "$AWS_PROFILE" "s3://$S3_BUCKET_NAME" >/dev/null 2>&1; then
         log_info "S3 bucket does not exist, creating..."
         if [ "$AWS_REGION" = "us-east-1" ]; then
-            aws s3 mb "s3://$S3_BUCKET_NAME" --region "$AWS_REGION"
+            aws s3 mb --profile "$AWS_PROFILE" "s3://$S3_BUCKET_NAME" --region "$AWS_REGION"
         else
-            aws s3 mb "s3://$S3_BUCKET_NAME" --region "$AWS_REGION"
+            aws s3 mb --profile "$AWS_PROFILE" "s3://$S3_BUCKET_NAME" --region "$AWS_REGION"
         fi
         log_success "S3 bucket created"
         
         # Configure static website hosting
         log_info "Configuring static website hosting..."
-        aws s3 website "s3://$S3_BUCKET_NAME" \
+        aws s3 website --profile "$AWS_PROFILE" "s3://$S3_BUCKET_NAME" \
             --index-document index.html \
             --error-document index.html
     else
@@ -49,7 +57,7 @@ deploy_frontend() {
     
     # Sync files to S3
     log_info "Syncing frontend files to S3..."
-    aws s3 sync "$REPO_ROOT/frontend/dist" "s3://$S3_BUCKET_NAME" --delete
+    aws s3 sync --profile "$AWS_PROFILE" "$REPO_ROOT/frontend/dist" "s3://$S3_BUCKET_NAME" --delete
     
     log_success "Frontend deployed to S3"
     log_info "  Bucket: $S3_BUCKET_NAME"

@@ -134,11 +134,19 @@ OPENAI_API_KEY=sk-your-openai-api-key-here
 AWS_REGION=us-east-1
 BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240229-v1:0
 
-# AWS Credentials for Bedrock (from Step 2)
-AWS_ACCESS_KEY_ID=<bedrock-admin-access-key-id>
-AWS_SECRET_ACCESS_KEY=<bedrock-admin-secret-access-key>
+# AWS Credentials for Admin (Infrastructure Operations)
+# Used by: Terraform, AWS CLI, ECR scripts, S3 operations
+AWS_ADMIN_ACCESS_KEY_ID=<admin-access-key-id>
+AWS_ADMIN_SECRET_ACCESS_KEY=<admin-secret-access-key>
 
-# AWS Profile for Admin Operations (from Step 3)
+# AWS Credentials for Bedrock (Application Runtime)
+# Used by: Flask API (boto3) for Bedrock API calls
+AWS_BEDROCK_ACCESS_KEY_ID=<bedrock-admin-access-key-id>
+AWS_BEDROCK_SECRET_ACCESS_KEY=<bedrock-admin-secret-access-key>
+
+# AWS Profile Selection
+# Infrastructure scripts default to 'admin' profile
+# Application runtime uses 'bedrock' profile (or 'admin' for local Docker)
 AWS_PROFILE=admin
 
 # Terraform State Bucket (will be created in Step 5)
@@ -148,19 +156,32 @@ TF_STATE_BUCKET=fru-terraform-state-<your-account-id>
 CONTAINER_IMAGE=<ecr-repository-uri>:latest
 ```
 
-**Why Use Bedrock-Admin Credentials Instead of Admin Credentials?**
+**Why We Need Both Admin and Bedrock Profiles:**
 
-This follows the **principle of least privilege** for security:
+This follows the **principle of least privilege** and **separation of concerns**:
 
-- **`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (bedrock-admin)**: Used by the **application code** (Flask API) to call Bedrock APIs. The application only needs Bedrock access, not full admin permissions. If the application is compromised, the damage is limited to Bedrock operations only.
+1. **Admin Profile** (`AWS_ADMIN_*` credentials → `[admin]` profile):
+   - **Used by**: Infrastructure scripts (Terraform, AWS CLI, ECR, S3 operations)
+   - **Permissions needed**: Full admin access to create/modify AWS resources
+   - **Purpose**: Deploy infrastructure, manage ECR repositories, create S3 buckets, run Terraform
+   - **Security**: If infrastructure scripts are compromised, attacker has admin access (expected for infrastructure management)
 
-- **`AWS_PROFILE=admin`**: Used by **infrastructure tools** (Terraform, AWS CLI, ECR scripts) for managing AWS resources. These tools need admin access to create/modify infrastructure, but this is separate from application runtime.
+2. **Bedrock Profile** (`AWS_BEDROCK_*` credentials → `[bedrock]` profile):
+   - **Used by**: Application code (Flask API via boto3) for Bedrock API calls
+   - **Permissions needed**: Only Bedrock access (BedrockFullAccess policy)
+   - **Purpose**: Application runtime calls to Bedrock for LLM inference
+   - **Security**: If application is compromised, damage is limited to Bedrock operations only
 
-**Separation of Concerns:**
-- **Admin credentials** → Infrastructure management (Terraform, ECR, S3, etc.)
-- **Bedrock-admin credentials** → Application runtime (Bedrock API calls)
+**How It Works:**
+- Credentials from `.env` are synced to `~/.aws/credentials` profiles via `setup-aws-profiles.sh`
+- Infrastructure scripts use `--profile admin` (or `AWS_PROFILE=admin`)
+- Application code uses `AWS_PROFILE=bedrock` (or `admin` for local Docker - see note below)
+- No credentials are exported as environment variables (more secure)
 
-**Note:** In production (ECS deployment), the application should use **IAM roles** instead of access keys in `.env`. The access keys in `.env` are primarily for local development and initial setup.
+**Note:** 
+- In production (ECS/EKS), the application should use **IAM roles** instead of access keys
+- For local Docker development, we use `AWS_PROFILE=admin` (instead of `bedrock`) to allow more operations during testing and development
+- The access keys in `.env` are primarily for local development and initial setup
 
 **Important Notes:**
 - Replace `<your-account-id>` with your AWS account ID (get it with: `aws sts get-caller-identity --profile admin --query Account --output text`)
@@ -246,6 +267,28 @@ TF_STATE_BUCKET=fru-terraform-state-<your-account-id>
 ```
 
 **Note:** If you use the automated script, it will use `TF_STATE_BUCKET` from your `.env` file automatically.
+
+### 5.4 Setup AWS Profiles (New - Required)
+
+**Migration Note:** If you have old `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in your `.env` file, you should:
+1. Identify which credentials they are (admin or bedrock)
+2. Replace them with the new `AWS_ADMIN_*` and `AWS_BEDROCK_*` variables
+3. Remove the old `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` lines
+
+After setting up credentials in `.env`, sync them to AWS profiles:
+
+```bash
+# This creates [admin] and [bedrock] profiles in ~/.aws/credentials
+./run_scripts/aws/setup-aws-profiles.sh
+```
+
+This script:
+- Reads `AWS_ADMIN_*` and `AWS_BEDROCK_*` from `.env`
+- Creates/updates `[admin]` and `[bedrock]` profiles in `~/.aws/credentials`
+- Sets proper file permissions (600)
+- Backs up existing credentials file
+
+**Note:** This is automatically run by `./run_scripts/aws/run.sh`, but you can run it manually if needed.
 
 ---
 
@@ -380,12 +423,16 @@ Before proceeding to Terraform deployment, ensure your `.env` file has all requi
 ✅ OPENAI_API_KEY
 ✅ AWS_REGION
 ✅ BEDROCK_MODEL_ID
-✅ AWS_ACCESS_KEY_ID (bedrock-admin)
-✅ AWS_SECRET_ACCESS_KEY (bedrock-admin)
-✅ AWS_PROFILE (admin)
+✅ AWS_ADMIN_ACCESS_KEY_ID (for infrastructure operations)
+✅ AWS_ADMIN_SECRET_ACCESS_KEY
+✅ AWS_BEDROCK_ACCESS_KEY_ID (for application runtime)
+✅ AWS_BEDROCK_SECRET_ACCESS_KEY
+✅ AWS_PROFILE (admin - for infrastructure scripts)
 ✅ TF_STATE_BUCKET
 ✅ CONTAINER_IMAGE
 ```
+
+**Note:** After setting credentials, run `./run_scripts/aws/setup-aws-profiles.sh` to sync them to `~/.aws/credentials` profiles.
 
 **Optional but recommended:**
 - `PGPASSWORD` (will be set by Terraform/Secrets Manager, but can be pre-set)

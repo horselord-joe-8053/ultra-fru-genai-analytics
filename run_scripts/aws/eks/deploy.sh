@@ -152,10 +152,17 @@ generate_manifests() {
     if [ -f "$secret_template" ]; then
         log_info "Generating Secret from template..."
         if command_exists envsubst; then
-            # Export sensitive variables
+            # Export sensitive variables for envsubst (Kubernetes Secret template)
+            # Note: For Kubernetes secrets, we need actual credential values
+            # We use bedrock credentials for application runtime (Bedrock API calls)
             export PGPASSWORD="${PGPASSWORD:-}"
-            export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-}"
-            export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-}"
+            # Load bedrock credentials from .env (not exported by load-env.sh)
+            # These are used to populate Kubernetes Secret for application runtime
+            if [ -f "$REPO_ROOT/.env" ]; then
+                source "$REPO_ROOT/.env"
+                export AWS_ACCESS_KEY_ID="${AWS_BEDROCK_ACCESS_KEY_ID:-}"
+                export AWS_SECRET_ACCESS_KEY="${AWS_BEDROCK_SECRET_ACCESS_KEY:-}"
+            fi
             export OPENAI_API_KEY="${OPENAI_API_KEY:-}"
             
             envsubst < "$secret_template" > "$secret_output"

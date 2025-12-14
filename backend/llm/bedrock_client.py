@@ -8,15 +8,25 @@ logger = logging.getLogger(__name__)
 
 
 def get_bedrock_client():
-    """Return a Bedrock Runtime client using AWS_REGION or us-east-1."""
-    access_key = os.environ.get("AWS_ACCESS_KEY_ID")
-    secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+    """Return a Bedrock Runtime client using AWS profile or IAM role.
+    
+    Uses AWS_PROFILE environment variable if set, otherwise uses default credentials.
+    In production (ECS/EKS), should use IAM roles instead of profiles.
+    For local Docker development, uses 'admin' profile by default.
+    """
     region = os.environ.get("AWS_REGION", "us-east-1")
+    profile = os.environ.get("AWS_PROFILE", "admin")  # Default to admin for local development
+    
     try:
-        return boto3.client("bedrock-runtime",
-                            aws_access_key_id=access_key,
-                            aws_secret_access_key=secret_key,
-                            region_name=region)
+        # Use boto3 Session with profile for local development
+        # In production (ECS/EKS), if AWS_PROFILE is not set, boto3 will use IAM role
+        # For local development, profile is set (admin or bedrock)
+        if profile:
+            session = boto3.Session(profile_name=profile)
+        else:
+            # No profile specified, use default credentials (IAM role in production)
+            session = boto3.Session()
+        return session.client("bedrock-runtime", region_name=region)
     except Exception as e:
         logger.error(f"Failed to create Bedrock client: {e}")
         raise ValueError(f"Failed to initialize Bedrock client: {e}")
