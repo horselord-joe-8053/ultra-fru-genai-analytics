@@ -87,6 +87,10 @@ main() {
         echo ""
         log_info "Or run: ./run_scripts/local/start-frontend.sh"
     fi
+    
+    # Run verification
+    echo ""
+    "$SCRIPT_DIR/post_run_verify.sh"
 }
 
 # Run main function

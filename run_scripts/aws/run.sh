@@ -229,24 +229,36 @@ main() {
     case "$DEPLOYMENT_TYPE" in
         ecs-full)
             deploy_ecs_full
+            echo ""
+            "$SCRIPT_DIR/post_run_verify.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT"
             ;;
         eks-full)
             deploy_eks_full
+            echo ""
+            "$SCRIPT_DIR/post_run_verify.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT"
             ;;
         infrastructure)
             deploy_infrastructure
+            echo ""
+            "$SCRIPT_DIR/post_run_verify.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT"
             ;;
         ecs)
             log_info "Starting ECS-specific deployment (legacy mode)..."
             "$SCRIPT_DIR/ecs/deploy.sh" "${@:2}"
+            echo ""
+            "$SCRIPT_DIR/post_run_verify.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT"
             ;;
         eks)
             log_info "Starting EKS-specific deployment (legacy mode)..."
             "$SCRIPT_DIR/eks/deploy.sh" "${@:2}"
+            echo ""
+            "$SCRIPT_DIR/post_run_verify.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT"
             ;;
         terraform)
             log_info "Starting Terraform deployment (legacy mode)..."
             "$SCRIPT_DIR/terraform/deploy.sh" "${@:2}"
+            echo ""
+            "$SCRIPT_DIR/post_run_verify.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT"
             ;;
         *)
             log_error "Unknown deployment type: $DEPLOYMENT_TYPE"

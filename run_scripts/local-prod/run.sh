@@ -79,11 +79,11 @@ main() {
     log_info "  - API: http://localhost:5000"
     if [ "$SKIP_FRONTEND" = false ]; then
         log_info "  - Frontend: Built in $REPO_ROOT/frontend/dist"
-        log_info "    (Serve with: cd frontend && npx serve dist)"
     fi
     echo ""
-    log_info "To view logs: cd $REPO_ROOT/infra/docker && docker compose logs -f"
-    log_info "To stop services: cd $REPO_ROOT/infra/docker && docker compose down"
+    
+    # Run verification
+    "$SCRIPT_DIR/post_run_verify.sh"
 }
 
 # Run main function

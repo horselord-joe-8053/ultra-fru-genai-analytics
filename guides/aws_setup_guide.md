@@ -174,21 +174,35 @@ This follows the **principle of least privilege** for security:
 
 ## Step 5: Create S3 Bucket for Terraform State
 
-**⚠️ Important:** This step must be done **manually before running Terraform**. Terraform cannot create its own state bucket because it needs the bucket to exist before it can store state files. This is a one-time bootstrap step.
+**⚠️ Important:** This step must be done **before running Terraform**. Terraform cannot create its own state bucket because it needs the bucket to exist before it can store state files. This is a one-time bootstrap step.
 
-**Note:** The Terraform configuration in `infra/terraform/environments/terragrunt.hcl` expects this bucket to exist and will use it automatically once created.
+**Note:** The Terraform configuration in `infra/terraform/environments/root.hcl` expects this bucket to exist and will use it automatically once created.
 
-### 5.1 Get Your AWS Account ID
+**Option A: Automated Script (Recommended)**
+
+The deployment script (`./run_scripts/aws/run.sh`) automatically runs this step, but you can also run it manually:
 
 ```bash
-export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --profile admin --query Account --output text)
-echo $AWS_ACCOUNT_ID
+# Ensure TF_STATE_BUCKET is set in .env
+# Then run:
+./run_scripts/aws/terraform/setup-s3-bucket.sh
 ```
 
-### 5.2 Create S3 Bucket
+This script will:
+- ✅ Check if bucket exists (idempotent)
+- ✅ Create bucket if it doesn't exist
+- ✅ Enable versioning
+- ✅ Enable encryption (AES256)
+- ✅ Block public access
+- ✅ Use region from `AWS_REGION` in `.env` (defaults to us-east-1)
+
+**Option B: Manual Creation**
+
+If you prefer to create it manually:
 
 ```bash
-# Set your preferred bucket name (must be globally unique)
+# Get your AWS account ID
+export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --profile admin --query Account --output text)
 export TF_STATE_BUCKET="fru-terraform-state-${AWS_ACCOUNT_ID}"
 export AWS_REGION="us-east-1"
 
@@ -198,7 +212,7 @@ aws s3api create-bucket \
   --region "$AWS_REGION" \
   --profile admin
 
-# Enable versioning (recommended for state files)
+# Enable versioning
 aws s3api put-bucket-versioning \
   --bucket "$TF_STATE_BUCKET" \
   --versioning-configuration Status=Enabled \
@@ -216,7 +230,7 @@ aws s3api put-bucket-encryption \
   }' \
   --profile admin
 
-# Block public access (security best practice)
+# Block public access
 aws s3api put-public-access-block \
   --bucket "$TF_STATE_BUCKET" \
   --public-access-block-configuration \
@@ -230,6 +244,8 @@ Add the bucket name to your `.env` file:
 ```bash
 TF_STATE_BUCKET=fru-terraform-state-<your-account-id>
 ```
+
+**Note:** If you use the automated script, it will use `TF_STATE_BUCKET` from your `.env` file automatically.
 
 ---
 
@@ -317,8 +333,14 @@ export AWS_PROFILE=admin
 
 ### 7.2 Run Build and Push Script
 
+**Option A: Automated (via run.sh)**
+
+The deployment script (`./run_scripts/aws/run.sh`) automatically builds and pushes the image if it doesn't exist in ECR. This is the recommended approach.
+
+**Option B: Manual Execution**
+
 ```bash
-./run_scripts/aws/ecs/build-push-ecr.sh
+./run_scripts/aws/common_ecs_eks/build-push-ecr.sh
 ```
 
 This script will:
@@ -326,6 +348,7 @@ This script will:
 - Create ECR repository `fru-api` (if it doesn't exist)
 - Build Docker image from `infra/docker/Dockerfile.api`
 - Tag and push image to ECR
+- Export `CONTAINER_IMAGE` environment variable
 
 ### 7.3 Get Container Image URI
 
@@ -404,14 +427,30 @@ export AWS_PROFILE=${AWS_PROFILE:-admin}
 
 The infrastructure layer includes: VPC, Aurora PostgreSQL, IAM roles, Secrets Manager.
 
-```bash
-# Using automated script (recommended)
-./run_scripts/aws/terraform/deploy.sh dev infrastructure
+**Option A: Using run.sh (Recommended - Full Automation)**
 
-# Or manually
+```bash
+# This will automatically:
+# 1. Setup S3 state bucket
+# 2. Deploy infrastructure
+# 3. Deploy application
+# 4. Verify deployment
+./run_scripts/aws/run.sh ecs-full dev
+```
+
+**Option B: Using terraform/deploy.sh**
+
+```bash
+# Deploy infrastructure only
+./run_scripts/aws/terraform/deploy.sh dev infrastructure
+```
+
+**Option C: Manual Terraform Commands**
+
+```bash
 cd infra/terraform/environments/dev/infrastructure
-terragrunt plan
-terragrunt apply
+terragrunt plan --terragrunt-config infra.hcl
+terragrunt apply --terragrunt-config infra.hcl
 ```
 
 **What this creates:**
@@ -429,14 +468,26 @@ terragrunt apply
 
 The application layer includes: ECS cluster, ECS service, ALB, Frontend (S3 + CloudFront).
 
-```bash
-# Using automated script (recommended)
-./run_scripts/aws/terraform/deploy.sh dev application
+**Option A: Using run.sh (Recommended - Full Automation)**
 
-# Or manually
+```bash
+# This is included in the ecs-full workflow
+./run_scripts/aws/run.sh ecs-full dev
+```
+
+**Option B: Using terraform/deploy.sh**
+
+```bash
+# Deploy application only (after infrastructure is deployed)
+./run_scripts/aws/terraform/deploy.sh dev application
+```
+
+**Option C: Manual Terraform Commands**
+
+```bash
 cd infra/terraform/environments/dev/application
-terragrunt plan
-terragrunt apply
+terragrunt plan --terragrunt-config appl.hcl
+terragrunt apply --terragrunt-config appl.hcl
 ```
 
 **What this creates:**
@@ -581,9 +632,30 @@ npm run build
 
 ### 13.2 Deploy to S3
 
+**Option A: Automated (via run.sh - Recommended)**
+
+The deployment script automatically builds and deploys the frontend:
+```bash
+./run_scripts/aws/run.sh ecs-full dev
+```
+
+**Option B: Manual Execution**
+
+```bash
+./run_scripts/aws/common_ecs_eks/deploy-frontend.sh
+```
+
+This script will:
+- Check if S3 bucket exists (creates if needed)
+- Configure static website hosting
+- Sync frontend files to S3
+- Output the website URL
+
+**Option C: Manual with Terraform Outputs**
+
 ```bash
 # Get S3 bucket from Terraform outputs
-cd ../infra/terraform/environments/dev/application
+cd infra/terraform/environments/dev/application
 export S3_BUCKET=$(terragrunt output -raw s3_bucket_id)
 
 # Sync frontend build to S3
@@ -602,12 +674,76 @@ aws cloudfront create-invalidation \
 
 ## Step 14: Verify Deployment
 
-### 14.1 Check ECS Service Status
+After running the deployment script (`./run_scripts/aws/run.sh`), the script will automatically run verification checks. However, you can also verify manually:
+
+### 14.1 Automatic Verification
+
+The deployment script automatically runs `post_run_verify.sh` which checks:
+- ✅ ECS service status and running task count
+- ✅ API health endpoint response
+- ✅ Terraform outputs (ALB DNS, CloudFront domain)
+- ✅ Kubernetes pod status (for EKS deployments)
+
+### 14.2 Manual Verification - Get Deployment URLs
+
+**For ECS Deployment:**
 
 ```bash
-# Get cluster and service names from Terraform outputs
+# Get ALB DNS name (API endpoint)
 cd infra/terraform/environments/dev/application
-export CLUSTER_NAME=$(terragrunt output -raw ecs_cluster_name)
+terragrunt output alb_dns_name
+
+# Get CloudFront domain (Frontend URL)
+terragrunt output cloudfront_domain_name
+
+# Get ECS cluster and service names
+terragrunt output ecs_cluster_id
+terragrunt output ecs_service_name
+```
+
+**For EKS Deployment:**
+
+```bash
+# Check pod status
+kubectl get pods -l app=fru-api
+
+# Get service endpoint
+kubectl get svc fru-api
+
+# Get ingress hostname
+kubectl get ingress fru-api-ingress
+```
+
+### 14.3 Test API Health Endpoint
+
+```bash
+# Get ALB DNS name first
+cd infra/terraform/environments/dev/application
+export ALB_DNS=$(terragrunt output -raw alb_dns_name)
+
+# Test health endpoint
+curl http://${ALB_DNS}/health
+
+# Expected response:
+# {"status": "ok", "database": "connected", "openai": "configured", "aws": "configured"}
+```
+
+### 14.4 Test Query Endpoint
+
+```bash
+# Test with a sample query
+curl -X POST http://${ALB_DNS}/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Why are Samsung customers unhappy?"}'
+
+# Expected: JSON response with answer from Claude via Bedrock
+```
+
+### 14.5 Check ECS Service Status
+
+```bash
+# Get cluster and service names
+export CLUSTER_NAME=$(terragrunt output -raw ecs_cluster_id)
 export SERVICE_NAME=$(terragrunt output -raw ecs_service_name)
 
 # Check service status
@@ -615,29 +751,22 @@ aws ecs describe-services \
   --cluster ${CLUSTER_NAME} \
   --services ${SERVICE_NAME} \
   --profile admin
+
+# Check running tasks
+aws ecs list-tasks \
+  --cluster ${CLUSTER_NAME} \
+  --service-name ${SERVICE_NAME} \
+  --profile admin
 ```
 
-### 14.2 Test API Endpoint
+### 14.6 Check CloudWatch Logs
 
 ```bash
-# Get ALB DNS name
-cd infra/terraform/environments/dev/application
-export ALB_DNS=$(terragrunt output -raw alb_dns_name)
-
-# Test query endpoint
-curl -X POST http://${ALB_DNS}/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Why are Samsung customers unhappy?"}'
-```
-
-### 14.3 Check CloudWatch Logs
-
-```bash
-# Get log group name
-export LOG_GROUP="/ecs/fru-api"
-
 # View recent logs
-aws logs tail ${LOG_GROUP} --follow --profile admin
+aws logs tail /ecs/fru-api --follow --profile admin
+
+# Or view logs for a specific task
+aws logs tail /ecs/fru-api --follow --filter-pattern "ERROR" --profile admin
 ```
 
 ---
@@ -697,6 +826,102 @@ aws ecr get-login-password --region us-east-1 --profile admin | \
 
 ---
 
+## Step 15: Access and Use Your Deployment
+
+### 15.1 Access the Frontend
+
+After deployment, get your frontend URL:
+
+```bash
+cd infra/terraform/environments/dev/application
+terragrunt output cloudfront_domain_name
+```
+
+**Open the CloudFront domain in your browser** (e.g., `https://d1234567890.cloudfront.net`)
+
+The frontend will:
+- Display the FRU GenAI Analytics interface
+- Allow you to ask natural language questions
+- Show analytics dashboards
+- Proxy API requests to your backend
+
+**Try asking questions like:**
+- "Why are Samsung customers unhappy?"
+- "What are the top-selling fridge models?"
+- "Which stores have the best performance?"
+
+### 15.2 Test the API Directly
+
+**Get your API endpoint:**
+
+```bash
+cd infra/terraform/environments/dev/application
+export ALB_DNS=$(terragrunt output -raw alb_dns_name)
+echo "API URL: http://${ALB_DNS}"
+```
+
+**Test the health endpoint:**
+
+```bash
+curl http://${ALB_DNS}/health
+```
+
+**Test a query:**
+
+```bash
+curl -X POST http://${ALB_DNS}/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Why are Samsung customers unhappy?"}'
+```
+
+### 15.3 Monitor Your Deployment
+
+**View ECS Service Metrics:**
+- AWS Console → ECS → Clusters → Your cluster → Services → Your service
+- Monitor: CPU utilization, memory usage, request count
+
+**View CloudWatch Logs:**
+```bash
+aws logs tail /ecs/fru-api --follow --profile admin
+```
+
+**View Aurora Metrics:**
+- AWS Console → RDS → Databases → Your Aurora cluster
+- Monitor: CPU utilization, connections, read/write IOPS
+
+### 15.4 Manual Verification Checklist
+
+After deployment, verify:
+
+- [ ] **ECS Service**: Tasks are running and healthy
+  ```bash
+  aws ecs describe-services --cluster <cluster-name> --services <service-name> --profile admin
+  ```
+
+- [ ] **API Health**: `/health` endpoint returns `{"status": "ok", "database": "connected"}`
+  ```bash
+  curl http://<alb-dns>/health
+  ```
+
+- [ ] **Database Connection**: API can connect to Aurora
+  - Check health endpoint response
+  - Check CloudWatch logs for connection errors
+
+- [ ] **Bedrock Access**: API can call Bedrock models
+  - Test with a query endpoint call
+  - Check CloudWatch logs for Bedrock errors
+
+- [ ] **Frontend Access**: CloudFront domain is accessible
+  - Open in browser
+  - Verify frontend loads and can make API calls
+
+- [ ] **Security Groups**: Only necessary ports are open
+  - ALB: Port 80/443 from internet
+  - ECS tasks: Only from ALB security group
+  - Aurora: Only from ECS security group
+
+---
+
 ## Next Steps
 
 After successful deployment:
@@ -716,14 +941,22 @@ This guide covered:
 2. ✅ Generating access keys
 3. ✅ Configuring AWS CLI
 4. ✅ Setting up .env file
-5. ✅ Creating S3 bucket for Terraform state
-6. ✅ Enabling Bedrock model access
-7. ✅ Building and pushing container to ECR
-8. ✅ Deploying infrastructure with Terraform
+5. ✅ Creating S3 bucket for Terraform state (automated via `setup-s3-bucket.sh`)
+6. ✅ Enabling Bedrock model access (automated via `enable-model-access.sh`)
+7. ✅ Building and pushing container to ECR (automated via `build-push-ecr.sh`)
+8. ✅ Deploying infrastructure with Terraform (automated via `terraform/deploy.sh`)
 9. ✅ Initializing database schema
 10. ✅ Loading data and embeddings
-11. ✅ Deploying frontend
-12. ✅ Verifying deployment
+11. ✅ Deploying frontend (automated via `deploy-frontend.sh`)
+12. ✅ Verifying deployment (automated via `post_run_verify.sh`)
 
-Your FRU GenAI Analytics system should now be running on AWS! 🎉
+**Your FRU GenAI Analytics system should now be running on AWS! 🎉**
+
+**Quick Start:**
+```bash
+# Deploy everything with one command:
+./run_scripts/aws/run.sh ecs-full dev
+
+# The script will automatically verify deployment and show you how to access your application
+```
 

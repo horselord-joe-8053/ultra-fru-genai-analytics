@@ -347,7 +347,7 @@ main() {
         log_info "    ├── service.yaml"
         log_info "    ├── configmap.yaml"
         log_info "    └── ingress.yaml"
-        log_info ""
+    log_info ""
         log_info "Reference CONTAINER_IMAGE in manifests using: \${CONTAINER_IMAGE} or <CONTAINER_IMAGE>"
     fi
     
