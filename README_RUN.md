@@ -69,7 +69,14 @@ FRU (**Fridges R Us**) is a GenAI analytics assistant over fridge sales data, bu
 
 - **Local Development**: `./run_scripts/local/run.sh` - One command to set up everything
 - **Local Production**: `./run_scripts/local-prod/run.sh` - Docker-based production simulation
-- **AWS Deployment**: `./run_scripts/aws/run.sh` - Interactive menu for AWS deployments
+- **AWS Deployment**: `./run_scripts/aws/run.sh` - Complete AWS deployment workflows
+
+**AWS Deployment Workflows:**
+- `./run_scripts/aws/run.sh ecs-full` - Complete ECS deployment (recommended)
+- `./run_scripts/aws/run.sh eks-full` - Complete EKS deployment
+- `./run_scripts/aws/run.sh infrastructure` - Infrastructure only
+
+**All scripts automatically verify deployment and provide usage instructions.**
 
 📖 **See `README_RUN_SCRIPTS.md` for complete script documentation.**
 
@@ -683,6 +690,14 @@ This is the **primary production deployment path**:
 
 ## 4.2 Build & push backend image to ECR
 
+**Recommended: Use automated script**
+```bash
+# Automated build and push (idempotent)
+./run_scripts/aws/common_ecs_eks/build-push-ecr.sh
+```
+
+**Manual steps (for reference):**
+
 ```bash
 cd backend
 docker build -t fru-api .
@@ -702,9 +717,11 @@ AWS_REGION=us-east-1
 ECR_URL="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 
 docker tag fru-api:latest "$ECR_URL/fru-api:latest"
-aws ecr get-login-password --region $AWS_REGION |       docker login --username AWS --password-stdin "$ECR_URL"
+aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin "$ECR_URL"
 docker push "$ECR_URL/fru-api:latest"
 ```
+
+> **Note:** The automated script checks if the image already exists in ECR before building, making it idempotent and faster for repeated runs.
 
 ---
 
@@ -778,6 +795,14 @@ Expose ECS service via either:
 
 ## 4.4 Frontend in AWS
 
+**Recommended: Use automated script**
+```bash
+# Automated frontend build and deployment (idempotent)
+./run_scripts/aws/common_ecs_eks/deploy-frontend.sh
+```
+
+**Manual steps (for reference):**
+
 1. Build frontend:
 
    ```bash
@@ -802,6 +827,8 @@ Result:
 - `https://fru.yourdomain.com` → CloudFront → S3 SPA
 - SPA → `https://api.fru.yourdomain.com/query` → API Gateway/ALB → ECS Fargate → Aurora + Bedrock
 
+> **Note:** The automated script only uploads changed files and automatically creates CloudFront invalidations, making it efficient for repeated deployments.
+
 ---
 
 ## 4.5 Bedrock networking (VPC endpoint, optional but recommended)
@@ -825,7 +852,28 @@ The building blocks:
 - Kubernetes `Deployment` + `Service` for API
 - Ingress (ALB Ingress Controller) for HTTP/HTTPS
 
+> **💡 Recommended**: Use the **automated EKS deployment script** for complete setup:
+> ```bash
+> # Complete EKS deployment (build image → setup infra → deploy app)
+> ./run_scripts/aws/run.sh eks-full dev
+> ```
+> 
+> This automatically:
+> - Builds and pushes Docker image to ECR
+> - Sets up Terraform state bucket (if needed)
+> - Deploys infrastructure (VPC, Aurora, IAM, Secrets Manager)
+> - Generates Kubernetes ConfigMap and Secret from `.env`
+> - Applies Kubernetes manifests from `infra/k8s/`
+> - Verifies deployment and shows access URLs
+>
+> **Prerequisites:**
+> - EKS cluster must already exist (created via `eksctl` or Terraform)
+> - `kubectl` configured with cluster access
+> - Kubernetes manifests in `infra/k8s/` (Deployment, Service, Ingress, ConfigMap, Secret templates)
+
 ### 5.1 Backend deployment YAML (simplified)
+
+> **Note:** The automated script uses manifests from `infra/k8s/` and generates ConfigMap/Secret from `.env`. The YAML below is for reference only.
 
 ```yaml
 apiVersion: apps/v1
@@ -944,12 +992,29 @@ infra/terraform/
 
 **Deployment:**
 
+**Recommended: Use automated workflows**
 ```bash
-# Deploy infrastructure layer
-./run_scripts/aws/terraform/deploy.sh dev infrastructure
+# Complete deployment (infrastructure + application)
+./run_scripts/aws/run.sh ecs-full dev
 
-# Deploy application layer
+# Infrastructure only
+./run_scripts/aws/run.sh infrastructure dev
+
+# Manual Terraform control
+./run_scripts/aws/terraform/deploy.sh dev infrastructure
 ./run_scripts/aws/terraform/deploy.sh dev application
+```
+
+**What's automated:**
+- ✅ S3 bucket for Terraform state (created automatically by `setup-s3-bucket.sh`)
+- ✅ Infrastructure layer deployment (VPC, Aurora, IAM, Secrets Manager)
+- ✅ Application layer deployment (ECS, ALB, Frontend)
+- ✅ Post-deployment verification
+
+**Terraform Teardown:**
+```bash
+# Destroy all resources (interactive confirmation)
+./run_scripts/aws/terraform/teardown.sh dev all
 ```
 
 See [`README_INFRA.md`](README_INFRA.md) for complete documentation.

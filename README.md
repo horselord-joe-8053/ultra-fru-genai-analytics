@@ -212,6 +212,9 @@ fru-genai-analytics-all/
 │   ├─ local/                     # Local development
 │   ├─ local-prod/                # Local production simulation
 │   ├─ aws/                       # AWS deployments (ECS, EKS, Terraform)
+│   │   ├─ common_ecs_eks/        # Shared ECS/EKS scripts
+│   │   ├─ bedrock/               # Bedrock model access
+│   │   └─ terraform/             # Terraform deployment & teardown
 │   └─ common/                    # Shared utilities
 │
 ├─ infra/
@@ -230,6 +233,9 @@ fru-genai-analytics-all/
 │       │   ├─ infrastructure/    # Wrapper module
 │       │   └─ application/      # Wrapper module
 │       └─ environments/          # Terragrunt configs (dev/prod)
+│           ├─ root.hcl          # Root configuration
+│           ├─ dev/env.hcl        # Dev environment config
+│           └─ prod/env.hcl       # Prod environment config
 │
 └─ study/
     └─ ARCHITECT_STUDY_GUIDE_DETAILED.md
@@ -546,7 +552,21 @@ Claude returns:
   s3://fru-analytics-data-prod/delta/fru_sales/...
   ```
 
-Use the Terraform modules in `infra/terraform/modules/` with Terragrunt configurations in `infra/terraform/environments/`. See [`README_INFRA.md`](README_INFRA.md) for detailed instructions.
+Use the Terraform modules in `infra/terraform/modules/` with Terragrunt configurations in `infra/terraform/environments/`. 
+
+**Recommended deployment workflows:**
+```bash
+# Complete ECS deployment
+./run_scripts/aws/run.sh ecs-full dev
+
+# Complete EKS deployment
+./run_scripts/aws/run.sh eks-full dev
+
+# Infrastructure only
+./run_scripts/aws/run.sh infrastructure dev
+```
+
+See [`README_INFRA.md`](README_INFRA.md) for detailed instructions.
 
 ---
 
@@ -591,11 +611,20 @@ Later evolution:
 
 ### 8.4 Containerize API + push to ECR
 
+**Recommended: Use automated script**
+```bash
+# Automated build and push (idempotent)
+./run_scripts/aws/common_ecs_eks/build-push-ecr.sh
+```
+
+**Manual steps (for reference):**
 ```bash
 docker build -f infra/docker/Dockerfile.api -t fru-api .
 aws ecr create-repository --repository-name fru-api
 # tag & push
 ```
+
+> **Note:** The automated script checks if the image already exists in ECR before building, making it idempotent and faster for repeated runs.
 
 ---
 

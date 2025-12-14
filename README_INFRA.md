@@ -125,15 +125,19 @@ infra/
     │   ├── infrastructure/    # Wrapper module (VPC + Aurora + IAM + Secrets)
     │   └── application/       # Wrapper module (ECS + ALB + Frontend)
     └── environments/          # Terragrunt environment configurations
-        ├── terragrunt.hcl     # Root configuration
+        ├── root.hcl           # Root configuration (Level 1)
         ├── dev/
-        │   ├── terragrunt.hcl
+        │   ├── env.hcl        # Environment config (Level 2)
         │   ├── infrastructure/
+        │   │   └── infra.hcl  # Infrastructure layer (Level 3)
         │   └── application/
+        │       └── appl.hcl   # Application layer (Level 3)
         └── prod/
-            ├── terragrunt.hcl
+            ├── env.hcl        # Environment config (Level 2)
             ├── infrastructure/
+            │   └── infra.hcl  # Infrastructure layer (Level 3)
             └── application/
+                └── appl.hcl   # Application layer (Level 3)
 ```
 
 ---
@@ -191,13 +195,13 @@ infra/
    ```
 
 4. **S3 Bucket for Terraform State**
-   - Create an S3 bucket for storing Terraform state
-   - Create a DynamoDB table for state locking
-   - Set environment variables:
+   - **Automated**: The deployment scripts automatically create the S3 bucket if it doesn't exist
+   - **Manual** (optional): Create an S3 bucket for storing Terraform state
+   - Set environment variable in `.env`:
      ```bash
-     export TF_STATE_BUCKET="fru-terraform-state-<account-id>"
-     export TF_STATE_LOCK_TABLE="fru-terraform-locks"
+     TF_STATE_BUCKET="fru-terraform-state-<account-id>"
      ```
+   - The `setup-s3-bucket.sh` script handles bucket creation, versioning, encryption, and public access blocking automatically
 
 ---
 
@@ -205,6 +209,19 @@ infra/
 
 ### Quick Start (Using Scripts)
 
+**Recommended: Complete workflows**
+```bash
+# Complete ECS deployment (build image → setup infra → deploy app)
+./run_scripts/aws/run.sh ecs-full dev
+
+# Complete EKS deployment (build image → setup infra → deploy app)
+./run_scripts/aws/run.sh eks-full dev
+
+# Infrastructure only (no application)
+./run_scripts/aws/run.sh infrastructure dev
+```
+
+**Legacy: Direct Terraform control**
 ```bash
 # Deploy to dev environment
 ./run_scripts/aws/terraform/deploy.sh dev all
@@ -213,8 +230,13 @@ infra/
 ./run_scripts/aws/terraform/deploy.sh dev infrastructure
 
 # Deploy only application layer
-./run_scripts/aws/terraform/deploy.sh prod application
+./run_scripts/aws/terraform/deploy.sh dev application
 ```
+
+> **Note:** All workflows automatically:
+> - Set up S3 bucket for Terraform state (if needed)
+> - Verify deployment and show access URLs
+> - Provide usage instructions
 
 ### Manual Deployment
 
@@ -232,26 +254,32 @@ infra/
 
    ```bash
    cd infra/terraform/environments/dev/infrastructure
-   terragrunt plan
-   terragrunt apply
+   terragrunt plan --terragrunt-config infra.hcl
+   terragrunt apply --terragrunt-config infra.hcl
    ```
 
 3. **Deploy Application Layer**
 
    ```bash
    cd infra/terraform/environments/dev/application
-   terragrunt plan
-   terragrunt apply
+   terragrunt plan --terragrunt-config appl.hcl
+   terragrunt apply --terragrunt-config appl.hcl
    ```
+
+> **Note:** The Terragrunt configuration files have been renamed for clarity:
+> - `root.hcl` - Root configuration (Level 1)
+> - `env.hcl` - Environment-specific config (Level 2)
+> - `infra.hcl` - Infrastructure layer config (Level 3)
+> - `appl.hcl` - Application layer config (Level 3)
 
 ### View Outputs
 
 ```bash
 cd infra/terraform/environments/dev/infrastructure
-terragrunt output
+terragrunt output --terragrunt-config infra.hcl
 
 cd ../application
-terragrunt output
+terragrunt output --terragrunt-config appl.hcl
 ```
 
 ---
@@ -350,10 +378,10 @@ aws dynamodb delete-item \
 
 ### Module Not Found
 
-Ensure you're running Terragrunt from the correct directory:
+Ensure you're running Terragrunt from the correct directory with the correct config file:
 ```bash
 cd infra/terraform/environments/dev/infrastructure
-terragrunt plan
+terragrunt plan --terragrunt-config infra.hcl
 ```
 
 ### Secrets Not Found
@@ -361,22 +389,37 @@ terragrunt plan
 Ensure secrets are created in Secrets Manager before deploying application layer:
 ```bash
 cd infra/terraform/environments/dev/infrastructure
-terragrunt apply
+terragrunt apply --terragrunt-config infra.hcl
 ```
 
 ---
 
 # 🗑️ 11. Destroying Infrastructure
 
+**Recommended: Use automated teardown script**
+```bash
+# Destroy all resources (interactive confirmation)
+./run_scripts/aws/terraform/teardown.sh dev all
+
+# Destroy only application layer
+./run_scripts/aws/terraform/teardown.sh dev application
+
+# Destroy only infrastructure layer
+./run_scripts/aws/terraform/teardown.sh dev infrastructure
+```
+
+**Manual: Using Terragrunt directly**
 ```bash
 cd infra/terraform/environments/dev/application
-terragrunt destroy
+terragrunt destroy --terragrunt-config appl.hcl
 
 cd ../infrastructure
-terragrunt destroy
+terragrunt destroy --terragrunt-config infra.hcl
 ```
 
 **Warning**: This will delete all resources. Ensure you have backups!
+
+> **Note:** The teardown script is idempotent and handles dependencies correctly (destroys application layer before infrastructure layer).
 
 ---
 

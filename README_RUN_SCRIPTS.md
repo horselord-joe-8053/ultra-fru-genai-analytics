@@ -33,6 +33,7 @@ This will:
 - ✅ Initialize database schema
 - ✅ Load CSV data
 - ✅ Start frontend dev server
+- ✅ Verify deployment and show usage instructions
 
 **That's it!** Open `http://localhost:5173` and start coding.
 
@@ -46,14 +47,21 @@ This will:
 ### AWS Deployment
 
 ```bash
-# Interactive menu to choose deployment type
+# Default: Complete ECS deployment (ecs-full)
 ./run_scripts/aws/run.sh
 
-# Or directly specify:
-./run_scripts/aws/run.sh ecs      # ECS Fargate
-./run_scripts/aws/run.sh eks      # Kubernetes
-./run_scripts/aws/run.sh terraform # Infrastructure as Code
+# Complete workflows (recommended):
+./run_scripts/aws/run.sh ecs-full        # Complete ECS deployment
+./run_scripts/aws/run.sh eks-full        # Complete EKS deployment
+./run_scripts/aws/run.sh infrastructure  # Infrastructure only
+
+# Legacy workflows (for quick updates):
+./run_scripts/aws/run.sh ecs             # ECS-specific steps only
+./run_scripts/aws/run.sh eks             # EKS-specific steps only
+./run_scripts/aws/run.sh terraform       # Terraform manual control
 ```
+
+**All workflows automatically verify deployment and provide usage instructions.**
 
 ---
 
@@ -71,6 +79,7 @@ run_scripts/
 │
 ├── local/                         # Local development
 │   ├── run.sh                     # 🎯 MAIN ORCHESTRATOR
+│   ├── post_run_verify.sh         # Post-deployment verification
 │   ├── setup-env.sh               # Create .env file
 │   ├── setup-python.sh            # Python venv + deps
 │   ├── setup-frontend.sh          # npm install
@@ -82,24 +91,34 @@ run_scripts/
 │
 ├── local-prod/                     # Local production simulation
 │   ├── run.sh                     # 🎯 MAIN ORCHESTRATOR
+│   ├── post_run_verify.sh         # Post-deployment verification
 │   ├── build-images.sh            # Build Docker images
 │   ├── build-frontend.sh          # Build frontend
-│   └── deploy.sh                  # Deploy with Docker
+│   ├── deploy.sh                  # Deploy with Docker
+│   └── teardown.sh                # Stop and remove services
 │
 └── aws/                           # AWS deployments
-    ├── run.sh                     # 🎯 MAIN ORCHESTRATOR (menu)
+    ├── run.sh                     # 🎯 MAIN ORCHESTRATOR
+    ├── post_run_verify.sh         # Post-deployment verification
     ├── check-aws-credentials.sh   # Verify AWS setup
     │
-    ├── ecs/                       # ECS Fargate deployment
-    │   ├── deploy.sh              # 🎯 MAIN ORCHESTRATOR
+    ├── bedrock/                   # Bedrock model access
+    │   └── enable-model-access.sh # Enable/verify model access
+    │
+    ├── common_ecs_eks/            # Shared ECS/EKS scripts
     │   ├── build-push-ecr.sh      # Build & push to ECR
     │   └── deploy-frontend.sh     # Deploy to S3
     │
+    ├── ecs/                       # ECS Fargate deployment
+    │   └── deploy.sh              # ECS-specific deployment
+    │
     ├── eks/                       # Kubernetes deployment
-    │   └── deploy.sh              # 🎯 MAIN ORCHESTRATOR
+    │   └── deploy.sh              # EKS-specific deployment
     │
     └── terraform/                 # Infrastructure as Code
-        └── deploy.sh              # 🎯 MAIN ORCHESTRATOR
+        ├── deploy.sh              # Deploy infrastructure/app
+        ├── setup-s3-bucket.sh    # Setup Terraform state bucket
+        └── teardown.sh            # Destroy infrastructure
 ```
 
 ---
@@ -232,8 +251,23 @@ You can provide AWS credentials in **three ways** (in order of preference):
 
 ### ECS Fargate Deployment
 
+**Recommended: Complete workflow (ecs-full)**
 ```bash
-# Full ECS deployment
+# Complete ECS deployment (build image → setup infra → deploy app)
+./run_scripts/aws/run.sh ecs-full dev
+```
+
+**What it does:**
+- ✅ Checks AWS credentials
+- ✅ Builds and pushes Docker image to ECR (idempotent)
+- ✅ Sets up S3 bucket for Terraform state (if needed)
+- ✅ Deploys infrastructure (VPC, Aurora, IAM, Secrets Manager)
+- ✅ Deploys application (ECS, ALB, Frontend)
+- ✅ Verifies deployment and shows access URLs
+
+**Legacy: ECS-specific steps only**
+```bash
+# ECS-specific steps (for quick updates after infrastructure exists)
 ./run_scripts/aws/run.sh ecs
 
 # Or directly:
@@ -241,45 +275,66 @@ You can provide AWS credentials in **three ways** (in order of preference):
 ```
 
 **What it does:**
-- ✅ Checks AWS credentials
 - ✅ Builds and pushes Docker image to ECR
 - ✅ Builds and deploys frontend to S3
-- ⚠️ Infrastructure setup (VPC, Aurora, ECS) needs to be done manually or via Terraform
-
-**After running:**
-1. Set up infrastructure (VPC, Aurora, ECS cluster, etc.)
-2. Update ECS task definition with ECR image URI
-3. Create/update ECS service
-
-**Or use Terraform for infrastructure:**
-```bash
-./run_scripts/aws/terraform/deploy.sh
-```
+- ⚠️ Assumes infrastructure already exists (use `ecs-full` for first-time setup)
 
 ### EKS (Kubernetes) Deployment
 
+**Recommended: Complete workflow (eks-full)**
 ```bash
-./run_scripts/aws/run.sh eks
-```
-
-**Note:** EKS deployment is partially automated. You need to:
-1. Create EKS cluster (use `eksctl` or Terraform)
-2. Configure `kubectl` context
-3. Build and push image to ECR
-4. Apply Kubernetes manifests
-
-### Terraform Infrastructure
-
-```bash
-./run_scripts/aws/terraform/deploy.sh
+# Complete EKS deployment (build image → setup infra → deploy app)
+./run_scripts/aws/run.sh eks-full dev
 ```
 
 **What it does:**
+- ✅ Checks AWS credentials and kubectl access
+- ✅ Builds and pushes Docker image to ECR (idempotent)
+- ✅ Sets up S3 bucket for Terraform state (if needed)
+- ✅ Deploys infrastructure (VPC, Aurora, IAM, Secrets Manager)
+- ✅ Generates Kubernetes ConfigMap and Secret from `.env`
+- ✅ Applies Kubernetes manifests (Deployment, Service, Ingress)
+- ✅ Verifies deployment and shows access URLs
+
+**Prerequisites:**
+- EKS cluster must already exist (created via `eksctl` or Terraform)
+- `kubectl` configured with cluster access
+- Kubernetes manifests in `infra/k8s/`
+
+**Legacy: EKS-specific steps only**
+```bash
+# EKS-specific steps (for quick updates after infrastructure exists)
+./run_scripts/aws/run.sh eks
+
+# Or directly:
+./run_scripts/aws/eks/deploy.sh
+```
+
+### Terraform Infrastructure
+
+**Recommended: Use via run.sh workflows**
+```bash
+# Infrastructure only (no application)
+./run_scripts/aws/run.sh infrastructure dev
+
+# Or use Terraform directly:
+./run_scripts/aws/terraform/deploy.sh dev all
+```
+
+**What it does:**
+- ✅ Automatically sets up S3 bucket for Terraform state (if needed)
 - ✅ Initializes Terraform
 - ✅ Shows plan of changes
-- ✅ Applies infrastructure (VPC, Aurora, ECS, etc.)
+- ✅ Applies infrastructure layer (VPC, Aurora, IAM, Secrets Manager)
+- ✅ Applies application layer (ECS, ALB, Frontend)
 
-**Note:** Terraform files need to be completed first. Currently, only basic S3 and RDS are defined.
+**Terraform Teardown:**
+```bash
+# Destroy all resources (interactive confirmation)
+./run_scripts/aws/terraform/teardown.sh dev all
+```
+
+**Note:** Terraform state bucket is automatically created by `setup-s3-bucket.sh` if it doesn't exist.
 
 ---
 
@@ -327,6 +382,8 @@ All scripts are:
 - ✅ **Error-handled** - Proper error messages and exit codes
 - ✅ **Colored output** - Easy to read success/error messages
 - ✅ **Prerequisite checks** - Validates dependencies before running
+- ✅ **Auto-verification** - Post-deployment verification scripts check service health
+- ✅ **Usage instructions** - Clear guidance on how to access and test deployments
 
 ---
 
@@ -464,9 +521,11 @@ DELTA_TABLE_PATH=data/delta/fru_sales
 |----------|---------|
 | **Local Dev Setup** | `./run_scripts/local/run.sh` |
 | **Local Prod** | `./run_scripts/local-prod/run.sh` |
-| **AWS ECS** | `./run_scripts/aws/run.sh ecs` |
-| **AWS EKS** | `./run_scripts/aws/run.sh eks` |
-| **AWS Terraform** | `./run_scripts/aws/run.sh terraform` |
+| **AWS ECS Full** | `./run_scripts/aws/run.sh ecs-full` |
+| **AWS EKS Full** | `./run_scripts/aws/run.sh eks-full` |
+| **AWS Infrastructure** | `./run_scripts/aws/run.sh infrastructure` |
+| **AWS ECS (legacy)** | `./run_scripts/aws/run.sh ecs` |
+| **AWS EKS (legacy)** | `./run_scripts/aws/run.sh eks` |
 | **Stop Services** | `./run_scripts/local/stop-services.sh` |
 | **Check Dependencies** | `./run_scripts/common/check-dependencies.sh` |
 
