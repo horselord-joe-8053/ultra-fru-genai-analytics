@@ -49,6 +49,8 @@ logs/
 *.tfstate
 *.tfstate.backup
 .terraform.lock.hcl
+.terragrunt-cache/
+temp_terra_gen/
 
 # PostgreSQL
 pgdata/

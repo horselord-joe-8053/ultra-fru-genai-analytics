@@ -1,13 +1,3 @@
-terraform {
-  required_version = ">= 1.5.0"
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
-
 # S3 Bucket for Frontend
 resource "aws_s3_bucket" "frontend" {
   bucket = "${var.project_name}-${var.environment}-frontend-${data.aws_caller_identity.current.account_id}"

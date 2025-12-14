@@ -1,0 +1,14 @@
+[0;90m17:28:10.338[0m [0;31mERROR [0m Error: Error in function call
+[0;90m17:28:10.339[0m [0;31mERROR [0m   on ./terragrunt.hcl line 14, in terraform:
+[0;90m17:28:10.339[0m [0;31mERROR [0m   14:   source = "${get_parent_terragrunt_dir()}/../../modules//infrastructure"
+[0;90m17:28:10.339[0m [0;31mERROR [0m Call to function "get_parent_terragrunt_dir" failed: Expected 1 params for
+[0;90m17:28:10.339[0m [0;31mERROR [0m function path_relative_from_include, but got 0.
+[0;90m17:28:10.339[0m [0;31mERROR [0m Error: Unsuitable value type
+[0;90m17:28:10.339[0m [0;31mERROR [0m   on ./terragrunt.hcl line 14, in terraform:
+[0;90m17:28:10.339[0m [0;31mERROR [0m   14:   source = "${get_parent_terragrunt_dir()}/../../modules//infrastructure"
+[0;90m17:28:10.339[0m [0;31mERROR [0m Unsuitable value: value must be known
+[0;90m17:28:10.970[0m [0;31mERROR [0m error occurred:
+
+* ./terragrunt.hcl:14,15-41: Error in function call; Call to function "get_parent_terragrunt_dir" failed: Expected 1 params for function path_relative_from_include, but got 0., and 1 other diagnostic(s)
+
+[0;90m17:28:10.973[0m [0;31mERROR [0m Unable to determine underlying exit code, so Terragrunt will exit with error code 1

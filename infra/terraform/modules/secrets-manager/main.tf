@@ -1,13 +1,3 @@
-terraform {
-  required_version = ">= 1.5.0"
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
-
 # OpenAI API Key Secret
 resource "aws_secretsmanager_secret" "openai_key" {
   name        = "${var.project_name}/${var.environment}/openai-api-key"

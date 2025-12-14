@@ -11,8 +11,11 @@ include "env" {
 }
 
 terraform {
-  source = "${get_parent_terragrunt_dir()}/../../modules//application"
+  source = "${get_terragrunt_dir()}/../../../modules//application"
 }
+
+# Set custom cache directory location for this configuration
+download_dir = "${get_path_to_repo_root()}/temp_terra_gen/.terragrunt-cache/dev/application"
 
 # Dependencies on infrastructure layer
 dependencies {
