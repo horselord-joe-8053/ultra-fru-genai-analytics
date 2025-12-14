@@ -106,7 +106,7 @@ deploy_terragrunt() {
         # Check if container image is set
         if [ -z "$CONTAINER_IMAGE" ]; then
             log_warning "CONTAINER_IMAGE not set. You may need to build and push to ECR first."
-            log_info "Run: ./run_scripts/aws/ecs/build-push-ecr.sh"
+            log_info "Run: ./run_scripts/aws/common_ecs_eks/build-push-ecr.sh"
             read -p "Continue anyway? (yes/no): " continue_anyway
             if [ "$continue_anyway" != "yes" ]; then
                 log_info "Application deployment cancelled"

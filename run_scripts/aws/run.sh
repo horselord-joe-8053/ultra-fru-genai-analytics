@@ -131,7 +131,7 @@ check_or_build_image() {
     log_info "Container image not found in ECR"
     log_info "Building and pushing container image..."
     
-    if "$SCRIPT_DIR/ecs/build-push-ecr.sh"; then
+    if "$SCRIPT_DIR/common_ecs_eks/build-push-ecr.sh"; then
         export CONTAINER_IMAGE="$ECR_REPO_URI:$IMAGE_TAG"
         log_success "Container image built and pushed: $CONTAINER_IMAGE"
         log_info "Consider adding to .env: CONTAINER_IMAGE=$CONTAINER_IMAGE"

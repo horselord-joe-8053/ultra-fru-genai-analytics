@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fru-config
+  namespace: default
+data:
+  # Database configuration (from Terraform outputs)
+  # These should be set from Terraform outputs or .env
+  pghost: "${PGHOST}"
+  pgport: "5432"
+  pgdatabase: "fru_db"
+  pguser: "${PGUSER:-postgres}"
+  
+  # AWS configuration
+  aws-region: "${AWS_REGION:-us-east-1}"
+  bedrock-model-id: "${BEDROCK_MODEL_ID:-anthropic.claude-3-haiku-20240307-v1:0}"
+  
+  # OpenAI configuration
+  openai-embed-model: "${OPENAI_EMBED_MODEL:-text-embedding-3-small}"
+  
+  # Optional feature flags
+  use-agent-query: "${USE_AGENT_QUERY:-false}"
+  log-level: "${LOG_LEVEL:-INFO}"
+

@@ -1,0 +1,126 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fru-api
+  namespace: default
+  labels:
+    app: fru-api
+    component: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fru-api
+  template:
+    metadata:
+      labels:
+        app: fru-api
+        component: backend
+    spec:
+      containers:
+      - name: fru-api
+        image: ${CONTAINER_IMAGE}
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 5000
+          protocol: TCP
+        env:
+        # Database configuration
+        - name: PGHOST
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: pghost
+        - name: PGPORT
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: pgport
+        - name: PGDATABASE
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: pgdatabase
+        - name: PGUSER
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: pguser
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: fru-secrets
+              key: db-password
+        # AWS/Bedrock configuration
+        - name: AWS_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: aws-region
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: fru-secrets
+              key: aws-access-key-id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: fru-secrets
+              key: aws-secret-access-key
+        - name: BEDROCK_MODEL_ID
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: bedrock-model-id
+        # OpenAI configuration
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: fru-secrets
+              key: openai-api-key
+        - name: OPENAI_EMBED_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: openai-embed-model
+              optional: true
+        # Optional feature flags
+        - name: USE_AGENT_QUERY
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: use-agent-query
+              optional: true
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: log-level
+              optional: true
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      # Service account for IAM role (if using IRSA)
+      # serviceAccountName: fru-api-sa
+
