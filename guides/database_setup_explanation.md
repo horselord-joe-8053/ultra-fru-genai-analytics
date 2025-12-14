@@ -321,7 +321,7 @@ The application layer Terraform configuration:
    aurora_endpoint = dependency.infrastructure.outputs.aurora_endpoint
    db_password_secret_arn = dependency.infrastructure.outputs.db_password_secret_arn
    ```
-   See `infra/terraform/environments/dev/application/terragrunt.hcl` lines 56-62
+   See `infra/terraform/environments/dev/application/appl.hcl` lines 56-62
 
 2. **Passes to ECS module**:
    - ECS module receives `aurora_endpoint` and `db_password_secret_arn`

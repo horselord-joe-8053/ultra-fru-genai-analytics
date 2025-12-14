@@ -1,7 +1,9 @@
 # Prod environment configuration
-include "root" {
-  path = find_in_parent_folders()
-}
+# NOTE: Do NOT include "root" here - it's included by infrastructure/terragrunt.hcl and application/terragrunt.hcl
+# Including it here would create a nested include chain, which Terragrunt doesn't allow.
+# include "root" {
+#   path = find_in_parent_folders()
+# }
 
 # Environment-specific inputs
 inputs = {

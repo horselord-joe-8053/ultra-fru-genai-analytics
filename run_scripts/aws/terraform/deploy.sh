@@ -85,14 +85,14 @@ deploy_terragrunt() {
         cd "$ENV_DIR/infrastructure"
         
         log_info "Running terragrunt plan..."
-        terragrunt plan
+        terragrunt plan --terragrunt-config infra.hcl
         
         log_warning "Terragrunt will create/modify AWS resources"
         read -p "Do you want to proceed with terragrunt apply? (yes/no): " confirm
         
         if [ "$confirm" = "yes" ]; then
             log_info "Applying Terragrunt configuration..."
-            terragrunt apply
+            terragrunt apply --terragrunt-config infra.hcl
             log_success "Infrastructure layer deployed!"
         else
             log_info "Infrastructure deployment cancelled"
@@ -119,14 +119,14 @@ deploy_terragrunt() {
         cd "$ENV_DIR/application"
         
         log_info "Running terragrunt plan..."
-        terragrunt plan
+        terragrunt plan --terragrunt-config appl.hcl
         
         log_warning "Terragrunt will create/modify AWS resources"
         read -p "Do you want to proceed with terragrunt apply? (yes/no): " confirm
         
         if [ "$confirm" = "yes" ]; then
             log_info "Applying Terragrunt configuration..."
-            terragrunt apply
+            terragrunt apply --terragrunt-config appl.hcl
             log_success "Application layer deployed!"
         else
             log_info "Application deployment cancelled"
@@ -134,8 +134,8 @@ deploy_terragrunt() {
     fi
     
     log_success "Terragrunt deployment complete!"
-    log_info "To view outputs: cd $ENV_DIR/<layer> && terragrunt output"
-    log_info "To destroy: cd $ENV_DIR/<layer> && terragrunt destroy"
+    log_info "To view outputs: cd $ENV_DIR/<layer> && terragrunt output --terragrunt-config <infra|appl>.hcl"
+    log_info "To destroy: cd $ENV_DIR/<layer> && terragrunt destroy --terragrunt-config <infra|appl>.hcl"
 }
 
 main() {

@@ -38,11 +38,15 @@ setup_python_env() {
     log_info "Upgrading pip..."
     pip install --quiet --upgrade pip
     
-    # Install dependencies
+    # Install dependencies (idempotent: pip install skips already-installed packages)
     if [ -f "$REQUIREMENTS_FILE" ]; then
-        log_info "Installing Python dependencies from requirements.txt..."
-        pip install --quiet -r "$REQUIREMENTS_FILE"
-        log_success "Python dependencies installed"
+        log_info "Installing/updating Python dependencies from requirements.txt..."
+        # pip install is idempotent - it will:
+        # - Skip packages already installed with matching versions
+        # - Upgrade packages if newer version is specified
+        # - Install missing packages
+        pip install --quiet --upgrade -r "$REQUIREMENTS_FILE"
+        log_success "Python dependencies installed/updated"
     else
         log_error "requirements.txt not found at $REQUIREMENTS_FILE"
         exit 1

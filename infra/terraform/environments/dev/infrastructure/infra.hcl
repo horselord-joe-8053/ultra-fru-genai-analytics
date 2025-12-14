@@ -1,12 +1,12 @@
-# Infrastructure layer for prod environment
+# Infrastructure layer for dev environment
 # This includes: VPC, Aurora, IAM, Secrets Manager
 
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 
 include "env" {
-  path = "${get_terragrunt_dir()}/../terragrunt.hcl"
+  path = "${get_terragrunt_dir()}/../env.hcl"
   expose = true
 }
 

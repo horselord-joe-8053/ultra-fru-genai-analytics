@@ -2,11 +2,11 @@
 # This includes: ECS, ALB, Frontend
 
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 
 include "env" {
-  path = "${get_terragrunt_dir()}/../terragrunt.hcl"
+  path = "${get_terragrunt_dir()}/../env.hcl"
   expose = true
 }
 
