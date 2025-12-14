@@ -51,8 +51,12 @@ deploy_terragrunt() {
         exit 1
     fi
     
-    # Load environment variables
+    # Load environment variables (needed for bootstrap script)
     load_env_file
+    
+    # Setup Terraform state bucket (if needed)
+    log_step "Ensuring Terraform state bucket exists"
+    "$SCRIPT_DIR/setup-s3-bucket.sh" || exit 1
     
     # Set required environment variables for Terragrunt
     export AWS_REGION="${AWS_REGION:-us-east-1}"

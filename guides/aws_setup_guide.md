@@ -174,6 +174,10 @@ This follows the **principle of least privilege** for security:
 
 ## Step 5: Create S3 Bucket for Terraform State
 
+**⚠️ Important:** This step must be done **manually before running Terraform**. Terraform cannot create its own state bucket because it needs the bucket to exist before it can store state files. This is a one-time bootstrap step.
+
+**Note:** The Terraform configuration in `infra/terraform/environments/terragrunt.hcl` expects this bucket to exist and will use it automatically once created.
+
 ### 5.1 Get Your AWS Account ID
 
 ```bash
@@ -231,32 +235,70 @@ TF_STATE_BUCKET=fru-terraform-state-<your-account-id>
 
 ## Step 6: Enable Bedrock Model Access
 
-### 6.1 Enable Bedrock in AWS Console
+### 6.1 Check Bedrock Model Access (Automated)
+
+**Note**: As of October 2025, AWS Bedrock automatically enables access to most serverless foundation models by default. However, Anthropic models (Claude) may still require a one-time usage form submission.
+
+**Option A: Use Automated Script (Recommended)**
+
+```bash
+# Check if model access is enabled
+./run_scripts/aws/bedrock/enable-model-access.sh
+
+# If access is not enabled, attempt automated enablement
+./run_scripts/aws/bedrock/enable-model-access.sh --enable
+
+# Check specific model
+./run_scripts/aws/bedrock/enable-model-access.sh --model anthropic.claude-3-haiku-20240307-v1:0
+```
+
+The script will:
+- ✅ Check if Bedrock service is accessible
+- ✅ Verify access to your specified model (default: Claude 3 Haiku)
+- ⚠️ Attempt automated enablement if `--enable` flag is used
+- ✅ Provide clear manual instructions if automated enablement is not possible
+
+**Option B: Manual Enablement via AWS Console**
+
+If automated enablement is not possible, follow these steps:
 
 1. Log in to AWS Console with `admin` user (or root)
-2. Navigate to **Amazon Bedrock** service
+2. Navigate to **Amazon Bedrock** service: https://console.aws.amazon.com/bedrock/
 3. Go to **"Model access"** in the left sidebar
 4. Click **"Manage model access"**
 5. Select the Claude models you want to use:
    - **Claude 3 Haiku** (recommended for cost)
    - **Claude 3 Sonnet** (optional)
    - **Claude 3 Opus** (optional)
-6. Click **"Save changes"**
-7. Wait for model access to be enabled (may take a few minutes)
+6. **For Anthropic models**: Complete the one-time usage form when prompted
+7. Click **"Save changes"**
+8. Wait for model access to be enabled (may take a few minutes)
 
 ### 6.2 Verify Bedrock Access
 
+After enabling access, verify it works:
+
 ```bash
-# Test with bedrock-admin credentials
+# Using the automated script
+./run_scripts/aws/bedrock/enable-model-access.sh
+
+# Or manually with AWS CLI
 export AWS_ACCESS_KEY_ID=<bedrock-admin-access-key-id>
 export AWS_SECRET_ACCESS_KEY=<bedrock-admin-secret-access-key>
 export AWS_REGION=us-east-1
 
 # List available models
 aws bedrock list-foundation-models --region us-east-1
+
+# Check specific model
+aws bedrock get-foundation-model \
+  --model-identifier anthropic.claude-3-haiku-20240307-v1:0 \
+  --region us-east-1
 ```
 
-You should see Claude models in the list.
+You should see Claude models in the list and be able to access the specific model.
+
+**Note**: If you see errors, the model access may still be propagating. Wait a few minutes and try again.
 
 ---
 
