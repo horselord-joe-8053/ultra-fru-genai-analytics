@@ -11,7 +11,7 @@ include "env" {
 }
 
 terraform {
-  source = "${get_parent_terragrunt_dir()}/../../modules//infrastructure"
+  source = "${get_terragrunt_dir()}/../../../modules//infrastructure"
 }
 
 # Pass inputs from environment config
@@ -27,6 +27,7 @@ inputs = {
   
   openai_api_key = include.env.inputs.openai_api_key
   db_password    = include.env.inputs.db_password
+  db_host        = include.env.inputs.db_host
   db_username     = include.env.inputs.db_username
   
   aurora_database_name = "fru_db"

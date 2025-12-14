@@ -25,25 +25,28 @@ remote_state {
 }
 
 # Generate provider configuration
-generate "provider" {
-  path      = "provider.tf"
-  if_exists = "overwrite_terragrunt"
-  contents  = <<EOF
-terraform {
-  required_version = ">= 1.5.0"
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
-
-provider "aws" {
-  region = var.aws_region
-}
-EOF
-}
+# NOTE: Terraform generates a provider configuration by itself. It is
+# good practice to let the modules create provider config so we
+# can use it anywhere else, instead of creating with root.hcl.
+# generate "provider" {
+#   path      = "provider.tf"
+#   if_exists = "overwrite_terragrunt"
+#   contents  = <<EOF
+# terraform {
+#   required_version = ">= 1.5.0"
+#   required_providers {
+#     aws = {
+#       source  = "hashicorp/aws"
+#       version = "~> 5.0"
+#     }
+#   }
+# }
+# 
+# provider "aws" {
+#   region = var.aws_region
+# }
+# EOF
+# }
 
 # Common inputs (can be overridden by environment-specific configs)
 inputs = {

@@ -11,7 +11,7 @@ include "env" {
 }
 
 terraform {
-  source = "${get_parent_terragrunt_dir()}/../../modules//application"
+  source = "${get_terragrunt_dir()}/../../../modules//application"
 }
 
 # Dependencies on infrastructure layer
