@@ -856,7 +856,7 @@ For full enterprise posture:
 If your environment requires Kubernetes, you can deploy FRU to **EKS**.  
 The building blocks:
 
-- EKS cluster
+- EKS cluster (created via Terraform)
 - Aurora PostgreSQL (same as above)
 - Bedrock + OpenAI as external services
 - Kubernetes `Deployment` + `Service` for API
@@ -864,7 +864,7 @@ The building blocks:
 
 > **💡 Recommended**: Use the **automated EKS deployment script** for complete setup:
 > ```bash
-> # Complete EKS deployment (build image → setup infra → deploy app)
+> # Complete EKS deployment (build image → setup infra → deploy EKS → deploy app)
 > ./run_scripts/aws/run.sh eks-full dev
 > ```
 > 
@@ -872,14 +872,16 @@ The building blocks:
 > - Builds and pushes Docker image to ECR
 > - Sets up Terraform state bucket (if needed)
 > - Deploys infrastructure (VPC, Aurora, IAM, Secrets Manager)
+> - Deploys EKS layer (EKS cluster, node groups/Fargate profiles, OIDC provider)
+> - Configures kubectl automatically
 > - Generates Kubernetes ConfigMap and Secret from `.env`
 > - Applies Kubernetes manifests from `infra/k8s/`
 > - Verifies deployment and shows access URLs
 >
 > **Prerequisites:**
-> - EKS cluster must already exist (created via `eksctl` or Terraform)
-> - `kubectl` configured with cluster access
+> - `kubectl` installed (will be configured automatically)
 > - Kubernetes manifests in `infra/k8s/` (Deployment, Service, Ingress, ConfigMap, Secret templates)
+> - EKS cluster is created automatically via Terraform (no manual `eksctl` needed)
 
 ### 5.1 Backend deployment YAML (simplified)
 
@@ -967,6 +969,7 @@ The infrastructure is organized as reusable modules with Terragrunt for environm
 - `iam/` — IAM roles (execution + runtime separation)
 - `secrets-manager/` — Secrets Manager for sensitive data
 - `ecs/` — ECS cluster, service, task definition
+- `eks/` — EKS cluster, node groups/Fargate profiles, OIDC provider
 - `alb/` — Application Load Balancer
 - `frontend/` — S3 + CloudFront for frontend
 
@@ -980,45 +983,60 @@ infra/terraform/
     iam/
     secrets-manager/
     ecs/
+    eks/
     alb/
     frontend/
     infrastructure/     # Wrapper (VPC + Aurora + IAM + Secrets)
     application/        # Wrapper (ECS + ALB + Frontend)
   environments/         # Terragrunt configs
-    terragrunt.hcl     # Root config
+    root.hcl           # Root config
     dev/
       infrastructure/
-      application/
+      application/      # ECS-specific
+      eks/              # EKS-specific
     prod/
       infrastructure/
-      application/
+      application/      # ECS-specific
+      eks/              # EKS-specific
 ```
 
 **Security Best Practices:**
 - Secrets stored in Secrets Manager (not environment variables)
 - IAM role separation (execution vs runtime)
 - IAM database authentication support
-- Private subnets for ECS tasks
+- Private subnets for ECS tasks and EKS nodes
+- OIDC provider for IRSA (IAM Roles for Service Accounts) in EKS
+
+**EKS vs ECS Architecture:**
+- **ECS**: Uses Terraform-managed ALB directly (application layer includes ALB module)
+- **EKS**: Uses Kubernetes controller-managed ALB (created dynamically from Ingress resources)
+- **Why separate layers**: EKS needs its own `eks/` folder because it uses different orchestration and load balancing approaches (see `README_INFRA.md` Section 3.3 for detailed explanation)
 
 **Deployment:**
 
 **Recommended: Use automated workflows**
 ```bash
-# Complete deployment (infrastructure + application)
+# Complete ECS deployment (infrastructure + application)
 ./run_scripts/aws/run.sh ecs-full dev
+
+# Complete EKS deployment (infrastructure + eks + Kubernetes manifests)
+./run_scripts/aws/run.sh eks-full dev
 
 # Infrastructure only
 ./run_scripts/aws/run.sh infrastructure dev
 
 # Manual Terraform control
 ./run_scripts/aws/terraform/deploy.sh dev infrastructure
-./run_scripts/aws/terraform/deploy.sh dev application
+./run_scripts/aws/terraform/deploy.sh dev application  # ECS-specific
+./run_scripts/aws/terraform/deploy.sh dev eks          # EKS-specific
 ```
 
 **What's automated:**
 - ✅ S3 bucket for Terraform state (created automatically by `setup-s3-bucket.sh`)
 - ✅ Infrastructure layer deployment (VPC, Aurora, IAM, Secrets Manager)
-- ✅ Application layer deployment (ECS, ALB, Frontend)
+- ✅ Application layer deployment (ECS, ALB, Frontend) - for ECS deployments
+- ✅ EKS layer deployment (EKS cluster, node groups, OIDC provider) - for EKS deployments
+- ✅ kubectl configuration (for EKS deployments)
 - ✅ Post-deployment verification
 
 **Terraform Teardown:**

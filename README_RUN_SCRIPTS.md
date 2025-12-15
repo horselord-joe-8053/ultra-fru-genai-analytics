@@ -283,23 +283,25 @@ You can provide AWS credentials in **three ways** (in order of preference):
 
 **Recommended: Complete workflow (eks-full)**
 ```bash
-# Complete EKS deployment (build image → setup infra → deploy app)
+# Complete EKS deployment (build image → setup infra → deploy EKS → deploy app)
 ./run_scripts/aws/run.sh eks-full dev
 ```
 
 **What it does:**
-- ✅ Checks AWS credentials and kubectl access
+- ✅ Checks AWS credentials
 - ✅ Builds and pushes Docker image to ECR (idempotent)
 - ✅ Sets up S3 bucket for Terraform state (if needed)
 - ✅ Deploys infrastructure (VPC, Aurora, IAM, Secrets Manager)
+- ✅ Deploys EKS layer (EKS cluster, node groups/Fargate profiles, OIDC provider)
+- ✅ Configures kubectl automatically
 - ✅ Generates Kubernetes ConfigMap and Secret from `.env`
 - ✅ Applies Kubernetes manifests (Deployment, Service, Ingress)
 - ✅ Verifies deployment and shows access URLs
 
 **Prerequisites:**
-- EKS cluster must already exist (created via `eksctl` or Terraform)
-- `kubectl` configured with cluster access
+- `kubectl` installed (will be configured automatically)
 - Kubernetes manifests in `infra/k8s/`
+- EKS cluster is created automatically via Terraform (no manual `eksctl` needed)
 
 **Legacy: EKS-specific steps only**
 ```bash
@@ -326,15 +328,30 @@ You can provide AWS credentials in **three ways** (in order of preference):
 - ✅ Initializes Terraform
 - ✅ Shows plan of changes
 - ✅ Applies infrastructure layer (VPC, Aurora, IAM, Secrets Manager)
-- ✅ Applies application layer (ECS, ALB, Frontend)
+- ✅ Applies application layer (ECS, ALB, Frontend) - for ECS deployments
+- ✅ Applies EKS layer (EKS cluster, node groups, OIDC provider) - for EKS deployments
+
+**Available layers:**
+- `infrastructure` - VPC, Aurora, IAM, Secrets Manager
+- `application` - ECS, ALB, Frontend (ECS-specific)
+- `eks` - EKS cluster, node groups, OIDC provider (EKS-specific)
+- `all` - Deploy all layers (infrastructure + application OR infrastructure + eks)
 
 **Terraform Teardown:**
 ```bash
 # Destroy all resources (interactive confirmation)
 ./run_scripts/aws/terraform/teardown.sh dev all
+
+# Destroy specific layer
+./run_scripts/aws/terraform/teardown.sh dev infrastructure
+./run_scripts/aws/terraform/teardown.sh dev application  # ECS-specific
+./run_scripts/aws/terraform/teardown.sh dev eks        # EKS-specific
 ```
 
-**Note:** Terraform state bucket is automatically created by `setup-s3-bucket.sh` if it doesn't exist.
+**Note:** 
+- Terraform state bucket is automatically created by `setup-s3-bucket.sh` if it doesn't exist
+- EKS and ECS deployments share the same infrastructure layer (VPC, Aurora, IAM, Secrets)
+- EKS has its own layer (`eks/`) separate from the application layer (`application/`) because they use different orchestration platforms (see `README_INFRA.md` Section 3.3 for details)
 
 ---
 
@@ -521,9 +538,9 @@ DELTA_TABLE_PATH=data/delta/fru_sales
 |----------|---------|
 | **Local Dev Setup** | `./run_scripts/local/run.sh` |
 | **Local Prod** | `./run_scripts/local-prod/run.sh` |
-| **AWS ECS Full** | `./run_scripts/aws/run.sh ecs-full` |
-| **AWS EKS Full** | `./run_scripts/aws/run.sh eks-full` |
-| **AWS Infrastructure** | `./run_scripts/aws/run.sh infrastructure` |
+| **AWS ECS Full** | `./run_scripts/aws/run.sh ecs-full dev` |
+| **AWS EKS Full** | `./run_scripts/aws/run.sh eks-full dev` |
+| **AWS Infrastructure** | `./run_scripts/aws/run.sh infrastructure dev` |
 | **AWS ECS (legacy)** | `./run_scripts/aws/run.sh ecs` |
 | **AWS EKS (legacy)** | `./run_scripts/aws/run.sh eks` |
 | **Stop Services** | `./run_scripts/local/stop-services.sh` |

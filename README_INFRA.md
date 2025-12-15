@@ -122,6 +122,7 @@ infra/
     │   ├── iam/               # IAM roles (execution + runtime)
     │   ├── secrets-manager/   # Secrets Manager for sensitive data
     │   ├── ecs/               # ECS cluster, service, task definition
+    │   ├── eks/               # EKS cluster, node groups, OIDC provider
     │   ├── alb/               # Application Load Balancer
     │   ├── frontend/           # S3 + CloudFront for frontend
     │   ├── infrastructure/    # Wrapper module (VPC + Aurora + IAM + Secrets)
@@ -132,14 +133,18 @@ infra/
         │   ├── env.hcl        # Environment config (Level 2)
         │   ├── infrastructure/
         │   │   └── terragrunt.hcl  # Infrastructure layer (Level 3)
-        │   └── application/
-        │       └── terragrunt.hcl   # Application layer (Level 3)
+        │   ├── application/
+        │   │   └── terragrunt.hcl   # Application layer (Level 3) - ECS
+        │   └── eks/
+        │       └── terragrunt.hcl   # EKS layer (Level 3) - EKS
         └── prod/
             ├── env.hcl        # Environment config (Level 2)
             ├── infrastructure/
             │   └── terragrunt.hcl  # Infrastructure layer (Level 3)
-            └── application/
-                └── terragrunt.hcl   # Application layer (Level 3)
+            ├── application/
+            │   └── terragrunt.hcl   # Application layer (Level 3) - ECS
+            └── eks/
+                └── terragrunt.hcl   # EKS layer (Level 3) - EKS
 ```
 
 ### 3.1. Why `terragrunt.hcl` at Each Level?
@@ -202,10 +207,12 @@ When Terragrunt processes this:
 infra/terraform/environments/
 ├── dev/
 │   ├── infrastructure/.terraform.lock.hcl  ✅ Committed
-│   └── application/.terraform.lock.hcl     ✅ Committed
+│   ├── application/.terraform.lock.hcl     ✅ Committed
+│   └── eks/.terraform.lock.hcl            ✅ Committed (if EKS is used)
 └── prod/
     ├── infrastructure/.terraform.lock.hcl  ✅ Committed
-    └── application/.terraform.lock.hcl      ✅ Committed
+    ├── application/.terraform.lock.hcl      ✅ Committed
+    └── eks/.terraform.lock.hcl              ✅ Committed (if EKS is used)
 ```
 
 **Why They Must Be Committed:**
@@ -231,6 +238,65 @@ To upgrade providers (e.g., from 5.x to 6.x):
 2. Run `terraform init -upgrade` in each environment directory
 3. Test thoroughly in dev environment first
 4. Commit the updated lock files
+
+### 3.3. Why EKS Has Its Own Layer (Separate from Application Layer)
+
+**Question**: Why does EKS have its own `eks/` folder, while ECS is part of the `application/` layer?
+
+**Answer**: ECS and EKS use fundamentally different orchestration and load balancing approaches, requiring separate infrastructure layers.
+
+#### ECS: Direct ALB Integration (AWS-Native)
+
+- **Terraform-managed ALB**: The `application/` layer includes an ALB module that creates AWS resources directly via Terraform (`aws_lb`, `aws_lb_target_group`)
+- **Direct connection**: ECS Service explicitly connects to the ALB Target Group via a `load_balancer` block in Terraform
+- **Static configuration**: ALB configuration is fixed at Terraform apply time
+- **Bundled together**: ECS, ALB, and Frontend are tightly coupled in the application layer
+
+**Flow**: `Internet → ALB (Terraform) → Target Group (Terraform) → ECS Tasks`
+
+#### EKS: ALB via Kubernetes Controller
+
+- **Controller-managed ALB**: EKS uses AWS Load Balancer Controller (a Kubernetes pod) that watches for `Ingress` resources
+- **Dynamic creation**: ALB and Target Group are created **at runtime** by the controller based on Kubernetes Ingress annotations
+- **Kubernetes-native**: Uses Kubernetes `Ingress` and `Service` resources, not Terraform-managed ALB
+- **Different lifecycle**: ALB is managed by Kubernetes, not Terraform
+
+**Flow**: `Internet → ALB (Controller-created) → Kubernetes Service → Pods`
+
+#### Why They Can't Share the Same Layer
+
+1. **Different ALB Management**:
+   - ECS: Terraform creates and manages ALB
+   - EKS: Kubernetes controller creates and manages ALB
+   - They would conflict if both tried to manage the same ALB
+
+2. **Different Target Types**:
+   - ECS: Target Group uses `target_type = "ip"` (Fargate IPs)
+   - EKS: Target Group targets Kubernetes Service endpoints
+   - Different health checks, security groups, configurations
+
+3. **Different Deployment Models**:
+   - ECS: Task definitions, ALB target groups (Terraform)
+   - EKS: Kubernetes manifests, Ingress resources (`kubectl apply`)
+
+4. **Independent Lifecycles**:
+   - EKS cluster creation takes 10-15 minutes (deserves its own layer)
+   - ECS and EKS are alternatives (choose one or the other, or both)
+
+#### Structure Comparison
+
+```
+ECS Deployment:
+  infrastructure/  → VPC, Aurora, IAM, Secrets (SHARED)
+  application/     → ECS, ALB, Frontend (ECS-specific)
+
+EKS Deployment:
+  infrastructure/  → VPC, Aurora, IAM, Secrets (SHARED)
+  eks/            → EKS Cluster, Node Groups, OIDC (EKS-specific)
+  (Kubernetes manifests deployed separately via kubectl)
+```
+
+**Key Insight**: ECS doesn't have its own folder because it's bundled with ALB and Frontend in the application layer. EKS needs its own layer because it uses a different orchestration platform with different networking requirements.
 
 ---
 
@@ -329,6 +395,9 @@ To upgrade providers (e.g., from 5.x to 6.x):
 
 # Deploy only application layer
 ./run_scripts/aws/terraform/deploy.sh dev application
+
+# Deploy only EKS layer
+./run_scripts/aws/terraform/deploy.sh dev eks
 ```
 
 > **Note:** All workflows automatically:
@@ -356,12 +425,23 @@ To upgrade providers (e.g., from 5.x to 6.x):
    terragrunt apply
    ```
 
-3. **Deploy Application Layer**
+3. **Deploy Application Layer (ECS)**
 
    ```bash
    cd infra/terraform/environments/dev/application
    terragrunt plan
    terragrunt apply
+   ```
+
+   **OR Deploy EKS Layer**
+
+   ```bash
+   cd infra/terraform/environments/dev/eks
+   terragrunt plan
+   terragrunt apply
+   
+   # After EKS cluster is created, configure kubectl
+   aws eks update-kubeconfig --region us-east-1 --name fru-dev-cluster --profile admin
    ```
 
 > **Note:** The Terragrunt configuration files use standard naming:

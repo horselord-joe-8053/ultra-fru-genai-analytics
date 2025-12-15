@@ -16,6 +16,9 @@ SCRIPT_DIR="$FRONTEND_SCRIPT_DIR"
 S3_BUCKET_NAME="${S3_BUCKET_NAME:-fru-frontend-bucket}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 
+# Check for dry-run mode (from parent script)
+DRY_RUN="${DRY_RUN:-false}"
+
 deploy_frontend() {
     log_step "Deploying frontend to S3"
     
@@ -36,8 +39,30 @@ deploy_frontend() {
         exit 1
     fi
     
-    # Check if S3 bucket exists, create if not
-    if ! aws s3 ls --profile "$AWS_PROFILE" "s3://$S3_BUCKET_NAME" >/dev/null 2>&1; then
+    # Check if S3 bucket exists
+    local bucket_exists=false
+    if aws s3 ls --profile "$AWS_PROFILE" "s3://$S3_BUCKET_NAME" >/dev/null 2>&1; then
+        bucket_exists=true
+        log_info "S3 bucket already exists"
+    else
+        log_info "S3 bucket does not exist"
+    fi
+    
+    if [ "$DRY_RUN" = "true" ]; then
+        log_info "[DRY-RUN] Would perform the following operations:"
+        if [ "$bucket_exists" = false ]; then
+            log_info "[DRY-RUN]   - Create S3 bucket: $S3_BUCKET_NAME"
+            log_info "[DRY-RUN]   - Configure static website hosting"
+        fi
+        log_info "[DRY-RUN]   - Sync frontend files to S3 (showing what would be synced)..."
+        aws s3 sync --dryrun --profile "$AWS_PROFILE" "$REPO_ROOT/frontend/dist" "s3://$S3_BUCKET_NAME" --delete
+        log_info "[DRY-RUN] Bucket: $S3_BUCKET_NAME"
+        log_info "[DRY-RUN] Website URL: http://$S3_BUCKET_NAME.s3-website-$AWS_REGION.amazonaws.com"
+        return 0
+    fi
+    
+    # Create S3 bucket if it doesn't exist
+    if [ "$bucket_exists" = false ]; then
         log_info "S3 bucket does not exist, creating..."
         if [ "$AWS_REGION" = "us-east-1" ]; then
             aws s3 mb --profile "$AWS_PROFILE" "s3://$S3_BUCKET_NAME" --region "$AWS_REGION"
@@ -51,8 +76,6 @@ deploy_frontend() {
         aws s3 website --profile "$AWS_PROFILE" "s3://$S3_BUCKET_NAME" \
             --index-document index.html \
             --error-document index.html
-    else
-        log_info "S3 bucket already exists"
     fi
     
     # Sync files to S3

@@ -36,6 +36,8 @@ resource "aws_secretsmanager_secret" "db_password" {
 resource "aws_secretsmanager_secret_version" "db_password" {
   secret_id     = aws_secretsmanager_secret.db_password.id
   secret_string = jsonencode({
+    # Include both username and password so this secret can be used with the RDS Data API
+    username = var.db_username
     password = var.db_password
   })
 }

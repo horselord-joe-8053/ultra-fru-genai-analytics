@@ -13,6 +13,9 @@ source "$SCRIPT_DIR/../../common/load-env.sh"
 # Load environment variables early
 load_env_file 2>/dev/null || true
 
+# Check for dry-run mode (from parent script)
+DRY_RUN="${DRY_RUN:-false}"
+
 # Parse command line arguments
 SKIP_BUILD=false
 SKIP_FRONTEND=false
@@ -231,18 +234,33 @@ apply_manifests() {
     for yaml_file in "${yaml_files[@]}"; do
         log_info "Applying: $(basename "$yaml_file")"
         
-        # If CONTAINER_IMAGE is set, substitute it in the manifest
-        if [ -n "$container_image" ]; then
-            # Use envsubst if available, otherwise use sed
-            if command_exists envsubst; then
-                export CONTAINER_IMAGE="$container_image"
-                envsubst < "$yaml_file" | kubectl apply -f -
+        if [ "$DRY_RUN" = "true" ]; then
+            # Dry-run: show what would be applied
+            if [ -n "$container_image" ]; then
+                if command_exists envsubst; then
+                    export CONTAINER_IMAGE="$container_image"
+                    envsubst < "$yaml_file" | kubectl apply --dry-run=client -f -
+                else
+                    sed "s|\${CONTAINER_IMAGE}|$container_image|g; s|<CONTAINER_IMAGE>|$container_image|g" "$yaml_file" | kubectl apply --dry-run=client -f -
+                fi
             else
-                # Fallback to sed (simple substitution)
-                sed "s|\${CONTAINER_IMAGE}|$container_image|g; s|<CONTAINER_IMAGE>|$container_image|g" "$yaml_file" | kubectl apply -f -
+                kubectl apply --dry-run=client -f "$yaml_file"
             fi
+            log_info "[DRY-RUN] Would apply: $(basename "$yaml_file")"
         else
-            kubectl apply -f "$yaml_file"
+            # Actual apply
+            if [ -n "$container_image" ]; then
+                # Use envsubst if available, otherwise use sed
+                if command_exists envsubst; then
+                    export CONTAINER_IMAGE="$container_image"
+                    envsubst < "$yaml_file" | kubectl apply -f -
+                else
+                    # Fallback to sed (simple substitution)
+                    sed "s|\${CONTAINER_IMAGE}|$container_image|g; s|<CONTAINER_IMAGE>|$container_image|g" "$yaml_file" | kubectl apply -f -
+                fi
+            else
+                kubectl apply -f "$yaml_file"
+            fi
         fi
     done
     

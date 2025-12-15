@@ -110,7 +110,6 @@ resource "aws_cloudfront_distribution" "frontend" {
 
     forwarded_values {
       query_string = true
-      headers      = ["*"]
       cookies {
         forward = "all"
       }

@@ -35,6 +35,11 @@ output "aurora_security_group_id" {
   value       = module.aurora.security_group_id
 }
 
+output "db_cluster_arn" {
+  description = "Aurora DB cluster ARN (for RDS Data API)"
+  value       = module.aurora.cluster_arn
+}
+
 # IAM Outputs
 output "ecs_task_execution_role_arn" {
   description = "ECS task execution role ARN"

@@ -34,6 +34,11 @@ output "security_group_id" {
   value       = aws_security_group.aurora.id
 }
 
+output "cluster_arn" {
+  description = "ARN of the Aurora DB cluster (for RDS Data API)"
+  value       = aws_rds_cluster.aurora.arn
+}
+
 output "iam_auth_enabled" {
   description = "Whether IAM database authentication is enabled"
   value       = aws_rds_cluster.aurora.iam_database_authentication_enabled

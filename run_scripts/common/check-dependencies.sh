@@ -32,16 +32,22 @@ check_all_dependencies() {
     
     log_step "Checking dependencies..."
     
-    # Required dependencies
+    # Ensure Homebrew-installed PostgreSQL client is on PATH for non-interactive shells
+    if [ -x "/opt/homebrew/opt/postgresql@16/bin/psql" ] && ! command_exists psql; then
+        export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"
+        log_info "Added /opt/homebrew/opt/postgresql@16/bin to PATH for psql"
+    fi
+    
+    # Required dependencies (project-wide)
     check_dependency "python3" true "brew install python3" || missing_required=$((missing_required + 1))
     check_dependency "node" true "brew install node" || missing_required=$((missing_required + 1))
     check_dependency "docker" true "Install Docker Desktop from https://www.docker.com/products/docker-desktop" || missing_required=$((missing_required + 1))
+    check_dependency "psql" true "brew install postgresql@16 or brew install libpq" || missing_required=$((missing_required + 1))
+    check_dependency "aws" true "brew install awscli" || missing_required=$((missing_required + 1))
+    check_dependency "terraform" true "brew install terraform" || missing_required=$((missing_required + 1))
     
     # Optional dependencies
-    check_dependency "psql" false "brew install postgresql@16 or brew install libpq"
     check_dependency "spark-submit" false "Download from https://spark.apache.org/downloads.html"
-    check_dependency "aws" false "brew install awscli"
-    check_dependency "terraform" false "brew install terraform"
     
     if [ $missing_required -gt 0 ]; then
         log_error "Missing $missing_required required dependency(ies). Please install them and try again."

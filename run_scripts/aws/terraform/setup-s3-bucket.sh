@@ -13,6 +13,9 @@ source "$SCRIPT_DIR/../../common/load-env.sh"
 # Load environment variables
 load_env_file
 
+# Check for dry-run mode (from parent script)
+DRY_RUN="${DRY_RUN:-false}"
+
 # Get configuration
 AWS_REGION="${AWS_REGION:-us-east-1}"
 # Force admin profile for infrastructure operations (S3 bucket creation)
@@ -107,7 +110,30 @@ main() {
     [ -n "$AWS_PROFILE" ] && log_info "AWS Profile: $AWS_PROFILE"
     
     # Check if bucket exists
+    local bucket_exists_flag=false
     if bucket_exists "$BUCKET_NAME"; then
+        bucket_exists_flag=true
+    fi
+    
+    if [ "$DRY_RUN" = "true" ]; then
+        log_info "[DRY-RUN] Would perform the following operations:"
+        if [ "$bucket_exists_flag" = false ]; then
+            log_info "[DRY-RUN]   - Create S3 bucket: $BUCKET_NAME in region: $AWS_REGION"
+        fi
+        log_info "[DRY-RUN]   - Configure bucket settings:"
+        log_info "[DRY-RUN]     - Enable versioning"
+        log_info "[DRY-RUN]     - Enable encryption (AES256)"
+        log_info "[DRY-RUN]     - Block public access"
+        if [ "$bucket_exists_flag" = true ]; then
+            log_info "[DRY-RUN] Bucket already exists: $BUCKET_NAME"
+        else
+            log_info "[DRY-RUN] Bucket does not exist (would be created)"
+        fi
+        return 0
+    fi
+    
+    # Actual operations
+    if [ "$bucket_exists_flag" = true ]; then
         log_info "Bucket already exists: $BUCKET_NAME"
         log_info "Updating bucket configuration..."
         configure_bucket "$BUCKET_NAME"

@@ -228,14 +228,23 @@ fru-genai-analytics-all/
 │       │   ├─ iam/
 │       │   ├─ secrets-manager/
 │       │   ├─ ecs/
+│       │   ├─ eks/
 │       │   ├─ alb/
 │       │   ├─ frontend/
 │       │   ├─ infrastructure/    # Wrapper module
 │       │   └─ application/      # Wrapper module
 │       └─ environments/          # Terragrunt configs (dev/prod)
 │           ├─ root.hcl          # Root configuration
-│           ├─ dev/env.hcl        # Dev environment config
-│           └─ prod/env.hcl       # Prod environment config
+│           ├─ dev/
+│           │   ├─ env.hcl        # Dev environment config
+│           │   ├─ infrastructure/
+│           │   ├─ application/   # ECS-specific
+│           │   └─ eks/           # EKS-specific
+│           └─ prod/
+│               ├─ env.hcl        # Prod environment config
+│               ├─ infrastructure/
+│               ├─ application/   # ECS-specific
+│               └─ eks/           # EKS-specific
 │
 └─ study/
     └─ ARCHITECT_STUDY_GUIDE_DETAILED.md
@@ -556,15 +565,21 @@ Use the Terraform modules in `infra/terraform/modules/` with Terragrunt configur
 
 **Recommended deployment workflows:**
 ```bash
-# Complete ECS deployment
+# Complete ECS deployment (infrastructure + ECS application)
 ./run_scripts/aws/run.sh ecs-full dev
 
-# Complete EKS deployment
+# Complete EKS deployment (infrastructure + EKS cluster + Kubernetes manifests)
 ./run_scripts/aws/run.sh eks-full dev
 
-# Infrastructure only
+# Infrastructure only (VPC, Aurora, IAM, Secrets Manager)
 ./run_scripts/aws/run.sh infrastructure dev
 ```
+
+**EKS Deployment Details:**
+- EKS cluster is created automatically via Terraform (no manual `eksctl` needed)
+- Supports both Fargate profiles and managed node groups
+- kubectl is configured automatically after cluster creation
+- Kubernetes manifests are applied from `infra/k8s/`
 
 See [`README_INFRA.md`](README_INFRA.md) for detailed instructions.
 

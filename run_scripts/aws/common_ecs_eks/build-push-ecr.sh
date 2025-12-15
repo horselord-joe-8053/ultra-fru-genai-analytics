@@ -16,6 +16,9 @@ SCRIPT_DIR="$BUILD_SCRIPT_DIR"
 ECR_REPO_NAME="fru-api"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 
+# Check for dry-run mode (from parent script)
+DRY_RUN="${DRY_RUN:-false}"
+
 build_and_push_ecr() {
     log_step "Building and pushing Docker image to ECR"
     
@@ -38,13 +41,52 @@ build_and_push_ecr() {
     log_info "ECR Repository: $ECR_REPO_URI"
     log_info "Image Tag: $IMAGE_TAG"
     
-    # Check if ECR repository exists, create if not
-    if ! aws ecr describe-repositories --profile "$AWS_PROFILE" --repository-names "$ECR_REPO_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+    # Check if ECR repository exists
+    local repo_exists=false
+    if aws ecr describe-repositories --profile "$AWS_PROFILE" --repository-names "$ECR_REPO_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+        repo_exists=true
+        log_info "ECR repository already exists"
+    else
+        log_info "ECR repository does not exist"
+    fi
+    
+    # Check if image exists
+    local image_exists=false
+    if [ "$repo_exists" = true ]; then
+        if aws ecr describe-images --profile "$AWS_PROFILE" --repository-name "$ECR_REPO_NAME" --image-ids imageTag="$IMAGE_TAG" --region "$AWS_REGION" >/dev/null 2>&1; then
+            image_exists=true
+            log_info "Container image already exists: $ECR_REPO_URI:$IMAGE_TAG"
+        fi
+    fi
+    
+    if [ "$DRY_RUN" = "true" ]; then
+        log_info "[DRY-RUN] Would perform the following operations:"
+        if [ "$repo_exists" = false ]; then
+            log_info "[DRY-RUN]   - Create ECR repository: $ECR_REPO_NAME"
+        fi
+        if [ "$image_exists" = false ]; then
+            log_info "[DRY-RUN]   - Build Docker image: $ECR_REPO_NAME:$IMAGE_TAG"
+            log_info "[DRY-RUN]   - Tag image: $ECR_REPO_URI:$IMAGE_TAG"
+            log_info "[DRY-RUN]   - Push image to ECR: $ECR_REPO_URI:$IMAGE_TAG"
+        else
+            log_info "[DRY-RUN]   - Image already exists, no build/push needed"
+        fi
+        log_info "[DRY-RUN] ECR Repository URI: $ECR_REPO_URI"
+        log_info "[DRY-RUN] Image Tag: $IMAGE_TAG"
+        return 0
+    fi
+    
+    # Create ECR repository if it doesn't exist
+    if [ "$repo_exists" = false ]; then
         log_info "ECR repository does not exist, creating..."
         aws ecr create-repository --profile "$AWS_PROFILE" --repository-name "$ECR_REPO_NAME" --region "$AWS_REGION"
         log_success "ECR repository created"
-    else
-        log_info "ECR repository already exists"
+    fi
+    
+    # If image exists, we're done
+    if [ "$image_exists" = true ]; then
+        log_success "Image already exists: $ECR_REPO_URI:$IMAGE_TAG"
+        return 0
     fi
     
     # Login to ECR

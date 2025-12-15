@@ -41,25 +41,10 @@ resource "aws_security_group" "aurora" {
   )
 }
 
-# Parameter Group for pgvector extension
-resource "aws_rds_cluster_parameter_group" "aurora" {
-  name        = "${var.project_name}-${var.environment}-aurora-pg"
-  family      = "aurora-postgresql16"
-  description = "Parameter group for Aurora PostgreSQL with pgvector"
-
-  # Enable shared_preload_libraries for pgvector
-  parameter {
-    name  = "shared_preload_libraries"
-    value = "pgvector"
-  }
-
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.project_name}-${var.environment}-aurora-pg"
-    }
-  )
-}
+# Note: pgvector extension is installed after cluster creation via SQL:
+# CREATE EXTENSION IF NOT EXISTS vector;
+# Aurora PostgreSQL doesn't support pgvector in shared_preload_libraries parameter.
+# The extension can be installed directly without requiring a custom parameter group.
 
 # Aurora PostgreSQL Cluster
 resource "aws_rds_cluster" "aurora" {
@@ -71,13 +56,16 @@ resource "aws_rds_cluster" "aurora" {
   master_password         = var.master_password # Will be replaced by Secrets Manager in production
   db_subnet_group_name    = aws_db_subnet_group.aurora.name
   vpc_security_group_ids  = [aws_security_group.aurora.id]
-  db_cluster_parameter_group_name = aws_rds_cluster_parameter_group.aurora.name
-  
+  # Note: Using default parameter group. pgvector extension will be installed via SQL after cluster creation.
+
   # Serverless v2 configuration
   serverlessv2_scaling_configuration {
     max_capacity = var.max_capacity
     min_capacity = var.min_capacity
   }
+
+  # Enable HTTP endpoint for RDS Data API (used to run CREATE EXTENSION remotely)
+  enable_http_endpoint = true
 
   # IAM Database Authentication (recommended for security)
   iam_database_authentication_enabled = var.enable_iam_auth

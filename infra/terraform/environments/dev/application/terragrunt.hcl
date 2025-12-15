@@ -63,7 +63,8 @@ inputs = {
   
   openai_secret_arn      = dependency.infrastructure.outputs.openai_secret_arn
   db_password_secret_arn = dependency.infrastructure.outputs.db_password_secret_arn
-  db_username_secret_arn = dependency.infrastructure.outputs.db_username_secret_arn
+  # Username secret is optional; not currently used by the application module
+  db_username_secret_arn = null
   
   container_image = get_env("CONTAINER_IMAGE", "") # Should be set after ECR push
   ecs_desired_count = include.env.inputs.ecs_desired_count

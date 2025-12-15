@@ -29,6 +29,17 @@ inputs = {
   ecs_task_cpu = 256
   ecs_task_memory = 512
   
+  # EKS configuration
+  eks_cluster_version = "1.28"
+  eks_enable_fargate = true  # Use Fargate for dev (simpler, no node management)
+  eks_node_group_instance_types = ["t3.medium"]  # Only used if enable_fargate = false
+  eks_node_group_desired_size = 2
+  eks_node_group_min_size = 1
+  eks_node_group_max_size = 3
+  eks_endpoint_private_access = true
+  eks_endpoint_public_access = false  # Private only for security
+  eks_enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+  
   # Secrets (should be provided via terraform.tfvars or environment variables)
   openai_api_key = get_env("OPENAI_API_KEY", "")
   db_username    = get_env("PGUSER", "fru_user")
