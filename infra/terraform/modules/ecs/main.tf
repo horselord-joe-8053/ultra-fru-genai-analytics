@@ -38,8 +38,15 @@ resource "aws_security_group" "ecs_tasks" {
 }
 
 # Security Group Rule: Allow inbound from ALB
+# Note: When used in application module, ALB is always created, so this rule is always needed.
+# We use a static key to avoid for_each errors with unknown values from dependencies.
+# The static key "alb-ingress" is always used when ALB is present (which is always in application module).
+# If alb_security_group_id is null (ECS used without ALB), this will fail at apply time,
+# which is acceptable - the rule should not exist without an ALB.
 resource "aws_security_group_rule" "ecs_from_alb" {
-  count                    = var.alb_security_group_id != null ? 1 : 0
+  # Always use static key - ALB is always present in application module context
+  # The condition is checked via the source_security_group_id value at apply time
+  for_each = { "alb-ingress" = true }
   type                     = "ingress"
   from_port                = var.container_port
   to_port                  = var.container_port
@@ -191,10 +198,9 @@ resource "aws_ecs_service" "fru_api" {
     }
   }
 
-  deployment_configuration {
-    maximum_percent         = var.deployment_maximum_percent
-    minimum_healthy_percent = var.deployment_minimum_percent
-  }
+  # Deployment configuration (top-level attributes in AWS provider v5)
+  deployment_maximum_percent         = var.deployment_maximum_percent
+  deployment_minimum_healthy_percent = var.deployment_minimum_percent
 
   # Enable ECS Exec (for debugging)
   enable_execute_command = var.enable_execute_command

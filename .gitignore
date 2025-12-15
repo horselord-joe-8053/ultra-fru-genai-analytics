@@ -48,7 +48,8 @@ logs/
 .terraform/
 *.tfstate
 *.tfstate.backup
-.terraform.lock.hcl
+# Note: .terraform.lock.hcl should be committed (removed from gitignore)
+# to ensure consistent provider versions across team members
 .terragrunt-cache/
 temp_terra_gen/
 

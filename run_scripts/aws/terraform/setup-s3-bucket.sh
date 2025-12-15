@@ -15,26 +15,23 @@ load_env_file
 
 # Get configuration
 AWS_REGION="${AWS_REGION:-us-east-1}"
-AWS_PROFILE="${AWS_PROFILE:-admin}"  # Default to admin for infrastructure operations
+# Force admin profile for infrastructure operations (S3 bucket creation)
+# Unset any credential env vars that might override the profile
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+export AWS_PROFILE=admin
 
-# Build AWS CLI profile flag
-get_aws_profile_flag() {
-    [ -n "$AWS_PROFILE" ] && echo "--profile $AWS_PROFILE" || echo ""
-}
 
 # Check if bucket exists
 bucket_exists() {
     local bucket=$1
-    local profile_flag=$(get_aws_profile_flag)
     
-    aws s3api head-bucket --bucket "$bucket" $profile_flag >/dev/null 2>&1
+    aws s3api head-bucket --bucket "$bucket" --profile admin >/dev/null 2>&1
 }
 
 # Create bucket (region-aware)
 create_bucket() {
     local bucket=$1
     local region=$2
-    local profile_flag=$(get_aws_profile_flag)
     
     log_info "Creating bucket: $bucket in region: $region"
     
@@ -43,21 +40,20 @@ create_bucket() {
         aws s3api create-bucket \
             --bucket "$bucket" \
             --region "$region" \
-            $profile_flag
+            --profile admin
     else
         # Other regions require LocationConstraint
         aws s3api create-bucket \
             --bucket "$bucket" \
             --region "$region" \
             --create-bucket-configuration LocationConstraint="$region" \
-            $profile_flag
+            --profile admin
     fi
 }
 
 # Configure bucket (versioning, encryption, public access block)
 configure_bucket() {
     local bucket=$1
-    local profile_flag=$(get_aws_profile_flag)
     
     log_info "Configuring bucket settings..."
     
@@ -66,7 +62,7 @@ configure_bucket() {
     aws s3api put-bucket-versioning \
         --bucket "$bucket" \
         --versioning-configuration Status=Enabled \
-        $profile_flag >/dev/null 2>&1 || log_warning "Failed to enable versioning (may already be enabled)"
+        --profile admin >/dev/null 2>&1 || log_warning "Failed to enable versioning (may already be enabled)"
     
     # Enable encryption
     log_info "  - Enabling encryption..."
@@ -79,7 +75,7 @@ configure_bucket() {
                 }
             }]
         }' \
-        $profile_flag >/dev/null 2>&1 || log_warning "Failed to enable encryption (may already be enabled)"
+        --profile admin >/dev/null 2>&1 || log_warning "Failed to enable encryption (may already be enabled)"
     
     # Block public access
     log_info "  - Blocking public access..."
@@ -87,7 +83,7 @@ configure_bucket() {
         --bucket "$bucket" \
         --public-access-block-configuration \
             "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true" \
-        $profile_flag >/dev/null 2>&1 || log_warning "Failed to block public access (may already be configured)"
+        --profile admin >/dev/null 2>&1 || log_warning "Failed to block public access (may already be configured)"
 }
 
 # Main function

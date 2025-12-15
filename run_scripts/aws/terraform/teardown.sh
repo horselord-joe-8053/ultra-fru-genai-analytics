@@ -75,9 +75,9 @@ teardown_terragrunt() {
         cd "$ENV_DIR/application"
         
         # Check if terragrunt state exists (resources may have been destroyed already)
-        if [ -f ".terragrunt-cache" ] || terragrunt state list --terragrunt-config appl.hcl >/dev/null 2>&1; then
+        if [ -f ".terragrunt-cache" ] || terragrunt state list >/dev/null 2>&1; then
             log_info "Running terragrunt destroy plan..."
-            terragrunt plan -destroy --terragrunt-config appl.hcl || {
+            terragrunt plan -destroy || {
                 log_warning "No resources to destroy in application layer (may already be destroyed)"
             }
             
@@ -87,7 +87,7 @@ teardown_terragrunt() {
             
             if [ "$confirm" = "yes" ]; then
                 log_info "Destroying application layer..."
-                terragrunt destroy --terragrunt-config appl.hcl || {
+                terragrunt destroy || {
                     log_warning "Destroy failed or no resources to destroy (idempotent)"
                 }
                 log_success "Application layer destroyed!"
@@ -106,9 +106,9 @@ teardown_terragrunt() {
         cd "$ENV_DIR/infrastructure"
         
         # Check if terragrunt state exists (resources may have been destroyed already)
-        if [ -f ".terragrunt-cache" ] || terragrunt state list --terragrunt-config infra.hcl >/dev/null 2>&1; then
+        if [ -f ".terragrunt-cache" ] || terragrunt state list >/dev/null 2>&1; then
             log_info "Running terragrunt destroy plan..."
-            terragrunt plan -destroy --terragrunt-config infra.hcl || {
+            terragrunt plan -destroy || {
                 log_warning "No resources to destroy in infrastructure layer (may already be destroyed)"
             }
             
@@ -119,7 +119,7 @@ teardown_terragrunt() {
             
             if [ "$confirm" = "yes" ]; then
                 log_info "Destroying infrastructure layer..."
-                terragrunt destroy --terragrunt-config infra.hcl || {
+                terragrunt destroy || {
                     log_warning "Destroy failed or no resources to destroy (idempotent)"
                 }
                 log_success "Infrastructure layer destroyed!"

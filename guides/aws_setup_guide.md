@@ -496,8 +496,8 @@ The infrastructure layer includes: VPC, Aurora PostgreSQL, IAM roles, Secrets Ma
 
 ```bash
 cd infra/terraform/environments/dev/infrastructure
-terragrunt plan --terragrunt-config infra.hcl
-terragrunt apply --terragrunt-config infra.hcl
+terragrunt plan
+terragrunt apply
 ```
 
 **What this creates:**
@@ -533,8 +533,8 @@ The application layer includes: ECS cluster, ECS service, ALB, Frontend (S3 + Cl
 
 ```bash
 cd infra/terraform/environments/dev/application
-terragrunt plan --terragrunt-config appl.hcl
-terragrunt apply --terragrunt-config appl.hcl
+terragrunt plan
+terragrunt apply
 ```
 
 **What this creates:**

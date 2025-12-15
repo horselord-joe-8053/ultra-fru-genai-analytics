@@ -46,23 +46,17 @@ validate_config() {
     local layer=$3
     local output_file=$(get_output_file "$env" "$layer" "validate")
     local config_dir=$(dirname "$config_file")
-    local config_name=$(basename "$config_file")
-    local symlink_path="$config_dir/terragrunt.hcl"
     
     log_step "Validating: $config_file"
     
     cd "$config_dir"
     
-    # Create temporary symlink (Terragrunt requires terragrunt.hcl by default)
-    ln -sf "$config_name" terragrunt.hcl
-    
     # Run validation (AWS_PROFILE is set globally)
+    # Terragrunt will automatically find terragrunt.hcl in the current directory
     if terragrunt validate > "$output_file" 2>&1; then
-        rm -f terragrunt.hcl
         log_success "Validation passed: $config_file"
         return 0
     else
-        rm -f terragrunt.hcl
         log_error "Validation failed: $config_file"
         log_info "Output saved to: $output_file"
         cat "$output_file"
@@ -77,24 +71,18 @@ plan_config() {
     local layer=$3
     local output_file=$(get_output_file "$env" "$layer" "plan")
     local config_dir=$(dirname "$config_file")
-    local config_name=$(basename "$config_file")
-    local symlink_path="$config_dir/terragrunt.hcl"
     
     log_step "Planning: $config_file"
     
     cd "$config_dir"
     
-    # Create temporary symlink (Terragrunt requires terragrunt.hcl by default)
-    ln -sf "$config_name" terragrunt.hcl
-    
     # Run plan (AWS_PROFILE is set globally)
+    # Terragrunt will automatically find terragrunt.hcl in the current directory
     if terragrunt plan > "$output_file" 2>&1; then
-        rm -f terragrunt.hcl
         log_success "Plan completed: $config_file"
         log_info "Plan output saved to: $output_file"
         return 0
     else
-        rm -f terragrunt.hcl
         log_error "Plan failed: $config_file"
         log_info "Output saved to: $output_file"
         cat "$output_file"
@@ -108,15 +96,15 @@ find_hcl_files() {
     local files=()
     
     if [ "$env_filter" = "all" ]; then
-        # Find all infra.hcl and appl.hcl files (exclude .terragrunt-cache)
+        # Find all terragrunt.hcl files in infrastructure and application directories (exclude .terragrunt-cache)
         while IFS= read -r file; do
             files+=("$file")
-        done < <(find "$TERRAFORM_DIR" -type f \( -name "infra.hcl" -o -name "appl.hcl" \) ! -path "*/.terragrunt-cache/*" | sort)
+        done < <(find "$TERRAFORM_DIR" -type f -name "terragrunt.hcl" ! -path "*/.terragrunt-cache/*" ! -path "*/root.hcl" ! -path "*/env.hcl" | sort)
     else
         # Find files for specific environment (exclude .terragrunt-cache)
         while IFS= read -r file; do
             files+=("$file")
-        done < <(find "$TERRAFORM_DIR/$env_filter" -type f \( -name "infra.hcl" -o -name "appl.hcl" \) ! -path "*/.terragrunt-cache/*" | sort)
+        done < <(find "$TERRAFORM_DIR/$env_filter" -type f -name "terragrunt.hcl" ! -path "*/.terragrunt-cache/*" | sort)
     fi
     
     echo "${files[@]}"
@@ -162,6 +150,26 @@ check_prerequisites() {
     export AWS_PROFILE=admin
     
     log_success "Prerequisites check passed"
+}
+
+# Setup S3 bucket for Terraform state (idempotent)
+setup_state_bucket() {
+    log_step "Ensuring Terraform state bucket exists"
+    log_info "This is idempotent - safe to run multiple times"
+    
+    # Load environment variables if not already loaded
+    if [ -z "${TF_STATE_BUCKET:-}" ]; then
+        load_env_file
+    fi
+    
+    # Call setup-s3-bucket.sh (idempotent)
+    if "$SCRIPT_DIR/setup-s3-bucket.sh"; then
+        log_success "Terraform state bucket ready"
+        return 0
+    else
+        log_error "Failed to setup Terraform state bucket"
+        return 1
+    fi
 }
 
 # Main validation function
@@ -256,6 +264,7 @@ EOF
 # Main execution
 main() {
     check_prerequisites
+    setup_state_bucket
     run_validation
     generate_summary
     

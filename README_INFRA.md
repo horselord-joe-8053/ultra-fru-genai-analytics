@@ -7,6 +7,8 @@ This document provides comprehensive documentation for deploying FRU infrastruct
 1. [📖 Overview](#-1-overview)
 2. [💡 Why Terraform IaC? Necessity and Benefits](#-2-why-terraform-iac-necessity-and-benefits)
 3. [📁 Structure](#-3-structure)
+   - [3.1. Why `terragrunt.hcl` at Each Level?](#-31-why-terragrunthcl-at-each-level)
+   - [3.2. Terraform Lock Files (`.terraform.lock.hcl`)](#-32-terraform-lock-files-terraformlockhcl)
 4. [🔒 Security Best Practices](#-4-security-best-practices)
 5. [✅ Prerequisites](#-5-prerequisites)
 6. [🚀 Usage](#-6-usage)
@@ -129,16 +131,106 @@ infra/
         ├── dev/
         │   ├── env.hcl        # Environment config (Level 2)
         │   ├── infrastructure/
-        │   │   └── infra.hcl  # Infrastructure layer (Level 3)
+        │   │   └── terragrunt.hcl  # Infrastructure layer (Level 3)
         │   └── application/
-        │       └── appl.hcl   # Application layer (Level 3)
+        │       └── terragrunt.hcl   # Application layer (Level 3)
         └── prod/
             ├── env.hcl        # Environment config (Level 2)
             ├── infrastructure/
-            │   └── infra.hcl  # Infrastructure layer (Level 3)
+            │   └── terragrunt.hcl  # Infrastructure layer (Level 3)
             └── application/
-                └── appl.hcl   # Application layer (Level 3)
+                └── terragrunt.hcl   # Application layer (Level 3)
 ```
+
+### 3.1. Why `terragrunt.hcl` at Each Level?
+
+**Important:** All Terragrunt configuration files at Level 3 (infrastructure and application layers) must be named `terragrunt.hcl`. This is a **Terragrunt requirement**, not just a convention.
+
+#### The Problem with Custom Names
+
+If we used custom names like `infra.hcl` or `appl.hcl`:
+- ✅ Terragrunt can find the config in the **current directory** using `--terragrunt-config` flag
+- ❌ Terragrunt **cannot** find configs in **dependency directories** (no flag support)
+- ❌ When `application/terragrunt.hcl` references `../infrastructure`, Terragrunt looks for `../infrastructure/terragrunt.hcl`
+- ❌ If the file is named `infra.hcl`, Terragrunt fails with: "You attempted to run terragrunt in a folder that does not contain a terragrunt.hcl file"
+
+#### Why This Matters
+
+Our `application/terragrunt.hcl` has a dependency block:
+```hcl
+dependency "infrastructure" {
+  config_path = "../infrastructure"  # Terragrunt looks for terragrunt.hcl here
+  ...
+}
+```
+
+When Terragrunt processes this:
+1. It reads `application/terragrunt.hcl` ✅
+2. It sees the dependency pointing to `../infrastructure`
+3. It **automatically** looks for `../infrastructure/terragrunt.hcl` (no flag can override this)
+4. If the file is named anything else, Terragrunt fails ❌
+
+#### The Solution
+
+**Use `terragrunt.hcl` at Level 3:**
+- ✅ Terragrunt finds it automatically in the current directory
+- ✅ Terragrunt finds it automatically in dependency directories
+- ✅ No need for `--terragrunt-config` flags
+- ✅ Works with all Terragrunt features (dependencies, includes, etc.)
+
+#### File Naming Summary
+
+| Level | File Name | Reason |
+|-------|-----------|--------|
+| Level 1 | `root.hcl` | Custom name OK - no dependencies reference it |
+| Level 2 | `env.hcl` | Custom name OK - included explicitly via path |
+| Level 3 | `terragrunt.hcl` | **Must be `terragrunt.hcl`** - required for dependency resolution |
+
+**Key Takeaway:** Level 3 files (`infrastructure/` and `application/`) must use `terragrunt.hcl` because Terragrunt's dependency resolution mechanism requires it. Level 1 and Level 2 files can use custom names because they're referenced explicitly via `include` blocks with explicit paths.
+
+### 3.2. Terraform Lock Files (`.terraform.lock.hcl`)
+
+**Purpose:** Lock files ensure consistent provider versions across all environments and team members, preventing "works on my machine" issues.
+
+**What They Do:**
+- **Lock exact provider versions**: Records the specific version used (e.g., AWS provider `5.100.0`)
+- **Store security checksums**: Verifies provider integrity during download
+- **Override version constraints**: When a lock file exists, Terraform uses the locked version instead of resolving from constraints
+
+**Where They're Located:**
+```
+infra/terraform/environments/
+├── dev/
+│   ├── infrastructure/.terraform.lock.hcl  ✅ Committed
+│   └── application/.terraform.lock.hcl     ✅ Committed
+└── prod/
+    ├── infrastructure/.terraform.lock.hcl  ✅ Committed
+    └── application/.terraform.lock.hcl      ✅ Committed
+```
+
+**Why They Must Be Committed:**
+- ✅ **Team consistency**: Everyone uses the same provider versions
+- ✅ **Reproducibility**: Same infrastructure behavior across dev/prod
+- ✅ **Security**: Checksums prevent tampering/corruption
+- ✅ **Stability**: Prevents unexpected breaking changes from provider updates
+
+**Current Configuration:**
+- **Provider constraint**: `~> 5.0` (in `root.hcl`) - allows any 5.x version
+- **Locked version**: `5.100.0` - exact version used across all environments
+- **Auto-upgrade prevention**: The constraint prevents automatic upgrades to 6.x
+
+**Important Notes:**
+- ❌ **Do NOT** run `terraform init` directly in module directories (`infra/terraform/modules/*`)
+- ✅ Lock files are automatically generated when running `terragrunt init` or `terragrunt apply`
+- ✅ Lock files in cache directories (`temp_terra_gen/.terragrunt-cache/`) are temporary and should not be committed
+- ✅ Only commit lock files next to `terragrunt.hcl` files in environment directories
+
+**Updating Provider Versions:**
+To upgrade providers (e.g., from 5.x to 6.x):
+1. Update the constraint in `root.hcl`: `version = "~> 6.0"`
+2. Run `terraform init -upgrade` in each environment directory
+3. Test thoroughly in dev environment first
+4. Commit the updated lock files
 
 ---
 
@@ -260,32 +352,31 @@ infra/
 
    ```bash
    cd infra/terraform/environments/dev/infrastructure
-   terragrunt plan --terragrunt-config infra.hcl
-   terragrunt apply --terragrunt-config infra.hcl
+   terragrunt plan
+   terragrunt apply
    ```
 
 3. **Deploy Application Layer**
 
    ```bash
    cd infra/terraform/environments/dev/application
-   terragrunt plan --terragrunt-config appl.hcl
-   terragrunt apply --terragrunt-config appl.hcl
+   terragrunt plan
+   terragrunt apply
    ```
 
-> **Note:** The Terragrunt configuration files have been renamed for clarity:
+> **Note:** The Terragrunt configuration files use standard naming:
 > - `root.hcl` - Root configuration (Level 1)
 > - `env.hcl` - Environment-specific config (Level 2)
-> - `infra.hcl` - Infrastructure layer config (Level 3)
-> - `appl.hcl` - Application layer config (Level 3)
+> - `terragrunt.hcl` - Layer-specific config (Level 3) - used in both infrastructure and application directories
 
 ### View Outputs
 
 ```bash
 cd infra/terraform/environments/dev/infrastructure
-terragrunt output --terragrunt-config infra.hcl
+terragrunt output
 
 cd ../application
-terragrunt output --terragrunt-config appl.hcl
+terragrunt output
 ```
 
 ---
@@ -384,10 +475,10 @@ aws dynamodb delete-item \
 
 ### Module Not Found
 
-Ensure you're running Terragrunt from the correct directory with the correct config file:
+Ensure you're running Terragrunt from the correct directory:
 ```bash
 cd infra/terraform/environments/dev/infrastructure
-terragrunt plan --terragrunt-config infra.hcl
+terragrunt plan
 ```
 
 ### Secrets Not Found
@@ -395,7 +486,7 @@ terragrunt plan --terragrunt-config infra.hcl
 Ensure secrets are created in Secrets Manager before deploying application layer:
 ```bash
 cd infra/terraform/environments/dev/infrastructure
-terragrunt apply --terragrunt-config infra.hcl
+terragrunt apply
 ```
 
 ---
@@ -417,10 +508,10 @@ terragrunt apply --terragrunt-config infra.hcl
 **Manual: Using Terragrunt directly**
 ```bash
 cd infra/terraform/environments/dev/application
-terragrunt destroy --terragrunt-config appl.hcl
+terragrunt destroy
 
 cd ../infrastructure
-terragrunt destroy --terragrunt-config infra.hcl
+terragrunt destroy
 ```
 
 **Warning**: This will delete all resources. Ensure you have backups!
