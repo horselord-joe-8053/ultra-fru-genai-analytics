@@ -83,31 +83,7 @@ verify_local_deployment() {
         fi
     fi
     echo ""
-    
-    # Print usage instructions
-    log_step "How to Use Your Local Development Environment"
-    echo ""
-    log_info "${GREEN}1. Frontend (if running):${NC}"
-    log_info "   Open in browser: ${GREEN}$FRONTEND_URL${NC}"
-    log_info "   - The frontend will proxy API requests to $API_URL"
-    log_info "   - Try asking questions like: 'Why are Samsung customers unhappy?'"
-    echo ""
-    log_info "${GREEN}2. API Health Check:${NC}"
-    log_info "   ${GREEN}curl $API_URL/health${NC}"
-    log_info "   - Should return: {\"status\": \"ok\", \"database\": \"connected\", ...}"
-    echo ""
-    log_info "${GREEN}3. Test Query Endpoint:${NC}"
-    log_info "   ${GREEN}curl -X POST $API_URL/query \\"
-    log_info "     -H \"Content-Type: application/json\" \\"
-    log_info "     -d '{\"query\": \"Why are Samsung customers unhappy?\"}'${NC}"
-    echo ""
-    log_info "${GREEN}4. View Logs:${NC}"
-    log_info "   ${GREEN}cd $REPO_ROOT/infra/docker && docker compose logs -f${NC}"
-    echo ""
-    log_info "${GREEN}5. Stop Services:${NC}"
-    log_info "   ${GREEN}./run_scripts/local/stop-services.sh${NC}"
-    echo ""
-    log_success "Verification complete! Your local development environment is ready."
+    log_success "Verification complete! Check the manual test hints for next steps."
 }
 
 verify_local_deployment "$@"

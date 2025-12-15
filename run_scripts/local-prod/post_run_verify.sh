@@ -86,37 +86,7 @@ verify_local_prod_deployment() {
         log_info "Build it with: ./run_scripts/local-prod/build-frontend.sh"
     fi
     echo ""
-    
-    # Print usage instructions
-    log_step "How to Use Your Local Production Simulation"
-    echo ""
-    log_info "${GREEN}1. Start Frontend Server (if built):${NC}"
-    if [ -d "$FRONTEND_DIST" ]; then
-        log_info "   ${GREEN}cd $REPO_ROOT/frontend && npx serve dist${NC}"
-        log_info "   - Frontend will be available at: http://localhost:3000 (or port shown)"
-        log_info "   - The frontend will need to be configured to call $API_URL for API"
-        log_info "   - Or use: ${GREEN}python3 -m http.server 3000${NC} in the dist directory"
-    else
-        log_info "   Frontend was not built. Build it with:"
-        log_info "   ${GREEN}cd $REPO_ROOT/frontend && npm run build && npx serve dist${NC}"
-    fi
-    echo ""
-    log_info "${GREEN}2. API Health Check:${NC}"
-    log_info "   ${GREEN}curl $API_URL/health${NC}"
-    log_info "   - Should return: {\"status\": \"ok\", \"database\": \"connected\", ...}"
-    echo ""
-    log_info "${GREEN}3. Test Query Endpoint:${NC}"
-    log_info "   ${GREEN}curl -X POST $API_URL/query \\"
-    log_info "     -H \"Content-Type: application/json\" \\"
-    log_info "     -d '{\"query\": \"Why are Samsung customers unhappy?\"}'${NC}"
-    echo ""
-    log_info "${GREEN}4. View Logs:${NC}"
-    log_info "   ${GREEN}cd $REPO_ROOT/infra/docker && docker compose logs -f${NC}"
-    echo ""
-    log_info "${GREEN}5. Stop Services:${NC}"
-    log_info "   ${GREEN}./run_scripts/local-prod/teardown.sh${NC}"
-    echo ""
-    log_success "Verification complete! Your local production simulation is ready."
+    log_success "Verification complete! Check the manual test hints for next steps."
 }
 
 verify_local_prod_deployment "$@"

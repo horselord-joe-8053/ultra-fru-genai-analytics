@@ -432,47 +432,29 @@ main() {
         ecs-full)
             deploy_ecs_full
             echo ""
-            if [ "$DRY_RUN" != "true" ]; then
-                "$SCRIPT_DIR/post_run_verify.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT"
-            fi
             ;;
         eks-full)
             deploy_eks_full
             echo ""
-            if [ "$DRY_RUN" != "true" ]; then
-                "$SCRIPT_DIR/post_run_verify.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT"
-            fi
             ;;
         infrastructure)
             deploy_infrastructure
             echo ""
-            if [ "$DRY_RUN" != "true" ]; then
-                "$SCRIPT_DIR/post_run_verify.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT"
-            fi
             ;;
         ecs)
             log_info "Starting ECS-specific deployment (legacy mode)..."
             "$SCRIPT_DIR/ecs/deploy.sh" "${REMAINING_ARGS[@]}"
             echo ""
-            if [ "$DRY_RUN" != "true" ]; then
-                "$SCRIPT_DIR/post_run_verify.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT"
-            fi
             ;;
         eks)
             log_info "Starting EKS-specific deployment (legacy mode)..."
             "$SCRIPT_DIR/eks/deploy.sh" "${REMAINING_ARGS[@]}"
             echo ""
-            if [ "$DRY_RUN" != "true" ]; then
-                "$SCRIPT_DIR/post_run_verify.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT"
-            fi
             ;;
         terraform)
             log_info "Starting Terraform deployment (legacy mode)..."
             "$SCRIPT_DIR/terraform/deploy.sh" "${REMAINING_ARGS[@]}"
             echo ""
-            if [ "$DRY_RUN" != "true" ]; then
-                "$SCRIPT_DIR/post_run_verify.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT"
-            fi
             ;;
         *)
             log_error "Unknown deployment type: $DEPLOYMENT_TYPE"
@@ -481,6 +463,15 @@ main() {
             exit 1
             ;;
     esac
+    
+    # Run post-deployment verification (skip for dry-run and error cases)
+    if [ "$DRY_RUN" != "true" ]; then
+        "$SCRIPT_DIR/post_run_verify.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT"
+    fi
+    
+    # Show manual test hints (always show, but indicate if dry-run)
+    echo ""
+    "$SCRIPT_DIR/manual_test_hint.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "" "" "$DRY_RUN"
 }
 
 main "$@"
