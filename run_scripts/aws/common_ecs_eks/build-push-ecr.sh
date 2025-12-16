@@ -1,6 +1,7 @@
 #!/bin/bash
 # Build and push Docker image to ECR
 # Idempotent: checks if image exists before pushing
+# Supports FORCE_REBUILD to rebuild even if image exists
 
 set -e
 
@@ -18,6 +19,10 @@ IMAGE_TAG="${IMAGE_TAG:-latest}"
 
 # Check for dry-run mode (from parent script)
 DRY_RUN="${DRY_RUN:-false}"
+
+# Check for force rebuild flag
+# Set FORCE_REBUILD=true to rebuild even if image exists
+FORCE_REBUILD="${FORCE_REBUILD:-false}"
 
 build_and_push_ecr() {
     log_step "Building and pushing Docker image to ECR"
@@ -59,12 +64,33 @@ build_and_push_ecr() {
         fi
     fi
     
+    # Handle force rebuild
+    local should_rebuild=false
+    if [ "$FORCE_REBUILD" = "true" ]; then
+        if [ "$image_exists" = true ]; then
+            log_info "FORCE_REBUILD=true: Will rebuild and replace existing image"
+            should_rebuild=true
+        else
+            log_info "FORCE_REBUILD=true: Will build new image"
+            should_rebuild=true
+        fi
+    elif [ "$image_exists" = false ]; then
+        log_info "Image does not exist: Will build new image"
+        should_rebuild=true
+    else
+        log_info "Image already exists and FORCE_REBUILD=false: Skipping build"
+        should_rebuild=false
+    fi
+    
     if [ "$DRY_RUN" = "true" ]; then
         log_info "[DRY-RUN] Would perform the following operations:"
         if [ "$repo_exists" = false ]; then
             log_info "[DRY-RUN]   - Create ECR repository: $ECR_REPO_NAME"
         fi
-        if [ "$image_exists" = false ]; then
+        if [ "$should_rebuild" = true ]; then
+            if [ "$image_exists" = true ] && [ "$FORCE_REBUILD" = "true" ]; then
+                log_info "[DRY-RUN]   - Delete existing image: $ECR_REPO_URI:$IMAGE_TAG"
+            fi
             log_info "[DRY-RUN]   - Build Docker image: $ECR_REPO_NAME:$IMAGE_TAG"
             log_info "[DRY-RUN]   - Tag image: $ECR_REPO_URI:$IMAGE_TAG"
             log_info "[DRY-RUN]   - Push image to ECR: $ECR_REPO_URI:$IMAGE_TAG"
@@ -73,6 +99,7 @@ build_and_push_ecr() {
         fi
         log_info "[DRY-RUN] ECR Repository URI: $ECR_REPO_URI"
         log_info "[DRY-RUN] Image Tag: $IMAGE_TAG"
+        log_info "[DRY-RUN] FORCE_REBUILD: $FORCE_REBUILD"
         return 0
     fi
     
@@ -83,10 +110,28 @@ build_and_push_ecr() {
         log_success "ECR repository created"
     fi
     
-    # If image exists, we're done
-    if [ "$image_exists" = true ]; then
+    # If image exists and we're not forcing rebuild, we're done
+    if [ "$should_rebuild" = false ]; then
         log_success "Image already exists: $ECR_REPO_URI:$IMAGE_TAG"
+        log_info "To force rebuild, set FORCE_REBUILD=true"
         return 0
+    fi
+    
+    # Delete existing image if forcing rebuild
+    if [ "$image_exists" = true ] && [ "$FORCE_REBUILD" = "true" ]; then
+        log_info "Deleting existing image: $ECR_REPO_URI:$IMAGE_TAG"
+        if aws ecr batch-delete-image --profile "$AWS_PROFILE" --repository-name "$ECR_REPO_NAME" --image-ids imageTag="$IMAGE_TAG" --region "$AWS_REGION" >/dev/null 2>&1; then
+            log_success "Existing image deleted"
+        else
+            log_warning "Failed to delete existing image (may not exist or already deleted)"
+        fi
+    fi
+    
+    # Ensure Docker daemon is running
+    source "$SCRIPT_DIR/../../common/docker_run.sh"
+    if ! ensure_docker_running; then
+        log_error "Failed to start Docker daemon"
+        exit 1
     fi
     
     # Login to ECR
@@ -95,9 +140,9 @@ build_and_push_ecr() {
         docker login --username AWS --password-stdin "$ECR_URL"
     
     # Build Docker image
-    log_info "Building Docker image..."
+    log_info "Building Docker image for linux/amd64 platform (required for ECS Fargate)..."
     cd "$REPO_ROOT"
-    docker build -t "$ECR_REPO_NAME:$IMAGE_TAG" -f $REPO_ROOT/infra/docker/Dockerfile.api .
+    docker build --platform linux/amd64 -t "$ECR_REPO_NAME:$IMAGE_TAG" -f $REPO_ROOT/infra/docker/Dockerfile.api .
     
     # Tag image
     log_info "Tagging image..."

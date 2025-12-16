@@ -13,8 +13,13 @@ source "$SCRIPT_DIR/../../common/load-env.sh"
 # Restore our SCRIPT_DIR
 SCRIPT_DIR="$FRONTEND_SCRIPT_DIR"
 
-S3_BUCKET_NAME="${S3_BUCKET_NAME:-fru-frontend-bucket}"
+# Helper function to check if command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
 AWS_REGION="${AWS_REGION:-us-east-1}"
+ENVIRONMENT="${ENVIRONMENT:-dev}"
 
 # Check for dry-run mode (from parent script)
 DRY_RUN="${DRY_RUN:-false}"
@@ -32,11 +37,65 @@ deploy_frontend() {
     AWS_PROFILE="${AWS_PROFILE:-admin}"
     log_info "Using AWS profile: $AWS_PROFILE (for infrastructure operations)"
     
-    # Check if frontend is built
+    # Get S3 bucket name from Terraform outputs
+    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT"
+    APP_DIR="$TERRAFORM_DIR/application"
+    
+    local s3_bucket_name=""
+    if [ -d "$APP_DIR" ] && command_exists terragrunt; then
+        ORIG_DIR=$(pwd)
+        cd "$APP_DIR" 2>/dev/null || {
+            log_warning "Could not access Terraform application directory, using default bucket name"
+            s3_bucket_name="${S3_BUCKET_NAME:-fru-frontend-bucket}"
+        }
+        if [ -z "$s3_bucket_name" ]; then
+            s3_bucket_name=$(terragrunt output -raw s3_bucket_id 2>/dev/null || echo "")
+        fi
+        cd "$ORIG_DIR" 2>/dev/null || true
+    fi
+    
+    # Fallback to default if Terraform output not available
+    if [ -z "$s3_bucket_name" ]; then
+        s3_bucket_name="${S3_BUCKET_NAME:-fru-frontend-bucket}"
+        log_warning "Could not get S3 bucket name from Terraform, using default: $s3_bucket_name"
+        log_info "To use the correct bucket, ensure Terraform application layer is deployed first"
+    else
+        log_info "Using S3 bucket from Terraform: $s3_bucket_name"
+    fi
+    
+    S3_BUCKET_NAME="$s3_bucket_name"
+    
+    # Check if frontend is built, build if needed
     if [ ! -d "$REPO_ROOT/frontend/dist" ]; then
-        log_error "Frontend not built. Please run build first."
-        log_info "Run: cd $REPO_ROOT/frontend && npm run build"
-        exit 1
+        log_info "Frontend not built, building now..."
+        cd "$REPO_ROOT/frontend"
+        
+        # Check if node_modules exists, install if needed
+        if [ ! -d "node_modules" ]; then
+            log_info "Installing frontend dependencies..."
+            if [ "$DRY_RUN" = "true" ]; then
+                log_info "[DRY-RUN] Would run: npm install"
+            else
+                npm install || {
+                    log_error "Failed to install frontend dependencies"
+                    exit 1
+                }
+            fi
+        fi
+        
+        # Build frontend
+        if [ "$DRY_RUN" = "true" ]; then
+            log_info "[DRY-RUN] Would run: npm run build"
+        else
+            npm run build || {
+                log_error "Failed to build frontend"
+                exit 1
+            }
+            log_success "Frontend built successfully"
+        fi
+        cd "$REPO_ROOT"
+    else
+        log_info "Frontend already built"
     fi
     
     # Check if S3 bucket exists
@@ -86,8 +145,8 @@ deploy_frontend() {
     log_info "  Bucket: $S3_BUCKET_NAME"
     log_info "  Website URL: http://$S3_BUCKET_NAME.s3-website-$AWS_REGION.amazonaws.com"
     log_info ""
-    log_warning "Note: CloudFront distribution setup is not automated yet"
-    log_info "  Create CloudFront distribution manually or use Terraform"
+    log_info "Note: CloudFront distribution is managed by Terraform"
+    log_info "  CloudFront will automatically serve content from this S3 bucket"
 }
 
 main() {

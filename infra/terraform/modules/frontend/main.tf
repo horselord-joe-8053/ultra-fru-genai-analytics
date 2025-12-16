@@ -40,7 +40,16 @@ resource "aws_s3_bucket_public_access_block" "frontend" {
   restrict_public_buckets = true
 }
 
-# S3 Bucket Policy (for CloudFront access)
+# CloudFront Origin Access Control (OAC) - replaces deprecated OAI
+resource "aws_cloudfront_origin_access_control" "frontend" {
+  name                              = "${var.project_name}-${var.environment}-frontend-oac"
+  description                       = "OAC for ${var.project_name}-${var.environment}-frontend"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+# S3 Bucket Policy (for CloudFront OAC access)
 resource "aws_s3_bucket_policy" "frontend" {
   bucket = aws_s3_bucket.frontend.id
 
@@ -48,21 +57,23 @@ resource "aws_s3_bucket_policy" "frontend" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "AllowCloudFrontAccess"
+        Sid    = "AllowCloudFrontOACAccess"
         Effect = "Allow"
         Principal = {
-          AWS = aws_cloudfront_origin_access_identity.frontend.iam_arn
+          Service = "cloudfront.amazonaws.com"
         }
         Action   = "s3:GetObject"
         Resource = "${aws_s3_bucket.frontend.arn}/*"
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = aws_cloudfront_distribution.frontend.arn
+          }
+        }
       }
     ]
   })
-}
 
-# CloudFront Origin Access Identity
-resource "aws_cloudfront_origin_access_identity" "frontend" {
-  comment = "OAI for ${var.project_name}-${var.environment}-frontend"
+  depends_on = [aws_cloudfront_distribution.frontend]
 }
 
 # CloudFront Distribution
@@ -74,12 +85,9 @@ resource "aws_cloudfront_distribution" "frontend" {
   price_class         = var.cloudfront_price_class
 
   origin {
-    domain_name = aws_s3_bucket.frontend.bucket_regional_domain_name
-    origin_id   = "S3-${aws_s3_bucket.frontend.bucket}"
-
-    s3_origin_config {
-      origin_access_identity = aws_cloudfront_origin_access_identity.frontend.cloudfront_access_identity_path
-    }
+    domain_name              = aws_s3_bucket.frontend.bucket_regional_domain_name
+    origin_id                = "S3-${aws_s3_bucket.frontend.bucket}"
+    origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
   }
 
   default_cache_behavior {

@@ -256,15 +256,26 @@ deploy_ecs_full() {
     ensure_pgvector_extension
     
     # Step 4: Deploy application (CONTAINER_IMAGE is already exported from check_or_build_image)
-    log_step "Step 4/4: Deploying application layer (ECS, ALB, Frontend)"
+    log_step "Step 4/5: Deploying application layer (ECS, ALB, CloudFront)"
     log_info "Using container image: $CONTAINER_IMAGE"
     if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" application; then
-        log_error "Step 4/4 FAILED: Application deployment failed"
+        log_error "Step 4/5 FAILED: Application deployment failed"
         log_info "Reason: Terraform plan or apply failed for application layer"
         log_info "Check Terraform configuration, AWS permissions, CONTAINER_IMAGE, and plan output above"
         exit 1
     fi
-    log_success "Step 4/4 PASSED: Application layer deployed"
+    log_success "Step 4/5 PASSED: Application layer deployed"
+    
+    # Step 5: Deploy frontend to S3 (for CloudFront to serve)
+    log_step "Step 5/5: Deploying frontend to S3"
+    export ENVIRONMENT="$ENVIRONMENT"
+    if ! "$SCRIPT_DIR/common_ecs_eks/deploy-frontend.sh"; then
+        log_error "Step 5/5 FAILED: Frontend deployment failed"
+        log_info "Reason: Failed to build frontend or sync to S3"
+        log_info "Check frontend build, AWS credentials, S3 permissions, and Terraform outputs"
+        exit 1
+    fi
+    log_success "Step 5/5 PASSED: Frontend deployed to S3"
     
     log_success "Complete ECS deployment finished successfully!"
     log_info "Your application should now be running on AWS ECS"

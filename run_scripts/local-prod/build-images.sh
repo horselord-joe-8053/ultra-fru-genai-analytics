@@ -18,9 +18,10 @@ build_images() {
         exit 1
     fi
     
-    # Check if Docker is running
-    if ! docker info >/dev/null 2>&1; then
-        log_error "Docker is not running. Please start Docker Desktop and try again."
+    # Ensure Docker daemon is running
+    source "$SCRIPT_DIR/../common/docker_run.sh"
+    if ! ensure_docker_running; then
+        log_error "Failed to start Docker daemon"
         exit 1
     fi
     
