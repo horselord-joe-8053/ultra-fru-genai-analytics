@@ -18,9 +18,14 @@ load_env_file || log_warning "Could not load .env; Terraform outputs may not be 
 # ============================================================================
 # VALIDATION CONSTANTS
 # ============================================================================
-API_VALIDATION_TIMEOUT_SECONDS=300  # 5 minutes
+API_VALIDATION_TIMEOUT_SECONDS=300  # 5 minutes (upper bound)
 FRONTEND_VALIDATION_TIMEOUT_SECONDS=60  # 1 minute
 VALIDATION_RETRY_INTERVAL_SECONDS=5  # Check every 5 seconds
+# Fail fast on API errors if we can diagnose a clear cause from ECS/logs
+API_VALIDATION_FAIL_FAST="${API_VALIDATION_FAIL_FAST:-true}"
+
+# Default ECS log group (can be overridden via env)
+ECS_LOG_GROUP="${ECS_LOG_GROUP:-/ecs/fru-dev}"
 
 # Expected HTML content keywords for frontend validation
 # These should be present in a working frontend page
@@ -127,6 +132,72 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Diagnose ECS API service failures using awscli (service events, tasks, logs)
+diagnose_api_failure() {
+    # Require aws cli
+    if ! command_exists aws; then
+        log_warning "aws CLI not available; cannot auto-diagnose API failure"
+        return 1
+    fi
+
+    local cluster_name="${ECS_CLUSTER_NAME:-fru-dev-cluster}"
+    local service_name="${ECS_SERVICE_NAME:-fru-dev-api-service}"
+    local region="${AWS_REGION:-us-east-1}"
+    local profile="${AWS_PROFILE:-admin}"
+
+    echo ""
+    log_step "Diagnosing ECS API service failure (cluster: $cluster_name, service: $service_name)"
+
+    # Recent ECS service events
+    log_info "Fetching recent ECS service events..."
+    aws ecs describe-services \
+        --cluster "$cluster_name" \
+        --services "$service_name" \
+        --profile "$profile" \
+        --region "$region" \
+        --query 'services[0].events[0:5]' \
+        --output table 2>/dev/null || log_warning "Could not fetch ECS service events"
+
+    # Task statuses
+    log_info "Fetching ECS task statuses..."
+    aws ecs list-tasks \
+        --cluster "$cluster_name" \
+        --service-name "$service_name" \
+        --profile "$profile" \
+        --region "$region" \
+        --desired-status RUNNING \
+        --query 'taskArns' \
+        --output text 2>/dev/null | \
+        awk '{for(i=1;i<=NF;i++)print $i}' | \
+        xargs -r aws ecs describe-tasks \
+            --cluster "$cluster_name" \
+            --profile "$profile" \
+            --region "$region" \
+            --tasks \
+            --query 'tasks[].{lastStatus:lastStatus,healthStatus:healthStatus,stoppedReason:stoppedReason,containers:containers[].{name:name,lastStatus:lastStatus,reason:reason}}' \
+            --output table 2>/dev/null || log_warning "Could not fetch ECS task details"
+
+    # Recent logs from CloudWatch
+    if [ -n "$ECS_LOG_GROUP" ]; then
+        log_info "Fetching recent CloudWatch logs from $ECS_LOG_GROUP (last 10 minutes, tail)..."
+        local logs_output
+        logs_output=$(aws logs tail "$ECS_LOG_GROUP" --since 10m --profile "$profile" --region "$region" 2>/dev/null || echo "")
+        if [ -n "$logs_output" ]; then
+            echo "$logs_output" | tail -40
+
+            # Highlight common database auth errors
+            if echo "$logs_output" | grep -qi "password authentication failed for user"; then
+                log_error "Detected database authentication failures in logs (e.g., 'password authentication failed for user')."
+                log_error "This usually means the Aurora DB password/username used by the API does not match the actual database credentials."
+            fi
+        else
+            log_warning "No recent logs found or unable to read CloudWatch logs"
+        fi
+    fi
+
+    return 0
+}
+
 # Validate API endpoint with retry logic
 validate_api_endpoint() {
     local api_endpoint="$1"
@@ -134,6 +205,7 @@ validate_api_endpoint() {
     local start_time=$(date +%s)
     local elapsed=0
     local last_status=""
+    local diagnosed=false
     
     log_info "Testing API endpoint: $api_endpoint/health"
     log_info "  Will retry for up to $((timeout_seconds / 60)) minutes..."
@@ -154,7 +226,14 @@ validate_api_endpoint() {
             fi
             return 0
         elif [ "$api_status" = "503" ] || [ "$api_status" = "502" ] || [ "$api_status" = "504" ]; then
-            # Service is starting, continue retrying
+            # Service is starting or has a backend error
+            if [ "$API_VALIDATION_FAIL_FAST" = "true" ] && [ "$diagnosed" = false ]; then
+                log_warning "API returned HTTP $api_status. Attempting to diagnose ECS/logs and fail fast..."
+                diagnose_api_failure || true
+                diagnosed=true
+                # Fail fast after diagnosis to avoid waiting full timeout when clear errors exist
+                return 1
+            fi
             if [ $((elapsed % 30)) -eq 0 ] && [ $elapsed -gt 0 ]; then
                 log_info "  Still waiting... (${elapsed}s elapsed, HTTP $api_status)"
             fi

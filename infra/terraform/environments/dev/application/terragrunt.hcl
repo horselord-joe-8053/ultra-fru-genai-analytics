@@ -37,7 +37,7 @@ dependency "infrastructure" {
     ecs_task_runtime_role_arn   = "arn:aws:iam::123456789012:role/fru-dev-ecs-task-runtime-role"
     openai_secret_arn         = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/openai-api-key"
     db_password_secret_arn    = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-password"
-    db_username_secret_arn    = null
+    db_username_secret_arn    = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-username"
   }
   
   mock_outputs_allowed_terraform_commands = ["validate", "plan"]
@@ -63,8 +63,8 @@ inputs = {
   
   openai_secret_arn      = dependency.infrastructure.outputs.openai_secret_arn
   db_password_secret_arn = dependency.infrastructure.outputs.db_password_secret_arn
-  # Username secret is optional; not currently used by the application module
-  db_username_secret_arn = null
+  # Username secret: ensures PGUSER in ECS matches Aurora master_username (both from .env)
+  db_username_secret_arn = dependency.infrastructure.outputs.db_username_secret_arn
   
   container_image = get_env("CONTAINER_IMAGE", "") # Should be set after ECR push
   ecs_desired_count = include.env.inputs.ecs_desired_count

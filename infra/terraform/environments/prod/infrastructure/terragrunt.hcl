@@ -32,6 +32,9 @@ inputs = {
   db_password    = include.env.inputs.db_password
   db_username     = include.env.inputs.db_username
   
+  # Create username secret so ECS can use PGUSER from Secrets Manager (single source of truth: .env)
+  create_db_username_secret = true
+  
   aurora_database_name = "fru_db"
   aurora_min_capacity  = include.env.inputs.aurora_min_capacity
   aurora_max_capacity  = include.env.inputs.aurora_max_capacity

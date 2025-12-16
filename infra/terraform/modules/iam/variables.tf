@@ -18,6 +18,12 @@ variable "db_password_secret_arn" {
   description = "ARN of database password secret in Secrets Manager"
 }
 
+variable "db_username_secret_arn" {
+  type        = string
+  description = "ARN of database username secret in Secrets Manager (optional, can be empty string)"
+  default     = ""
+}
+
 variable "bedrock_model_arns" {
   type        = list(string)
   description = "List of Bedrock model ARNs that the task can invoke"

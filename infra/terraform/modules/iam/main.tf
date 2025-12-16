@@ -50,10 +50,10 @@ resource "aws_iam_role_policy" "ecs_task_execution_secrets" {
           "secretsmanager:GetSecretValue",
           "secretsmanager:DescribeSecret"
         ]
-        Resource = [
-          var.openai_secret_arn,
-          var.db_password_secret_arn
-        ]
+        Resource = concat(
+          [var.openai_secret_arn, var.db_password_secret_arn],
+          var.db_username_secret_arn != "" ? [var.db_username_secret_arn] : []
+        )
       }
     ]
   })
@@ -125,10 +125,10 @@ resource "aws_iam_role_policy" "ecs_task_runtime_secrets" {
           "secretsmanager:GetSecretValue",
           "secretsmanager:DescribeSecret"
         ]
-        Resource = [
-          var.openai_secret_arn,
-          var.db_password_secret_arn
-        ]
+        Resource = concat(
+          [var.openai_secret_arn, var.db_password_secret_arn],
+          var.db_username_secret_arn != "" ? [var.db_username_secret_arn] : []
+        )
       }
     ]
   })
