@@ -16,13 +16,18 @@ API_URL="http://localhost:5000"
 FRONTEND_DIST="$REPO_ROOT/frontend/dist"
 
 print_manual_test_hints() {
+    # Add prominent separator
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════════════════════"
     if [ "$DRY_RUN" = "true" ]; then
-        echo ""
-        log_warning "=== DRY-RUN MODE: Manual Test Hints (Preview Only) ==="
+        log_warning "═══════════  DRY-RUN MODE: Manual Test Hints (Preview Only)  ═══════════"
         log_info "These instructions show what you would do after a real deployment."
         log_info "No actual deployment has been made."
-        echo ""
+    else
+        log_success "═══════════  Manual Test Hints: How to Use Your Deployment  ═══════════"
     fi
+    echo "═══════════════════════════════════════════════════════════════════════════════"
+    echo ""
     
     log_step "How to Use Your Local Production Simulation"
     echo ""
@@ -59,6 +64,10 @@ print_manual_test_hints() {
     else
         log_success "Verification complete! Your local production simulation is ready."
     fi
+    
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════════════════════"
+    echo ""
 }
 
 print_manual_test_hints "$@"
