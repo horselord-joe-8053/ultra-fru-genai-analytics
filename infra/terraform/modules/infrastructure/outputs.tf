@@ -67,3 +67,8 @@ output "db_username_secret_arn" {
   value       = module.secrets_manager.db_username_secret_arn
 }
 
+output "db_password_plain_secret_arn" {
+  description = "Database password secret ARN (plain string for ECS)"
+  value       = module.secrets_manager.db_password_plain_secret_arn
+}
+

@@ -12,18 +12,12 @@ resource "aws_db_subnet_group" "aurora" {
 }
 
 # Security Group for Aurora
+# Note: Ingress rules are managed by the application layer via aws_security_group_rule
+# to allow the actual ECS security group (not the placeholder)
 resource "aws_security_group" "aurora" {
   name        = "${var.project_name}-${var.environment}-aurora-sg"
   description = "Security group for Aurora PostgreSQL cluster"
   vpc_id      = var.vpc_id
-
-  ingress {
-    description     = "PostgreSQL from ECS tasks"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [var.ecs_security_group_id]
-  }
 
   egress {
     description = "All outbound"

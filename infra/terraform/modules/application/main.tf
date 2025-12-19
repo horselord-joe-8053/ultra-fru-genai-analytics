@@ -30,12 +30,13 @@ module "ecs" {
   ecs_task_execution_role_arn = var.ecs_task_execution_role_arn
   ecs_task_runtime_role_arn   = var.ecs_task_runtime_role_arn
 
-  aurora_endpoint        = var.aurora_endpoint
-  aurora_port            = var.aurora_port
-  aurora_database_name   = var.aurora_database_name
-  openai_secret_arn      = var.openai_secret_arn
-  db_password_secret_arn = var.db_password_secret_arn
-  db_username_secret_arn = var.db_username_secret_arn
+  aurora_endpoint             = var.aurora_endpoint
+  aurora_port                 = var.aurora_port
+  aurora_database_name        = var.aurora_database_name
+  openai_secret_arn           = var.openai_secret_arn
+  db_password_secret_arn       = var.db_password_secret_arn        # JSON format (for RDS Data API)
+  db_password_plain_secret_arn = var.db_password_plain_secret_arn # Plain string (for ECS)
+  db_username_secret_arn       = var.db_username_secret_arn
 
   container_image = var.container_image
   container_name  = var.container_name

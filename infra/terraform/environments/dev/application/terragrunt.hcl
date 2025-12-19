@@ -35,9 +35,10 @@ dependency "infrastructure" {
     aurora_security_group_id  = "sg-xxxxxxxx"
     ecs_task_execution_role_arn = "arn:aws:iam::123456789012:role/fru-dev-ecs-task-execution-role"
     ecs_task_runtime_role_arn   = "arn:aws:iam::123456789012:role/fru-dev-ecs-task-runtime-role"
-    openai_secret_arn         = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/openai-api-key"
-    db_password_secret_arn    = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-password"
-    db_username_secret_arn    = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-username"
+    openai_secret_arn            = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/openai-api-key"
+    db_password_secret_arn       = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-password"
+    db_password_plain_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-password-plain"
+    db_username_secret_arn       = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-username"
   }
   
   mock_outputs_allowed_terraform_commands = ["validate", "plan"]
@@ -61,10 +62,11 @@ inputs = {
   aurora_database_name   = dependency.infrastructure.outputs.aurora_database_name
   aurora_security_group_id = dependency.infrastructure.outputs.aurora_security_group_id
   
-  openai_secret_arn      = dependency.infrastructure.outputs.openai_secret_arn
-  db_password_secret_arn = dependency.infrastructure.outputs.db_password_secret_arn
+  openai_secret_arn            = dependency.infrastructure.outputs.openai_secret_arn
+  db_password_secret_arn       = dependency.infrastructure.outputs.db_password_secret_arn        # JSON format (for RDS Data API)
+  db_password_plain_secret_arn = dependency.infrastructure.outputs.db_password_plain_secret_arn # Plain string (for ECS)
   # Username secret: ensures PGUSER in ECS matches Aurora master_username (both from .env)
-  db_username_secret_arn = dependency.infrastructure.outputs.db_username_secret_arn
+  db_username_secret_arn       = dependency.infrastructure.outputs.db_username_secret_arn
   
   container_image = get_env("CONTAINER_IMAGE", "") # Should be set after ECR push
   ecs_desired_count = include.env.inputs.ecs_desired_count

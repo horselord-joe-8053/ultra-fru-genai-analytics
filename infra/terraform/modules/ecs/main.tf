@@ -107,6 +107,7 @@ resource "aws_ecs_task_definition" "fru_api" {
       ]
 
       # Secrets (sensitive - from Secrets Manager)
+      # Use plain string password secret for ECS (ECS doesn't support JSON key extraction)
       secrets = concat(
         [
           {
@@ -115,7 +116,8 @@ resource "aws_ecs_task_definition" "fru_api" {
           },
           {
             name      = "PGPASSWORD"
-            valueFrom = var.db_password_secret_arn
+            # Plain string secret (ECS doesn't support :json-key: syntax)
+            valueFrom = var.db_password_plain_secret_arn
           }
         ],
         var.db_username_secret_arn != null ? [

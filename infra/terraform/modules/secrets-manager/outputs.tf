@@ -18,6 +18,11 @@ output "db_password_secret_name" {
   value       = aws_secretsmanager_secret.db_password.name
 }
 
+output "db_password_plain_secret_arn" {
+  description = "ARN of database password secret (plain string for ECS)"
+  value       = aws_secretsmanager_secret.db_password_plain.arn
+}
+
 output "db_username_secret_arn" {
   description = "ARN of database username secret (if created)"
   value       = var.create_db_username_secret ? aws_secretsmanager_secret.db_username[0].arn : null

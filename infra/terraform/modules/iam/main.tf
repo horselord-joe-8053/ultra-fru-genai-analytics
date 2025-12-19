@@ -51,7 +51,11 @@ resource "aws_iam_role_policy" "ecs_task_execution_secrets" {
           "secretsmanager:DescribeSecret"
         ]
         Resource = concat(
-          [var.openai_secret_arn, var.db_password_secret_arn],
+          [
+            var.openai_secret_arn,
+            var.db_password_secret_arn,        # JSON format (for RDS Data API)
+            var.db_password_plain_secret_arn   # Plain string (for ECS)
+          ],
           var.db_username_secret_arn != "" ? [var.db_username_secret_arn] : []
         )
       }
@@ -126,7 +130,11 @@ resource "aws_iam_role_policy" "ecs_task_runtime_secrets" {
           "secretsmanager:DescribeSecret"
         ]
         Resource = concat(
-          [var.openai_secret_arn, var.db_password_secret_arn],
+          [
+            var.openai_secret_arn,
+            var.db_password_secret_arn,        # JSON format (for RDS Data API)
+            var.db_password_plain_secret_arn   # Plain string (for ECS)
+          ],
           var.db_username_secret_arn != "" ? [var.db_username_secret_arn] : []
         )
       }

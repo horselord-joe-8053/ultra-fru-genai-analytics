@@ -35,13 +35,14 @@ module "secrets_manager" {
 module "iam" {
   source = "../iam"
 
-  project_name            = var.project_name
-  environment             = var.environment
-  openai_secret_arn       = module.secrets_manager.openai_secret_arn
-  db_password_secret_arn  = module.secrets_manager.db_password_secret_arn
-  db_username_secret_arn  = try(module.secrets_manager.db_username_secret_arn, "")
-  enable_rds_iam_auth     = var.enable_iam_auth
-  rds_db_resource_arn     = var.enable_iam_auth ? "arn:aws:rds-db:${var.aws_region}:${data.aws_caller_identity.current.account_id}:dbuser:${var.project_name}-${var.environment}-aurora-cluster/${var.db_username}" : ""
+  project_name                 = var.project_name
+  environment                  = var.environment
+  openai_secret_arn            = module.secrets_manager.openai_secret_arn
+  db_password_secret_arn       = module.secrets_manager.db_password_secret_arn        # JSON format (for RDS Data API)
+  db_password_plain_secret_arn = module.secrets_manager.db_password_plain_secret_arn    # Plain string (for ECS)
+  db_username_secret_arn       = try(module.secrets_manager.db_username_secret_arn, "")
+  enable_rds_iam_auth          = var.enable_iam_auth
+  rds_db_resource_arn          = var.enable_iam_auth ? "arn:aws:rds-db:${var.aws_region}:${data.aws_caller_identity.current.account_id}:dbuser:${var.project_name}-${var.environment}-aurora-cluster/${var.db_username}" : ""
 
   tags = var.tags
 }

@@ -15,7 +15,12 @@ variable "openai_secret_arn" {
 
 variable "db_password_secret_arn" {
   type        = string
-  description = "ARN of database password secret in Secrets Manager"
+  description = "ARN of database password secret in Secrets Manager (JSON format for RDS Data API)"
+}
+
+variable "db_password_plain_secret_arn" {
+  type        = string
+  description = "ARN of database password secret in Secrets Manager (plain string for ECS)"
 }
 
 variable "db_username_secret_arn" {

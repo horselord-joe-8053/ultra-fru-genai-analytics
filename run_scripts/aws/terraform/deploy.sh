@@ -37,28 +37,133 @@ deploy_terragrunt() {
     log_info "Environment: $ENVIRONMENT"
     log_info "Layer: $LAYER"
 
-    # Helper to run terragrunt with a single automatic unlock/retry on lock errors
+    # Helper functions for lock handling
+    # Calculate age of lock in seconds
+    calculate_lock_age() {
+        local created_iso="$1"
+        # Parse ISO 8601 timestamp (e.g., "2025-12-18T22:46:26.942208Z")
+        # Remove microseconds and Z suffix for parsing
+        local created_clean="${created_iso%.*}"  # Remove .942208
+        created_clean="${created_clean%Z}"       # Remove Z
+        
+        if ! command_exists date; then
+            echo 0
+            return
+        fi
+        
+        local created_epoch=0
+        local now_epoch=$(date +%s 2>/dev/null || echo 0)
+        
+        # Try macOS date format first (date -j)
+        if created_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$created_clean" +%s 2>/dev/null); then
+            echo $((now_epoch - created_epoch))
+            return
+        fi
+        
+        # Try Linux date format (date -d)
+        if created_epoch=$(date -d "$created_iso" +%s 2>/dev/null); then
+            echo $((now_epoch - created_epoch))
+            return
+        fi
+        
+        # Fallback: return 0 if parsing fails
+        echo 0
+    }
+
+    # Check if Terraform/terragrunt process is running for current user
+    is_process_running() {
+        local lock_who="$1"
+        
+        # Check for running terraform or terragrunt processes for current user
+        # Use pgrep if available, otherwise use ps
+        if command_exists pgrep; then
+            if pgrep -f "terraform|terragrunt" >/dev/null 2>&1; then
+                return 0  # Process is running
+            fi
+        elif command_exists ps; then
+            if ps aux | grep -v grep | grep -E "terraform|terragrunt" >/dev/null 2>&1; then
+                return 0  # Process is running
+            fi
+        fi
+        
+        return 1  # No process found
+    }
+
+    # Download and parse S3 lock file
+    get_lock_file_info() {
+        local env="$1"
+        local layer="$2"
+        local bucket="${TF_STATE_BUCKET:-}"
+        
+        if [ -z "$bucket" ]; then
+            # Try to get from environment or construct default
+            bucket="${TF_STATE_BUCKET:-fru-terraform-state-$(aws sts get-caller-identity --profile "${AWS_PROFILE:-admin}" --query Account --output text 2>/dev/null || echo "")}"
+        fi
+        
+        if [ -z "$bucket" ]; then
+            return 1
+        fi
+        
+        local lock_file_path="$env/$layer/terraform.tfstate.tflock"
+        local lock_file_s3="s3://$bucket/$lock_file_path"
+        local tmp_lock_file
+        tmp_lock_file="$(mktemp)"
+        
+        # Try to download lock file
+        if aws s3 cp "$lock_file_s3" "$tmp_lock_file" --profile "${AWS_PROFILE:-admin}" --region "${AWS_REGION:-us-east-1}" 2>/dev/null; then
+            echo "$tmp_lock_file"
+            return 0
+        else
+            rm -f "$tmp_lock_file"
+            return 1
+        fi
+    }
+
+    # Check if lock file still exists in S3
+    lock_still_exists() {
+        local env="$1"
+        local layer="$2"
+        local bucket="${TF_STATE_BUCKET:-}"
+        
+        if [ -z "$bucket" ]; then
+            bucket="${TF_STATE_BUCKET:-fru-terraform-state-$(aws sts get-caller-identity --profile "${AWS_PROFILE:-admin}" --query Account --output text 2>/dev/null || echo "")}"
+        fi
+        
+        if [ -z "$bucket" ]; then
+            return 1  # Can't check, assume doesn't exist
+        fi
+        
+        local lock_file_path="$env/$layer/terraform.tfstate.tflock"
+        aws s3 ls "s3://$bucket/$lock_file_path" --profile "${AWS_PROFILE:-admin}" --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1
+    }
+
+    # Helper to run terragrunt with improved lock error handling
     # Streams output in real-time while still capturing for lock error detection
     run_with_lock_retry() {
         local description="$1"; shift
         local cmd=( "$@" )
         local tmp_out
         tmp_out="$(mktemp)"
+        local exit_code=0
 
         log_info "Running: ${cmd[*]}  (${description})"
         log_info "Note: This operation may take several minutes. Output will stream in real-time..."
         
         # Stream output to both terminal and temp file using tee
-        # This allows real-time visibility while still capturing output for lock error detection
+        # Capture actual exit code using PIPESTATUS
         if "${cmd[@]}" 2>&1 | tee "$tmp_out"; then
+            exit_code=0
+        else
+            exit_code=${PIPESTATUS[0]}  # Get actual command exit code (not tee's)
+        fi
+        
+        # If command succeeded, return success
+        if [ $exit_code -eq 0 ]; then
             rm -f "$tmp_out"
             return 0
         fi
         
-        # Command failed - check exit code from tee (which reflects the command's exit code)
-        local exit_code=${PIPESTATUS[0]}
-        
-        # Check for lock error in captured output
+        # Command failed - check for lock error
         if grep -q "Error acquiring the state lock" "$tmp_out"; then
             # Strip ANSI to ease parsing
             local clean_out
@@ -67,7 +172,6 @@ deploy_terragrunt() {
 
             # Try to extract the lock ID from common patterns
             local lock_id
-            # Simplest and most robust: grab the first UUID in the output
             lock_id="$(grep -Eo '[0-9a-fA-F-]{8}-[0-9a-fA-F-]{4}-[0-9a-fA-F-]{4}-[0-9a-fA-F-]{4}-[0-9a-fA-F-]{12}' "$clean_out" | head -1)"
             # Basic sanity: ensure it looks like a UUID
             if ! [[ "$lock_id" =~ ^[0-9a-fA-F-]{8}-[0-9a-fA-F-]{4}-[0-9a-fA-F-]{4}-[0-9a-fA-F-]{4}-[0-9a-fA-F-]{12}$ ]]; then
@@ -75,18 +179,125 @@ deploy_terragrunt() {
             fi
 
             if [ -n "$lock_id" ]; then
-                log_warning "State lock detected (ID: $lock_id). Attempting force-unlock and retry..."
+                log_warning "State lock detected (ID: $lock_id)"
+                
+                # Try to get lock file info from S3
+                local lock_file
+                local lock_who=""
+                local lock_created=""
+                local lock_age=0
+                
+                if lock_file=$(get_lock_file_info "$ENVIRONMENT" "$LAYER" 2>/dev/null); then
+                    # Parse lock file JSON
+                    if command_exists jq; then
+                        lock_who=$(jq -r '.Who // ""' "$lock_file" 2>/dev/null || echo "")
+                        lock_created=$(jq -r '.Created // ""' "$lock_file" 2>/dev/null || echo "")
+                    else
+                        # Fallback: try to parse JSON manually (basic extraction)
+                        lock_who=$(grep -o '"Who":"[^"]*"' "$lock_file" 2>/dev/null | sed 's/"Who":"\(.*\)"/\1/' || echo "")
+                        lock_created=$(grep -o '"Created":"[^"]*"' "$lock_file" 2>/dev/null | sed 's/"Created":"\(.*\)"/\1/' || echo "")
+                    fi
+                    
+                    if [ -n "$lock_created" ]; then
+                        lock_age=$(calculate_lock_age "$lock_created")
+                        if [ $lock_age -gt 0 ]; then
+                            log_info "Lock age: ${lock_age} seconds (created: $lock_created)"
+                        fi
+                    fi
+                    rm -f "$lock_file"
+                fi
+                
+                # Fail-fast: Check if lock owner process is still running
+                if [ -n "$lock_who" ] && is_process_running "$lock_who"; then
+                    log_error "Lock owner process is still running!"
+                    log_error "  Lock owner: $lock_who"
+                    log_error "  Lock ID: $lock_id"
+                    if [ $lock_age -gt 0 ]; then
+                        log_error "  Lock age: ${lock_age} seconds"
+                    fi
+                    log_error ""
+                    log_error "Another Terraform operation may be in progress."
+                    log_error "Wait for it to complete or manually verify no processes are running."
+                    log_error ""
+                    log_error "To check for running processes:"
+                    log_error "  ps aux | grep -E 'terraform|terragrunt'"
+                    log_error ""
+                    log_error "To manually unlock (if safe):"
+                    log_error "  cd $TERRAFORM_DIR/$ENVIRONMENT/$LAYER"
+                    log_error "  terragrunt force-unlock $lock_id -force"
+                    rm -f "$tmp_out" "$clean_out"
+                    return 1  # Fail fast
+                fi
+                
+                # Attempt to unlock
+                log_warning "Attempting to unlock lock (ID: $lock_id"
+                if [ $lock_age -gt 0 ]; then
+                    log_warning ", age: ${lock_age}s"
+                fi
+                log_warning ")..."
                 log_info "This retry may take several minutes. Terraform will re-run the full operation..."
-                if terragrunt force-unlock -force "$lock_id"; then
-                    log_info "Lock released. Retrying ${description} (this will re-run the full operation)..."
-                    log_info "Note: Output will stream in real-time during retry..."
-                    # Retry with streaming output again
-                    if "${cmd[@]}" 2>&1 | tee "$tmp_out"; then
+                
+                if terragrunt force-unlock -force "$lock_id" 2>&1; then
+                    # Wait a moment for S3 to propagate
+                    sleep 2
+                    
+                    # Verify lock is actually released
+                    if lock_still_exists "$ENVIRONMENT" "$LAYER"; then
+                        log_error "Lock still exists after force-unlock attempt!"
+                        log_error "  Lock ID: $lock_id"
+                        log_error "S3 propagation may be delayed, or unlock failed silently."
+                        log_error ""
+                        log_error "Manual intervention required:"
+                        log_error "  1. Wait a few more seconds and retry"
+                        log_error "  2. Check lock file in S3: s3://${TF_STATE_BUCKET:-fru-terraform-state-*}/$ENVIRONMENT/$LAYER/terraform.tfstate.tflock"
+                        log_error "  3. Manually unlock: cd $TERRAFORM_DIR/$ENVIRONMENT/$LAYER && terragrunt force-unlock $lock_id -force"
                         rm -f "$tmp_out" "$clean_out"
+                        return 1  # Fail fast
+                    fi
+                    
+                    log_success "Lock verified as released"
+                    if [ $lock_age -gt 0 ]; then
+                        log_info "Lock was ${lock_age} seconds old when unlocked"
+                    fi
+                    log_info "Retrying ${description} (this will re-run the full operation)..."
+                    log_info "Note: Output will stream in real-time during retry..."
+                    
+                    # Retry with streaming output
+                    local retry_tmp_out
+                    retry_tmp_out="$(mktemp)"
+                    local retry_exit_code=0
+                    if "${cmd[@]}" 2>&1 | tee "$retry_tmp_out"; then
+                        retry_exit_code=0
+                    else
+                        retry_exit_code=${PIPESTATUS[0]}  # Get actual command exit code
+                    fi
+                    
+                    # Return the retry exit code (0 for success, non-zero for failure)
+                    if [ $retry_exit_code -eq 0 ]; then
+                        rm -f "$tmp_out" "$clean_out" "$retry_tmp_out"
                         return 0
+                    else
+                        # Show output for failed retry
+                        cat "$retry_tmp_out"
+                        rm -f "$tmp_out" "$clean_out" "$retry_tmp_out"
+                        return 1
                     fi
                 else
-                    log_warning "Failed to force-unlock lock ID: $lock_id"
+                    log_error "Failed to force-unlock lock!"
+                    log_error "  Lock ID: $lock_id"
+                    if [ $lock_age -gt 0 ]; then
+                        log_error "  Lock age: ${lock_age} seconds"
+                    fi
+                    if [ -n "$lock_who" ]; then
+                        log_error "  Lock owner: $lock_who"
+                    fi
+                    log_error ""
+                    log_error "Manual intervention required:"
+                    log_error "  1. Verify no Terraform processes are running: ps aux | grep -E 'terraform|terragrunt'"
+                    log_error "  2. Check lock file in S3: s3://${TF_STATE_BUCKET:-fru-terraform-state-*}/$ENVIRONMENT/$LAYER/terraform.tfstate.tflock"
+                    log_error "  3. Manually unlock: cd $TERRAFORM_DIR/$ENVIRONMENT/$LAYER && terragrunt force-unlock $lock_id -force"
+                    rm -f "$tmp_out" "$clean_out"
+                    return 1  # Fail fast
                 fi
             else
                 log_warning "State lock detected but lock ID could not be parsed. Showing original error."
@@ -130,9 +341,13 @@ deploy_terragrunt() {
     export AWS_PROFILE="${AWS_PROFILE:-admin}"  # Use admin profile for Terraform
     export ENVIRONMENT="$ENVIRONMENT"
     
-    # Set secrets if available
+    # Set secrets if available (export for Terragrunt's get_env() function)
     if [ -n "$OPENAI_API_KEY" ]; then
         export OPENAI_API_KEY
+    fi
+    
+    if [ -n "$PGUSER" ]; then
+        export PGUSER
     fi
     
     if [ -n "$PGPASSWORD" ]; then
