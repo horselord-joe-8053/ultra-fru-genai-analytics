@@ -56,3 +56,4 @@ temp_terra_gen/
 # PostgreSQL
 pgdata/
 
+.env.bak
