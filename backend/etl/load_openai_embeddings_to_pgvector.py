@@ -4,8 +4,9 @@ import pandas as pd
 import psycopg2
 from psycopg2.extras import execute_batch
 from openai import OpenAI
+from backend.utils.env_helpers import get_required_env, get_optional_env, get_optional_int_env
 
-OPENAI_MODEL = os.environ.get("OPENAI_EMBED_MODEL", "text-embedding-3-small")
+OPENAI_MODEL = get_required_env("OPENAI_EMBED_MODEL", "OpenAI embedding model (e.g., text-embedding-3-small)")
 
 def get_openai_client() -> OpenAI:
     return OpenAI()  # requires OPENAI_API_KEY in env
@@ -18,7 +19,7 @@ def embed_texts(client: OpenAI, texts):
     return [item.embedding for item in resp.data]
 
 def main():
-    csv_path = os.environ.get("FRU_CSV_PATH", "data/raw/fridge_sales_with_rating.csv")
+    csv_path = get_optional_env("FRU_CSV_PATH", "data/raw/fridge_sales_with_rating.csv")
     df = pd.read_csv(csv_path)
 
     required = ["ID","BRAND","FRIDGE_MODEL","PRICE","SALES_DATE","STORE_NAME","CUSTOMER_FEEDBACK","FEEDBACK_RATING"]
@@ -27,11 +28,11 @@ def main():
             raise RuntimeError(f"Missing required column: {c}")
 
     conn = psycopg2.connect(
-        host=os.environ.get("PGHOST","localhost"),
-        port=os.environ.get("PGPORT","5432"),
-        user=os.environ.get("PGUSER","postgres"),
-        password=os.environ.get("PGPASSWORD","postgres"),
-        dbname=os.environ.get("PGDATABASE","fru_db"),
+        host=get_required_env("PGHOST", "Database host"),
+        port=get_optional_int_env("PGPORT", 5432),
+        user=get_required_env("PGUSER", "Database username"),
+        password=get_required_env("PGPASSWORD", "Database password"),
+        dbname=get_required_env("PGDATABASE", "Database name"),
     )
     conn.autocommit = True
     cur = conn.cursor()

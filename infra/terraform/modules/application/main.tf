@@ -33,7 +33,8 @@ module "ecs" {
   aurora_endpoint             = var.aurora_endpoint
   aurora_port                 = var.aurora_port
   aurora_database_name        = var.aurora_database_name
-  openai_secret_arn           = var.openai_secret_arn
+  openai_secret_arn           = var.openai_secret_arn            # JSON format (for backward compatibility)
+  openai_secret_plain_arn     = var.openai_secret_plain_arn      # Plain string (for ECS)
   db_password_secret_arn       = var.db_password_secret_arn        # JSON format (for RDS Data API)
   db_password_plain_secret_arn = var.db_password_plain_secret_arn # Plain string (for ECS)
   db_username_secret_arn       = var.db_username_secret_arn
@@ -46,7 +47,11 @@ module "ecs" {
   task_memory = var.ecs_task_memory
 
   desired_count = var.ecs_desired_count
-  bedrock_model_id = var.bedrock_model_id
+  bedrock_inference_profile_id = var.bedrock_inference_profile_id  # Primary for Claude 3.5
+  aws_bedrock_model_id = var.aws_bedrock_model_id  # Fallback for ON_DEMAND models
+  log_level = var.log_level
+  allowed_origins = var.allowed_origins
+  openai_embed_model = var.openai_embed_model
 
   alb_target_group_arn  = module.alb.target_group_arn
   alb_security_group_id = module.alb.security_group_id
@@ -80,6 +85,7 @@ module "frontend" {
   cloudfront_price_class = var.cloudfront_price_class
   certificate_arn   = var.frontend_certificate_arn
   api_origin_id     = var.frontend_api_origin_id
+  alb_dns_name      = module.alb.alb_dns_name # Pass ALB DNS for API origin
 
   tags = var.tags
 }

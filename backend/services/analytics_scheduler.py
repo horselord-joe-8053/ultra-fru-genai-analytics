@@ -6,6 +6,7 @@ import subprocess
 import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from backend.utils.env_helpers import get_optional_env
 
 logger = logging.getLogger(__name__)
 
@@ -13,10 +14,10 @@ logger = logging.getLogger(__name__)
 def run_spark_analytics():
     """Execute Spark analytics job and save to PostgreSQL."""
     try:
-        # Get paths from environment or use defaults
-        repo_root = os.environ.get("REPO_ROOT", os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        delta_path = os.environ.get("DELTA_TABLE_PATH", "data/delta/fru_sales")
-        spark_home = os.environ.get("SPARK_HOME", "")
+        # Get paths from environment or use defaults (these are optional - used only for Spark analytics)
+        repo_root = get_optional_env("REPO_ROOT", os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        delta_path = get_optional_env("DELTA_TABLE_PATH", "data/delta/fru_sales")
+        spark_home = get_optional_env("SPARK_HOME", "")
         
         # Construct spark-submit command
         spark_submit = "spark-submit"

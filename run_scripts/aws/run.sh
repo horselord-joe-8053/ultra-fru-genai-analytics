@@ -222,6 +222,26 @@ deploy_ecs_full() {
         "$SCRIPT_DIR/terraform/post_create_pgvector.sh" "$ENVIRONMENT"
     }
 
+    # Initialize database schema (creates tables: fru_sales_embeddings, batch_analytics)
+    init_db_schema() {
+        local infra_dir="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT/infrastructure"
+        
+        log_step "Initializing database schema"
+
+        # Check if schema initialization script exists
+        if [ ! -f "$SCRIPT_DIR/terraform/init_db_schema.sh" ]; then
+            log_warning "Schema initialization script not found; skipping schema setup"
+            return 0
+        fi
+
+        AWS_PROFILE="${AWS_PROFILE:-admin}" \
+        AWS_REGION="${AWS_REGION:-$DEFAULT_AWS_REGION}" \
+        "$SCRIPT_DIR/terraform/init_db_schema.sh" "$ENVIRONMENT" || {
+            log_warning "Schema initialization failed (tables may already exist or DB not ready)"
+            log_info "This is usually safe to ignore if tables already exist"
+        }
+    }
+
     # Step 1: Check/build container image (idempotent)
     log_step "Step 1/4: Checking container image availability"
     if ! check_or_build_image; then
@@ -254,8 +274,11 @@ deploy_ecs_full() {
 
     # Step 3.5: Ensure pgvector extension exists (Aurora/Postgres)
     ensure_pgvector_extension
+
+    # Step 3.6: Initialize database schema (creates tables: fru_sales_embeddings, batch_analytics)
+    init_db_schema
     
-    # Step 3.6: Validate infrastructure outputs before deploying application
+    # Step 3.7: Validate infrastructure outputs before deploying application
     validate_infrastructure_outputs() {
         local env="$1"
         local terraform_dir="$REPO_ROOT/infra/terraform/environments"
@@ -527,14 +550,10 @@ main() {
             ;;
     esac
     
-    # Run post-deployment verification (skip for dry-run and error cases)
-    if [ "$DRY_RUN" != "true" ]; then
-        "$SCRIPT_DIR/post_run_verify.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT"
-    fi
-    
-    # Show manual test hints (always show, but indicate if dry-run)
+    # Run post-deployment verification and show manual test hints
+    # (replaces both post_run_verify.sh and manual_test_hint.sh)
     echo ""
-    "$SCRIPT_DIR/manual_test_hint.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "" "" "$DRY_RUN"
+    "$SCRIPT_DIR/auto_verify_and_manual_hint.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "" "" "$DRY_RUN"
 }
 
 main "$@"

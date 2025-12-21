@@ -35,13 +35,27 @@ load_env_file() {
     # Explicitly export non-credential variables that scripts need
     # Credential variables (AWS_ADMIN_*, AWS_BEDROCK_*) are NOT exported
     # They are only used by setup-aws-profiles.sh to populate ~/.aws/credentials
+    
+    # AWS configuration (for Terragrunt get_env())
     export AWS_REGION="${AWS_REGION:-}"
     export AWS_PROFILE="${AWS_PROFILE:-}"
-    export BEDROCK_MODEL_ID="${BEDROCK_MODEL_ID:-}"
     export TF_STATE_BUCKET="${TF_STATE_BUCKET:-}"
     
-    # Export database, OpenAI, and other non-AWS-credential variables
-    # (These are loaded from .env but we don't need to list them all)
+    # Application configuration (for Terragrunt get_env())
+    # Use empty defaults for fail-fast behavior (consistent with get_env("VAR", ""))
+    export AWS_BEDROCK_INFERENCE_PROFILE_ID="${AWS_BEDROCK_INFERENCE_PROFILE_ID:-}"  # Primary for Claude 3.5
+    export AWS_BEDROCK_MODEL_ID="${AWS_BEDROCK_MODEL_ID:-}"  # Fallback for ON_DEMAND models
+    export OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+    
+    # Database configuration (for Terragrunt get_env())
+    export PGUSER="${PGUSER:-}"
+    export PGPASSWORD="${PGPASSWORD:-}"
+    export PGHOST="${PGHOST:-}"
+    export PGPORT="${PGPORT:-}"
+    export PGDATABASE="${PGDATABASE:-}"
+    
+    # Environment variable (for Terragrunt get_env())
+    export ENVIRONMENT="${ENVIRONMENT:-}"
     
     log_success "Loaded environment variables from $env_path"
     log_info "Note: AWS credential variables (AWS_ADMIN_*, AWS_BEDROCK_*) are loaded but not exported"

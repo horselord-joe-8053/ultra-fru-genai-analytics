@@ -3,6 +3,7 @@ import json
 import logging
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
+from backend.utils.env_helpers import get_required_env
 
 logger = logging.getLogger(__name__)
 
@@ -10,21 +11,21 @@ logger = logging.getLogger(__name__)
 def get_bedrock_client():
     """Return a Bedrock Runtime client using AWS profile or IAM role.
     
-    Uses AWS_PROFILE environment variable if set, otherwise uses default credentials.
-    In production (ECS/EKS), should use IAM roles instead of profiles.
-    For local Docker development, uses 'admin' profile by default.
+    - If AWS_PROFILE is explicitly set, uses that profile (for local development)
+    - If AWS_PROFILE is not set or empty, uses IAM role (for ECS/EKS production)
+    - In production (ECS/EKS), ECS task execution role provides Bedrock access via IAM
     """
-    region = os.environ.get("AWS_REGION", "us-east-1")
-    profile = os.environ.get("AWS_PROFILE", "admin")  # Default to admin for local development
+    region = get_required_env("AWS_REGION", "AWS region for Bedrock API")
+    profile = os.environ.get("AWS_PROFILE", "")  # Empty string if not set (use IAM role)
     
     try:
-        # Use boto3 Session with profile for local development
-        # In production (ECS/EKS), if AWS_PROFILE is not set, boto3 will use IAM role
-        # For local development, profile is set (admin or bedrock)
+        # Only use profile if explicitly set (for local development)
+        # In production (ECS/EKS), AWS_PROFILE should not be set, so boto3 uses IAM role
         if profile:
             session = boto3.Session(profile_name=profile)
         else:
             # No profile specified, use default credentials (IAM role in production)
+            # ECS tasks use the task execution role for authentication
             session = boto3.Session()
         return session.client("bedrock-runtime", region_name=region)
     except Exception as e:
@@ -36,10 +37,15 @@ def claude_complete(system_prompt, user_message, model_id=None, max_tokens=800):
     """
     Call an Anthropic Claude model on Bedrock and return the text reply.
     
+    Priority order for model/inference profile selection:
+    1. AWS_BEDROCK_INFERENCE_PROFILE_ID
+    2. model_id parameter (if provided)
+    3. AWS_BEDROCK_MODEL_ID
+    
     Args:
         system_prompt: System prompt for Claude
         user_message: User message content
-        model_id: Optional model ID (defaults to env var or Haiku)
+        model_id: Optional model ID (defaults to env var)
         max_tokens: Maximum tokens in response
     
     Returns:
@@ -48,11 +54,25 @@ def claude_complete(system_prompt, user_message, model_id=None, max_tokens=800):
     Raises:
         ValueError: If Bedrock API call fails
     """
-    if model_id is None:
-        model_id = os.environ.get(
-            "BEDROCK_MODEL_ID",
-            "anthropic.claude-3-haiku-20240307-v1:0",
-        )
+    # Try to get inference profile ID (preferred for Claude 3.5 and newer models)
+    # Strip whitespace to handle any accidental spaces in environment variable
+    inference_profile_id = os.environ.get("AWS_BEDROCK_INFERENCE_PROFILE_ID", "").strip()
+    
+    # Debug logging to help diagnose issues
+    if inference_profile_id:
+        logger.debug(f"AWS_BEDROCK_INFERENCE_PROFILE_ID is set: '{inference_profile_id}'")
+    else:
+        logger.debug("AWS_BEDROCK_INFERENCE_PROFILE_ID is not set or empty")
+    
+    # Fallback to model ID if no inference profile
+    if not inference_profile_id:
+        if model_id is None:
+            model_id = os.environ.get("AWS_BEDROCK_MODEL_ID", "").strip()
+            if not model_id:
+                # Fail-fast if neither inference profile nor model ID is set
+                raise ValueError(
+                    "Either AWS_BEDROCK_INFERENCE_PROFILE_ID or AWS_BEDROCK_MODEL_ID must be set"
+                )
 
     try:
         client = get_bedrock_client()
@@ -74,13 +94,24 @@ def claude_complete(system_prompt, user_message, model_id=None, max_tokens=800):
         ],
     }
 
+    # Build invoke_model parameters
+    invoke_params = {
+        "body": json.dumps(body),
+        "accept": "application/json",
+        "contentType": "application/json",
+    }
+    
+    # Use inference profile ID as modelId if available (inference profiles are referenced via modelId)
+    # If inference profile ID is set, use it as the modelId parameter
+    if inference_profile_id:
+        invoke_params["modelId"] = inference_profile_id
+        logger.info(f"Using Bedrock inference profile (as modelId): {inference_profile_id} in region: {get_required_env('AWS_REGION')}")
+    else:
+        invoke_params["modelId"] = model_id
+        logger.info(f"Using Bedrock model ID: {model_id} in region: {get_required_env('AWS_REGION')}")
+
     try:
-        response = client.invoke_model(
-            modelId=model_id,
-            body=json.dumps(body),
-            accept="application/json",
-            contentType="application/json",
-        )
+        response = client.invoke_model(**invoke_params)
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "Unknown")
         error_message = e.response.get("Error", {}).get("Message", str(e))

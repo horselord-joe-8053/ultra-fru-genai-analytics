@@ -38,20 +38,35 @@ variable "enable_bedrock_vpc_endpoint" {
 
 variable "openai_api_key" {
   type        = string
-  description = "OpenAI API key"
+  description = "OpenAI API key (must be provided via .env - empty string will fail validation)"
   sensitive   = true
+  
+  validation {
+    condition     = length(var.openai_api_key) > 0
+    error_message = "openai_api_key cannot be empty. Please set OPENAI_API_KEY in your .env file."
+  }
 }
 
 variable "db_password" {
   type        = string
-  description = "Database password"
+  description = "Database password (must be provided via .env - empty string will fail validation)"
   sensitive   = true
+  
+  validation {
+    condition     = length(var.db_password) > 0
+    error_message = "db_password cannot be empty. Please set PGPASSWORD in your .env file."
+  }
 }
 
 variable "db_username" {
   type        = string
-  description = "Database username"
-  default     = "fru_user"
+  description = "Database username (must be provided via .env - empty string will fail validation)"
+  default     = ""
+  
+  validation {
+    condition     = length(var.db_username) > 0
+    error_message = "db_username cannot be empty. Please set PGUSER in your .env file."
+  }
 }
 
 variable "create_db_username_secret" {
@@ -62,8 +77,13 @@ variable "create_db_username_secret" {
 
 variable "aurora_database_name" {
   type        = string
-  description = "Aurora database name"
-  default     = "fru_db"
+  description = "Aurora database name (must be provided via .env - empty string will fail validation)"
+  default     = ""
+  
+  validation {
+    condition     = length(var.aurora_database_name) > 0
+    error_message = "aurora_database_name cannot be empty. Please set PGDATABASE in your .env file."
+  }
 }
 
 variable "aurora_engine_version" {
@@ -130,6 +150,12 @@ variable "deletion_protection" {
   type        = bool
   description = "Enable deletion protection"
   default     = false
+}
+
+variable "bedrock_inference_profile_id" {
+  type        = string
+  description = "Bedrock inference profile ID (optional, for IAM permissions)"
+  default     = ""
 }
 
 variable "tags" {

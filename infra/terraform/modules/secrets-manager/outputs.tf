@@ -1,11 +1,16 @@
 output "openai_secret_arn" {
-  description = "ARN of OpenAI API key secret"
+  description = "ARN of OpenAI API key secret (JSON format - for backward compatibility)"
   value       = aws_secretsmanager_secret.openai_key.arn
 }
 
 output "openai_secret_name" {
   description = "Name of OpenAI API key secret"
   value       = aws_secretsmanager_secret.openai_key.name
+}
+
+output "openai_secret_plain_arn" {
+  description = "ARN of OpenAI API key secret (plain string for ECS)"
+  value       = aws_secretsmanager_secret.openai_key_plain.arn
 }
 
 output "db_password_secret_arn" {

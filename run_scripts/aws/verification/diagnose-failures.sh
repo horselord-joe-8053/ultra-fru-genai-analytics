@@ -1,0 +1,93 @@
+#!/bin/bash
+# Diagnostic functions for troubleshooting deployment failures
+# Usage: source diagnose-failures.sh
+#        diagnose_api_failure
+
+# Default ECS log group (can be overridden via env)
+ECS_LOG_GROUP="${ECS_LOG_GROUP:-/ecs/fru-dev}"
+
+# Helper function to check if command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Diagnose ECS API service failures using awscli (service events, tasks, logs)
+diagnose_api_failure() {
+    # Require aws cli
+    if ! command_exists aws; then
+        log_warning "aws CLI not available; cannot auto-diagnose API failure"
+        return 1
+    fi
+
+    local cluster_name="${ECS_CLUSTER_NAME:-fru-dev-cluster}"
+    local service_name="${ECS_SERVICE_NAME:-fru-dev-api-service}"
+    local region="${AWS_REGION:-us-east-1}"
+    local profile="${AWS_PROFILE:-admin}"
+
+    echo ""
+    log_step "Diagnosing ECS API service failure (cluster: $cluster_name, service: $service_name)"
+
+    # Recent ECS service events
+    log_info "Fetching recent ECS service events..."
+    aws ecs describe-services \
+        --cluster "$cluster_name" \
+        --services "$service_name" \
+        --profile "$profile" \
+        --region "$region" \
+        --query 'services[0].events[0:5]' \
+        --output table 2>/dev/null || log_warning "Could not fetch ECS service events"
+
+    # Task statuses
+    log_info "Fetching ECS task statuses..."
+    aws ecs list-tasks \
+        --cluster "$cluster_name" \
+        --service-name "$service_name" \
+        --profile "$profile" \
+        --region "$region" \
+        --desired-status RUNNING \
+        --query 'taskArns' \
+        --output text 2>/dev/null | \
+        awk '{for(i=1;i<=NF;i++)print $i}' | \
+        xargs -r aws ecs describe-tasks \
+            --cluster "$cluster_name" \
+            --profile "$profile" \
+            --region "$region" \
+            --tasks \
+            --query 'tasks[].{lastStatus:lastStatus,healthStatus:healthStatus,stoppedReason:stoppedReason,containers:containers[].{name:name,lastStatus:lastStatus,reason:reason}}' \
+            --output table 2>/dev/null || log_warning "Could not fetch ECS task details"
+
+    # Recent logs from CloudWatch
+    if [ -n "$ECS_LOG_GROUP" ]; then
+        log_info "Fetching recent CloudWatch logs from $ECS_LOG_GROUP (last 10 minutes, tail)..."
+        local logs_output
+        logs_output=$(aws logs tail "$ECS_LOG_GROUP" --since 10m --profile "$profile" --region "$region" 2>/dev/null || echo "")
+        if [ -n "$logs_output" ]; then
+            echo "$logs_output" | tail -40
+
+            # Highlight common database auth errors
+            if echo "$logs_output" | grep -qi "password authentication failed for user"; then
+                log_error "Detected database authentication failures in logs (e.g., 'password authentication failed for user')."
+                log_error "This usually means the Aurora DB password/username used by the API does not match the actual database credentials."
+            fi
+        else
+            log_warning "No recent logs found or unable to read CloudWatch logs"
+        fi
+    fi
+
+    return 0
+}
+
+# Main execution (if run standalone)
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    # Source logger if not already sourced
+    if [ -z "${log_info:-}" ]; then
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        source "$SCRIPT_DIR/../../common/logger.sh" 2>/dev/null || true
+    fi
+    
+    diagnose_api_failure
+else
+    # If sourced, just define the functions
+    true  # Functions are already defined above
+fi
+

@@ -52,7 +52,12 @@ variable "aurora_database_name" {
 
 variable "openai_secret_arn" {
   type        = string
-  description = "ARN of OpenAI API key secret"
+  description = "ARN of OpenAI API key secret (JSON format - for backward compatibility, not used by ECS)"
+}
+
+variable "openai_secret_plain_arn" {
+  type        = string
+  description = "ARN of OpenAI API key secret (plain string for ECS task definition)"
 }
 
 variable "db_password_secret_arn" {
@@ -106,10 +111,49 @@ variable "desired_count" {
   default     = 1
 }
 
-variable "bedrock_model_id" {
+variable "bedrock_inference_profile_id" {
   type        = string
-  description = "Bedrock model ID"
-  default     = "anthropic.claude-3-haiku-20240229-v1:0"
+  description = "Bedrock inference profile ID (primary for Claude 3.5 and newer models). Can be empty if using model ID."
+  default     = ""
+}
+
+variable "aws_bedrock_model_id" {
+  type        = string
+  description = "AWS Bedrock model ID (fallback for ON_DEMAND models). Can be empty if using inference profile."
+  default     = ""
+}
+
+variable "log_level" {
+  type        = string
+  description = "Logging level (must be provided via .env - empty string will fail validation)"
+  default     = ""
+  
+  validation {
+    condition     = length(var.log_level) > 0
+    error_message = "log_level cannot be empty. Please set LOG_LEVEL in your .env file."
+  }
+}
+
+variable "allowed_origins" {
+  type        = string
+  description = "Comma-separated list of allowed CORS origins (must be provided via .env - empty string will fail validation)"
+  default     = ""
+  
+  validation {
+    condition     = length(var.allowed_origins) > 0
+    error_message = "allowed_origins cannot be empty. Please set ALLOWED_ORIGINS in your .env file."
+  }
+}
+
+variable "openai_embed_model" {
+  type        = string
+  description = "OpenAI embedding model (must be provided via .env - empty string will fail validation)"
+  default     = ""
+  
+  validation {
+    condition     = length(var.openai_embed_model) > 0
+    error_message = "openai_embed_model cannot be empty. Please set OPENAI_EMBED_MODEL in your .env file."
+  }
 }
 
 variable "alb_target_group_arn" {

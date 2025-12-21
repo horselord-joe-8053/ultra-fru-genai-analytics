@@ -32,6 +32,12 @@ variable "api_origin_id" {
   default     = null
 }
 
+variable "alb_dns_name" {
+  type        = string
+  description = "ALB DNS name for API origin - optional, for /query path"
+  default     = null
+}
+
 variable "tags" {
   type        = map(string)
   description = "Common tags for all resources"

@@ -16,9 +16,10 @@ from openai import APIError as OpenAIError
 
 from backend.llm.bedrock_client import claude_complete, get_bedrock_client
 from backend.services.analytics_scheduler import start_analytics_scheduler
+from backend.utils.env_helpers import get_required_env, get_optional_env, get_optional_bool_env, get_optional_int_env
 
-# Feature flag for agent-based query processing
-USE_AGENT_QUERY = os.environ.get('USE_AGENT_QUERY', 'false').lower() == 'true'
+# Feature flag for agent-based query processing (optional, defaults to False)
+USE_AGENT_QUERY = get_optional_bool_env('USE_AGENT_QUERY', False)
 
 # Agent will be initialized after DB pool is ready
 query_agent = None
@@ -32,10 +33,7 @@ def init_agent():
             from openai import OpenAI as OpenAIClient
             
             # Initialize OpenAI client for embeddings
-            openai_api_key = os.environ.get("OPENAI_API_KEY")
-            if not openai_api_key:
-                app.logger.warning("OPENAI_API_KEY not set, agent will not work properly")
-                return
+            openai_api_key = get_required_env("OPENAI_API_KEY", "OpenAI API key for embeddings")
             
             openai_client = OpenAIClient(api_key=openai_api_key)
             
@@ -51,14 +49,14 @@ def init_agent():
 
 # Configure logging
 logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    level=get_required_env("LOG_LEVEL", "Logging level (e.g., INFO, DEBUG, WARNING)").upper(),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 app = Flask(__name__)
 app.logger = logging.getLogger(__name__)
 
 # Configure CORS
-allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
+allowed_origins = get_required_env("ALLOWED_ORIGINS", "Comma-separated list of allowed CORS origins").split(",")
 CORS(app, resources={
     r"/query": {"origins": allowed_origins},
     r"/query-v2": {"origins": allowed_origins},
@@ -81,11 +79,11 @@ def init_db_pool():
         try:
             _connection_pool = psycopg2.pool.SimpleConnectionPool(
                 1, 20,  # minconn, maxconn
-                host=os.environ.get("PGHOST", "localhost"),
-                port=int(os.environ.get("PGPORT", "5432")),
-                user=os.environ.get("PGUSER", "postgres"),
-                password=os.environ.get("PGPASSWORD", "postgres"),
-                dbname=os.environ.get("PGDATABASE", "fru_db"),
+                host=get_required_env("PGHOST", "Database host"),
+                port=get_optional_int_env("PGPORT", 5432),
+                user=get_required_env("PGUSER", "Database username"),
+                password=get_required_env("PGPASSWORD", "Database password"),
+                dbname=get_required_env("PGDATABASE", "Database name"),
             )
             app.logger.info("Database connection pool initialized")
         except Exception as e:
@@ -112,11 +110,11 @@ def get_db_conn():
     # Fallback to direct connection
     try:
         conn = psycopg2.connect(
-            host=os.environ.get("PGHOST", "localhost"),
-            port=int(os.environ.get("PGPORT", "5432")),
-            user=os.environ.get("PGUSER", "postgres"),
-            password=os.environ.get("PGPASSWORD", "postgres"),
-            dbname=os.environ.get("PGDATABASE", "fru_db"),
+            host=get_required_env("PGHOST", "Database host"),
+            port=get_optional_int_env("PGPORT", 5432),
+            user=get_required_env("PGUSER", "Database username"),
+            password=get_required_env("PGPASSWORD", "Database password"),
+            dbname=get_required_env("PGDATABASE", "Database name"),
         )
         return conn
     except Psycopg2Error as e:
@@ -151,7 +149,7 @@ def embed_text(text: str) -> List[float]:
     """Get an OpenAI embedding for a single text string."""
     try:
         client = get_openai_client()
-        model = os.environ.get("OPENAI_EMBED_MODEL", "text-embedding-3-small")
+        model = get_required_env("OPENAI_EMBED_MODEL", "OpenAI embedding model (e.g., text-embedding-3-small)")
         resp = client.embeddings.create(model=model, input=[text])
         return resp.data[0].embedding
     except OpenAIError as e:
@@ -401,9 +399,10 @@ def health():
         return jsonify(status), 503
     
     # Check OpenAI API key
-    if os.environ.get("OPENAI_API_KEY"):
+    try:
+        get_required_env("OPENAI_API_KEY")
         status["openai"] = "configured"
-    else:
+    except ValueError:
         status["openai"] = "not_configured"
     
     # Check AWS credentials
@@ -543,8 +542,8 @@ if __name__ == "__main__":
     init_agent()
     
     # Start analytics scheduler (if enabled)
-    enable_scheduler = os.environ.get("ENABLE_ANALYTICS_SCHEDULER", "false").lower() == "true"
-    scheduler_interval = int(os.environ.get("ANALYTICS_SCHEDULER_INTERVAL_MINUTES", "5"))
+    enable_scheduler = get_optional_bool_env("ENABLE_ANALYTICS_SCHEDULER", False)
+    scheduler_interval = get_optional_int_env("ANALYTICS_SCHEDULER_INTERVAL_MINUTES", 5)
     
     if enable_scheduler:
         try:

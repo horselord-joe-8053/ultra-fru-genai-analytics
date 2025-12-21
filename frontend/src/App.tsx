@@ -29,6 +29,9 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Use relative URL - CloudFront will proxy /query requests to ALB
+  // In development, Vite proxy handles /query -> localhost:5000
+  // In production, CloudFront cache behavior proxies /query -> ALB
   async function sendQuery(text: string) {
     if (!text.trim() || loading) return;
     setError(null);

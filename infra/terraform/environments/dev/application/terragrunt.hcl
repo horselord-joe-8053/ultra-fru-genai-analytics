@@ -36,6 +36,7 @@ dependency "infrastructure" {
     ecs_task_execution_role_arn = "arn:aws:iam::123456789012:role/fru-dev-ecs-task-execution-role"
     ecs_task_runtime_role_arn   = "arn:aws:iam::123456789012:role/fru-dev-ecs-task-runtime-role"
     openai_secret_arn            = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/openai-api-key"
+    openai_secret_plain_arn      = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/openai-api-key-plain"
     db_password_secret_arn       = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-password"
     db_password_plain_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-password-plain"
     db_username_secret_arn       = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-username"
@@ -62,7 +63,8 @@ inputs = {
   aurora_database_name   = dependency.infrastructure.outputs.aurora_database_name
   aurora_security_group_id = dependency.infrastructure.outputs.aurora_security_group_id
   
-  openai_secret_arn            = dependency.infrastructure.outputs.openai_secret_arn
+  openai_secret_arn            = dependency.infrastructure.outputs.openai_secret_arn            # JSON format (for backward compatibility)
+  openai_secret_plain_arn      = dependency.infrastructure.outputs.openai_secret_plain_arn     # Plain string (for ECS)
   db_password_secret_arn       = dependency.infrastructure.outputs.db_password_secret_arn        # JSON format (for RDS Data API)
   db_password_plain_secret_arn = dependency.infrastructure.outputs.db_password_plain_secret_arn # Plain string (for ECS)
   # Username secret: ensures PGUSER in ECS matches Aurora master_username (both from .env)
@@ -72,6 +74,13 @@ inputs = {
   ecs_desired_count = include.env.inputs.ecs_desired_count
   ecs_task_cpu     = include.env.inputs.ecs_task_cpu
   ecs_task_memory  = include.env.inputs.ecs_task_memory
+  
+  # Application configuration (from .env via env.hcl)
+  bedrock_inference_profile_id = include.env.inputs.bedrock_inference_profile_id  # Primary for Claude 3.5
+  aws_bedrock_model_id = include.env.inputs.aws_bedrock_model_id  # Fallback for ON_DEMAND models
+  log_level = include.env.inputs.log_level
+  allowed_origins = include.env.inputs.allowed_origins
+  openai_embed_model = include.env.inputs.openai_embed_model
   
   deletion_protection = include.env.inputs.deletion_protection
   

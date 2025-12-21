@@ -74,7 +74,8 @@ The `configmap.yaml` uses environment variable substitution. Update it with actu
 export PGHOST="<aurora-endpoint>"
 export PGUSER="postgres"
 export AWS_REGION="us-east-1"
-export BEDROCK_MODEL_ID="anthropic.claude-3-haiku-20240307-v1:0"
+export AWS_BEDROCK_INFERENCE_PROFILE_ID="us.anthropic.claude-3-5-haiku-20241022-v1:0"
+export AWS_BEDROCK_MODEL_ID="anthropic.claude-3-haiku-20240307-v1:0"
 
 envsubst < configmap.yaml > configmap-generated.yaml
 kubectl apply -f configmap-generated.yaml
@@ -116,7 +117,8 @@ kubectl apply -f ingress.yaml  # Optional
 
 ### Optional (with defaults)
 - `AWS_REGION` - Default: us-east-1
-- `BEDROCK_MODEL_ID` - Default: anthropic.claude-3-haiku-20240307-v1:0
+- `AWS_BEDROCK_INFERENCE_PROFILE_ID` - Inference profile ID for Claude 3.5 (optional)
+- `AWS_BEDROCK_MODEL_ID` - Default: anthropic.claude-3-haiku-20240307-v1:0
 - `OPENAI_EMBED_MODEL` - Default: text-embedding-3-small
 - `USE_AGENT_QUERY` - Default: false
 - `LOG_LEVEL` - Default: INFO

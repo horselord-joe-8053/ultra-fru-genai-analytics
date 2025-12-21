@@ -35,13 +35,16 @@ inputs = {
   # Create username secret so ECS can use PGUSER from Secrets Manager (single source of truth: .env)
   create_db_username_secret = true
   
-  aurora_database_name = "fru_db"
+  aurora_database_name = include.env.inputs.aurora_database_name
   aurora_min_capacity  = include.env.inputs.aurora_min_capacity
   aurora_max_capacity  = include.env.inputs.aurora_max_capacity
   aurora_instance_count = include.env.inputs.aurora_instance_count
   
   enable_iam_auth = include.env.inputs.enable_iam_auth
   deletion_protection = include.env.inputs.deletion_protection
+  
+  # Bedrock inference profile ID (for IAM permissions)
+  bedrock_inference_profile_id = include.env.inputs.bedrock_inference_profile_id
   
   tags = include.env.inputs.tags
 }

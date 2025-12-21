@@ -21,7 +21,7 @@ DEFAULT_REGION="us-east-1"
 # Initialize variables from environment or defaults
 # ============================================================================
 PROVIDER="${DEFAULT_PROVIDER}"
-MODEL_ID="${BEDROCK_MODEL_ID:-$DEFAULT_MODEL}"
+MODEL_ID="${AWS_BEDROCK_MODEL_ID:-$DEFAULT_MODEL}"
 AWS_REGION="${AWS_REGION:-$DEFAULT_REGION}"
 AWS_PROFILE="${AWS_PROFILE:-admin}"  # Default to admin for infrastructure operations
 
@@ -69,7 +69,7 @@ EXAMPLES:
     $0 --verify --provider anthropic --model anthropic.claude-3-haiku-20240307-v1:0
 
 ENVIRONMENT VARIABLES:
-    BEDROCK_MODEL_ID       Default model ID to check
+    AWS_BEDROCK_MODEL_ID   Default model ID to check
     AWS_REGION             AWS region (default: $DEFAULT_REGION)
     AWS_PROFILE            AWS profile to use
 

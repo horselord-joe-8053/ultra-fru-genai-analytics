@@ -41,9 +41,18 @@ inputs = {
   eks_enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
   
   # Secrets (MUST be provided via terraform.tfvars or environment variables)
+  # Use empty defaults for fail-fast behavior - ensures .env is the single source of truth
   openai_api_key = get_env("OPENAI_API_KEY", "")
-  db_username    = get_env("PGUSER", "fru_user")
+  db_username    = get_env("PGUSER", "")
   db_password    = get_env("PGPASSWORD", "")
+  
+  # Application configuration (from .env)
+  bedrock_inference_profile_id = get_env("AWS_BEDROCK_INFERENCE_PROFILE_ID", "")  # Primary for Claude 3.5
+  aws_bedrock_model_id = get_env("AWS_BEDROCK_MODEL_ID", "")  # Fallback for ON_DEMAND models
+  aurora_database_name = get_env("PGDATABASE", "")
+  log_level = get_env("LOG_LEVEL", "")
+  allowed_origins = get_env("ALLOWED_ORIGINS", "")
+  openai_embed_model = get_env("OPENAI_EMBED_MODEL", "")
   
   # Feature flags
   enable_nat_gateway = true

@@ -27,19 +27,31 @@ setup_env_file() {
     else
         log_info "Creating .env from scratch..."
         cat > "$ENV_FILE" << 'EOF'
-# Database Configuration
+# Database Configuration (REQUIRED)
 PGHOST=localhost
 PGPORT=5432
 PGUSER=postgres
 PGPASSWORD=postgres
 PGDATABASE=fru_db
 
-# OpenAI Configuration
+# OpenAI Configuration (REQUIRED)
 OPENAI_API_KEY=sk-...
+OPENAI_EMBED_MODEL=text-embedding-3-small
 
-# AWS Configuration
+# AWS Configuration (REQUIRED)
 AWS_REGION=us-east-1
-BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240229-v1:0
+
+# AWS Bedrock Configuration
+# Primary: Inference Profile ID (for Claude 3.5 and newer models)
+AWS_BEDROCK_INFERENCE_PROFILE_ID=us.anthropic.claude-3-5-haiku-20241022-v1:0
+
+# Fallback: Model ID (for ON_DEMAND models like Claude 3)
+# Only used if AWS_BEDROCK_INFERENCE_PROFILE_ID is not set
+AWS_BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
+
+# Application Configuration (REQUIRED)
+LOG_LEVEL=INFO
+ALLOWED_ORIGINS=*
 
 # AWS Credentials for Profiles (required for AWS operations)
 # These are used to populate ~/.aws/credentials profiles
@@ -53,8 +65,14 @@ BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240229-v1:0
 # AWS_PROFILE=admin  # For infrastructure scripts (default: admin)
 # For application runtime in Docker, set AWS_PROFILE=admin in docker-compose.yml
 
+# Optional: Feature Flags
+# USE_AGENT_QUERY=false  # Enable agent-based query processing
+# USE_AGENT_QUERY_PERCENTAGE=0  # Percentage of queries to use agent (0-100)
+# USE_AGENT_QUERY_WHITELIST=  # Comma-separated list of user IDs to always use agent
+
 # Optional: Data Paths
 # FRU_CSV_PATH=data/raw/fridge_sales_with_rating.csv
+# REPO_ROOT=  # Repository root path (defaults to auto-detection if not set)
 
 # Optional: Analytics Scheduler (requires Spark + Delta table)
 # ENABLE_ANALYTICS_SCHEDULER=true

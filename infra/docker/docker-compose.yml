@@ -33,11 +33,24 @@ services:
 
       # OpenAI embeddings
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_EMBED_MODEL: ${OPENAI_EMBED_MODEL:-text-embedding-3-small}
 
       # Bedrock (uses AWS profile for credentials)
       AWS_PROFILE: ${AWS_PROFILE:-admin}
       AWS_REGION: ${AWS_REGION:-us-east-1}
-      BEDROCK_MODEL_ID: ${BEDROCK_MODEL_ID:-anthropic.claude-3-haiku-20240307-v1:0}
+      # Primary: Inference Profile ID (for Claude 3.5)
+      AWS_BEDROCK_INFERENCE_PROFILE_ID: ${AWS_BEDROCK_INFERENCE_PROFILE_ID:-}
+      # Fallback: Model ID (for ON_DEMAND models)
+      AWS_BEDROCK_MODEL_ID: ${AWS_BEDROCK_MODEL_ID:-}
+
+      # Application configuration
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+
+      # Optional: Feature flags
+      USE_AGENT_QUERY: ${USE_AGENT_QUERY:-false}
+      USE_AGENT_QUERY_PERCENTAGE: ${USE_AGENT_QUERY_PERCENTAGE:-0}
+      USE_AGENT_QUERY_WHITELIST: ${USE_AGENT_QUERY_WHITELIST:-}
 
     depends_on:
       db:

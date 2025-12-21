@@ -54,9 +54,8 @@ teardown_terragrunt() {
     # Load environment variables
     load_env_file
     
-    # Set required environment variables for Terragrunt
-    export AWS_REGION="${AWS_REGION:-us-east-1}"
-    export ENVIRONMENT="$ENVIRONMENT"
+    # Environment variables are now exported by load-env.sh
+    # No need to re-export here - they're already available for Terragrunt's get_env()
     
     ENV_DIR="$TERRAFORM_DIR/$ENVIRONMENT"
     

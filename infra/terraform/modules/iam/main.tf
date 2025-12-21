@@ -52,7 +52,8 @@ resource "aws_iam_role_policy" "ecs_task_execution_secrets" {
         ]
         Resource = concat(
           [
-            var.openai_secret_arn,
+            var.openai_secret_arn,            # JSON format (for backward compatibility)
+            var.openai_secret_plain_arn,      # Plain string (for ECS)
             var.db_password_secret_arn,        # JSON format (for RDS Data API)
             var.db_password_plain_secret_arn   # Plain string (for ECS)
           ],
@@ -109,7 +110,12 @@ resource "aws_iam_role_policy" "ecs_task_runtime_bedrock" {
           "bedrock:InvokeModel",
           "bedrock:InvokeModelWithResponseStream"
         ]
-        Resource = var.bedrock_model_arns
+        # Allow both model ARNs and inference profile ARNs
+        # Inference profiles are referenced as: arn:aws:bedrock:region:account-id:inference-profile/profile-id
+        Resource = concat(
+          var.bedrock_model_arns,
+          var.bedrock_inference_profile_arns != null ? var.bedrock_inference_profile_arns : []
+        )
       }
     ]
   })
@@ -131,7 +137,8 @@ resource "aws_iam_role_policy" "ecs_task_runtime_secrets" {
         ]
         Resource = concat(
           [
-            var.openai_secret_arn,
+            var.openai_secret_arn,            # JSON format (for backward compatibility)
+            var.openai_secret_plain_arn,      # Plain string (for ECS)
             var.db_password_secret_arn,        # JSON format (for RDS Data API)
             var.db_password_plain_secret_arn   # Plain string (for ECS)
           ],

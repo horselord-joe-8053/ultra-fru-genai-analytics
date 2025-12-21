@@ -53,8 +53,13 @@ output "ecs_task_runtime_role_arn" {
 
 # Secrets Manager Outputs
 output "openai_secret_arn" {
-  description = "OpenAI secret ARN"
+  description = "OpenAI secret ARN (JSON format - for backward compatibility)"
   value       = module.secrets_manager.openai_secret_arn
+}
+
+output "openai_secret_plain_arn" {
+  description = "OpenAI secret ARN (plain string for ECS)"
+  value       = module.secrets_manager.openai_secret_plain_arn
 }
 
 output "db_password_secret_arn" {

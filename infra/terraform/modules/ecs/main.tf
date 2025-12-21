@@ -100,19 +100,36 @@ resource "aws_ecs_task_definition" "fru_api" {
           name  = "AWS_REGION"
           value = var.aws_region
         },
+        # Bedrock configuration (inference profile is primary, model ID is fallback)
         {
-          name  = "BEDROCK_MODEL_ID"
-          value = var.bedrock_model_id
+          name  = "AWS_BEDROCK_INFERENCE_PROFILE_ID"
+          value = var.bedrock_inference_profile_id
+        },
+        {
+          name  = "AWS_BEDROCK_MODEL_ID"
+          value = var.aws_bedrock_model_id
+        },
+        {
+          name  = "LOG_LEVEL"
+          value = var.log_level
+        },
+        {
+          name  = "ALLOWED_ORIGINS"
+          value = var.allowed_origins
+        },
+        {
+          name  = "OPENAI_EMBED_MODEL"
+          value = var.openai_embed_model
         }
       ]
 
       # Secrets (sensitive - from Secrets Manager)
-      # Use plain string password secret for ECS (ECS doesn't support JSON key extraction)
+      # Use plain string secrets for ECS (ECS doesn't support JSON key extraction)
       secrets = concat(
         [
           {
             name      = "OPENAI_API_KEY"
-            valueFrom = var.openai_secret_arn
+            valueFrom = var.openai_secret_plain_arn  # Use plain string secret
           },
           {
             name      = "PGPASSWORD"
@@ -138,7 +155,8 @@ resource "aws_ecs_task_definition" "fru_api" {
       }
 
       healthCheck = {
-        command     = ["CMD-SHELL", "curl -f http://localhost:${var.container_port}/health || exit 1"]
+        # Use Python for health check (curl is not available in python:3.11-slim)
+        command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${var.container_port}/health').read()\" || exit 1"]
         interval    = 30
         timeout     = 5
         retries     = 3

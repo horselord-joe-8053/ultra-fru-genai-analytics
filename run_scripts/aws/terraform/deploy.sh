@@ -504,23 +504,8 @@ deploy_terragrunt() {
     log_step "Ensuring Terraform state bucket exists"
     "$SCRIPT_DIR/setup-s3-bucket.sh" || exit 1
     
-    # Set required environment variables for Terragrunt
-    export AWS_REGION="${AWS_REGION:-us-east-1}"
-    export AWS_PROFILE="${AWS_PROFILE:-admin}"  # Use admin profile for Terraform
-    export ENVIRONMENT="$ENVIRONMENT"
-    
-    # Set secrets if available (export for Terragrunt's get_env() function)
-    if [ -n "$OPENAI_API_KEY" ]; then
-        export OPENAI_API_KEY
-    fi
-    
-    if [ -n "$PGUSER" ]; then
-        export PGUSER
-    fi
-    
-    if [ -n "$PGPASSWORD" ]; then
-        export PGPASSWORD
-    fi
+    # Environment variables are now exported by load-env.sh
+    # No need to re-export here - they're already available for Terragrunt's get_env()
     
     ENV_DIR="$TERRAFORM_DIR/$ENVIRONMENT"
     

@@ -40,6 +40,9 @@ const BatchAnalyticsPanel: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Use relative URL - CloudFront will proxy /analytics requests to ALB
+  // In development, Vite proxy handles /analytics -> localhost:5000
+  // In production, CloudFront cache behavior proxies /analytics -> ALB
   const fetchAnalytics = async () => {
     try {
       setLoading(true);

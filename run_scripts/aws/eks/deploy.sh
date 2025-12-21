@@ -131,11 +131,8 @@ generate_manifests() {
     if [ -f "$configmap_template" ]; then
         log_info "Generating ConfigMap from template..."
         if command_exists envsubst; then
-            # Export all variables that might be in the template
-            export PGHOST="${PGHOST:-}"
-            export PGUSER="${PGUSER:-postgres}"
-            export AWS_REGION="${AWS_REGION:-us-east-1}"
-            export BEDROCK_MODEL_ID="${BEDROCK_MODEL_ID:-anthropic.claude-3-haiku-20240307-v1:0}"
+            # Most variables are now exported by load-env.sh (PGHOST, PGUSER, AWS_REGION, AWS_BEDROCK_MODEL_ID)
+            # Only export Kubernetes-specific variables that aren't in load-env.sh
             export OPENAI_EMBED_MODEL="${OPENAI_EMBED_MODEL:-text-embedding-3-small}"
             export USE_AGENT_QUERY="${USE_AGENT_QUERY:-false}"
             export LOG_LEVEL="${LOG_LEVEL:-INFO}"
@@ -156,17 +153,14 @@ generate_manifests() {
         log_info "Generating Secret from template..."
         if command_exists envsubst; then
             # Export sensitive variables for envsubst (Kubernetes Secret template)
-            # Note: For Kubernetes secrets, we need actual credential values
-            # We use bedrock credentials for application runtime (Bedrock API calls)
-            export PGPASSWORD="${PGPASSWORD:-}"
-            # Load bedrock credentials from .env (not exported by load-env.sh)
+            # Note: PGPASSWORD and OPENAI_API_KEY are now exported by load-env.sh
+            # Load bedrock credentials from .env (not exported by load-env.sh for security)
             # These are used to populate Kubernetes Secret for application runtime
             if [ -f "$REPO_ROOT/.env" ]; then
                 source "$REPO_ROOT/.env"
                 export AWS_ACCESS_KEY_ID="${AWS_BEDROCK_ACCESS_KEY_ID:-}"
                 export AWS_SECRET_ACCESS_KEY="${AWS_BEDROCK_SECRET_ACCESS_KEY:-}"
             fi
-            export OPENAI_API_KEY="${OPENAI_API_KEY:-}"
             
             envsubst < "$secret_template" > "$secret_output"
             log_success "Secret generated: secret.yaml"

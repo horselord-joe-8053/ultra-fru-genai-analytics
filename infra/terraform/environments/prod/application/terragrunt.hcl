@@ -71,6 +71,13 @@ inputs = {
   ecs_task_cpu     = include.env.inputs.ecs_task_cpu
   ecs_task_memory  = include.env.inputs.ecs_task_memory
   
+  # Application configuration (from .env via env.hcl)
+  bedrock_inference_profile_id = include.env.inputs.bedrock_inference_profile_id  # Primary for Claude 3.5
+  aws_bedrock_model_id = include.env.inputs.aws_bedrock_model_id  # Fallback for ON_DEMAND models
+  log_level = include.env.inputs.log_level
+  allowed_origins = include.env.inputs.allowed_origins
+  openai_embed_model = include.env.inputs.openai_embed_model
+  
   deletion_protection = include.env.inputs.deletion_protection
   
   tags = include.env.inputs.tags

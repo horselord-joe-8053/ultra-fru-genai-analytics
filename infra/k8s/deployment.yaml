@@ -68,11 +68,16 @@ spec:
             secretKeyRef:
               name: fru-secrets
               key: aws-secret-access-key
-        - name: BEDROCK_MODEL_ID
+        - name: AWS_BEDROCK_INFERENCE_PROFILE_ID
           valueFrom:
             configMapKeyRef:
               name: fru-config
-              key: bedrock-model-id
+              key: aws-bedrock-inference-profile-id
+        - name: AWS_BEDROCK_MODEL_ID
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: aws-bedrock-model-id
         # OpenAI configuration
         - name: OPENAI_API_KEY
           valueFrom:

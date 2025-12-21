@@ -37,12 +37,18 @@ module "iam" {
 
   project_name                 = var.project_name
   environment                  = var.environment
-  openai_secret_arn            = module.secrets_manager.openai_secret_arn
+  openai_secret_arn            = module.secrets_manager.openai_secret_arn            # JSON format (for backward compatibility)
+  openai_secret_plain_arn      = module.secrets_manager.openai_secret_plain_arn     # Plain string (for ECS)
   db_password_secret_arn       = module.secrets_manager.db_password_secret_arn        # JSON format (for RDS Data API)
   db_password_plain_secret_arn = module.secrets_manager.db_password_plain_secret_arn    # Plain string (for ECS)
   db_username_secret_arn       = try(module.secrets_manager.db_username_secret_arn, "")
   enable_rds_iam_auth          = var.enable_iam_auth
   rds_db_resource_arn          = var.enable_iam_auth ? "arn:aws:rds-db:${var.aws_region}:${data.aws_caller_identity.current.account_id}:dbuser:${var.project_name}-${var.environment}-aurora-cluster/${var.db_username}" : ""
+  
+  # Bedrock permissions: allow inference profiles if configured
+  bedrock_inference_profile_arns = var.bedrock_inference_profile_id != "" ? [
+    "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/${var.bedrock_inference_profile_id}"
+  ] : null
 
   tags = var.tags
 }

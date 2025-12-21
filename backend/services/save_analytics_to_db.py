@@ -7,6 +7,7 @@ import json
 import psycopg2
 from typing import Dict, Any, Optional
 from datetime import datetime
+from backend.utils.env_helpers import get_required_env, get_optional_int_env
 
 
 def save_analytics_to_db(
@@ -37,11 +38,11 @@ def save_analytics_to_db(
     """
     if db_config is None:
         db_config = {
-            "host": os.environ.get("PGHOST", "localhost"),
-            "port": int(os.environ.get("PGPORT", "5432")),
-            "user": os.environ.get("PGUSER", "postgres"),
-            "password": os.environ.get("PGPASSWORD", "postgres"),
-            "dbname": os.environ.get("PGDATABASE", "fru_db"),
+            "host": get_required_env("PGHOST", "Database host"),
+            "port": get_optional_int_env("PGPORT", 5432),
+            "user": get_required_env("PGUSER", "Database username"),
+            "password": get_required_env("PGPASSWORD", "Database password"),
+            "dbname": get_required_env("PGDATABASE", "Database name"),
         }
     
     try:

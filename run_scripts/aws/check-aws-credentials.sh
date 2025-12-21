@@ -83,12 +83,12 @@ check_aws_credentials_from_env() {
         log_success "AWS_REGION is set: $AWS_REGION"
     fi
     
-    # Check BEDROCK_MODEL_ID
-    if [ -z "$BEDROCK_MODEL_ID" ]; then
-        log_warning "BEDROCK_MODEL_ID not set in .env"
+    # Check AWS_BEDROCK_MODEL_ID
+    if [ -z "$AWS_BEDROCK_MODEL_ID" ]; then
+        log_warning "AWS_BEDROCK_MODEL_ID not set in .env"
         log_info "  Default will be used: anthropic.claude-3-haiku-20240307-v1:0"
     else
-        log_success "BEDROCK_MODEL_ID is set: $BEDROCK_MODEL_ID"
+        log_success "AWS_BEDROCK_MODEL_ID is set: $AWS_BEDROCK_MODEL_ID"
     fi
     
     # Check AWS_PROFILE
@@ -163,7 +163,7 @@ check_bedrock_access() {
     fi
     
     local region="${AWS_REGION:-us-east-1}"
-    local model_id="${BEDROCK_MODEL_ID:-anthropic.claude-3-haiku-20240307-v1:0}"
+    local model_id="${AWS_BEDROCK_MODEL_ID:-anthropic.claude-3-haiku-20240307-v1:0}"
     
     # Extract foundation model name (before the colon)
     local foundation_model=$(echo "$model_id" | cut -d: -f1)

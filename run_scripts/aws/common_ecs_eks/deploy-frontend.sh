@@ -66,6 +66,7 @@ deploy_frontend() {
     S3_BUCKET_NAME="$s3_bucket_name"
     
     # Check if frontend is built, build if needed
+    # Frontend uses relative URLs - CloudFront will proxy /query and /analytics to ALB
     if [ ! -d "$REPO_ROOT/frontend/dist" ]; then
         log_info "Frontend not built, building now..."
         cd "$REPO_ROOT/frontend"
@@ -83,15 +84,18 @@ deploy_frontend() {
             fi
         fi
         
-        # Build frontend
+        # Build frontend (uses relative URLs - CloudFront proxies API requests to ALB)
         if [ "$DRY_RUN" = "true" ]; then
             log_info "[DRY-RUN] Would run: npm run build"
+            log_info "[DRY-RUN] Frontend will use relative URLs (/query, /analytics)"
+            log_info "[DRY-RUN] CloudFront will proxy these requests to ALB"
         else
             npm run build || {
                 log_error "Failed to build frontend"
                 exit 1
             }
             log_success "Frontend built successfully"
+            log_info "Frontend uses relative URLs - CloudFront will proxy /query and /analytics to ALB"
         fi
         cd "$REPO_ROOT"
     else

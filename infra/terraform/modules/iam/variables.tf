@@ -10,7 +10,12 @@ variable "environment" {
 
 variable "openai_secret_arn" {
   type        = string
-  description = "ARN of OpenAI API key secret in Secrets Manager"
+  description = "ARN of OpenAI API key secret in Secrets Manager (JSON format - for backward compatibility)"
+}
+
+variable "openai_secret_plain_arn" {
+  type        = string
+  description = "ARN of OpenAI API key secret in Secrets Manager (plain string for ECS)"
 }
 
 variable "db_password_secret_arn" {
@@ -33,9 +38,14 @@ variable "bedrock_model_arns" {
   type        = list(string)
   description = "List of Bedrock model ARNs that the task can invoke"
   default = [
-    "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-haiku-*",
-    "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-sonnet-*"
+    "arn:aws:bedrock:*::foundation-model/anthropic.*"  # All Anthropic models (future-proof)
   ]
+}
+
+variable "bedrock_inference_profile_arns" {
+  type        = list(string)
+  description = "List of Bedrock inference profile ARNs that the task can invoke (optional)"
+  default     = null
 }
 
 variable "enable_rds_iam_auth" {

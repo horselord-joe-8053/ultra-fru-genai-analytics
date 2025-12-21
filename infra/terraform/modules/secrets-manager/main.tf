@@ -11,12 +11,33 @@ resource "aws_secretsmanager_secret" "openai_key" {
   )
 }
 
-# OpenAI API Key Secret Version
+# OpenAI API Key Secret Version (JSON format - kept for backward compatibility)
 resource "aws_secretsmanager_secret_version" "openai_key" {
   secret_id = aws_secretsmanager_secret.openai_key.id
   secret_string = jsonencode({
     api_key = var.openai_api_key
   })
+}
+
+# OpenAI API Key Secret (Plain String) - for ECS task definitions
+# ECS doesn't support JSON key extraction, so we need a separate plain string secret
+resource "aws_secretsmanager_secret" "openai_key_plain" {
+  name        = "${var.project_name}/${var.environment}/openai-api-key-plain"
+  description = "OpenAI API key for embeddings (plain string for ECS)"
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.project_name}-${var.environment}-openai-key-plain"
+    }
+  )
+}
+
+# OpenAI API Key Secret Version (Plain String)
+# Plain string format required for ECS task definition secrets
+resource "aws_secretsmanager_secret_version" "openai_key_plain" {
+  secret_id     = aws_secretsmanager_secret.openai_key_plain.id
+  secret_string = var.openai_api_key  # Plain string, not JSON
 }
 
 # Database Password Secret

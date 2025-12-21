@@ -4,16 +4,17 @@ Feature flags for gradual rollout.
 import os
 import random
 from typing import Optional
+from backend.utils.env_helpers import get_optional_env, get_optional_bool_env
 
 
 class FeatureFlags:
     """Manage feature flags with gradual rollout."""
     
     def __init__(self):
-        self.agent_query_enabled = os.getenv('USE_AGENT_QUERY', 'false').lower() == 'true'
-        self.agent_query_percentage = float(os.getenv('USE_AGENT_QUERY_PERCENTAGE', '0'))
+        self.agent_query_enabled = get_optional_bool_env('USE_AGENT_QUERY', False)
+        self.agent_query_percentage = float(get_optional_env('USE_AGENT_QUERY_PERCENTAGE', '0'))
         self.agent_query_user_whitelist = [
-            uid.strip() for uid in os.getenv('USE_AGENT_QUERY_WHITELIST', '').split(',')
+            uid.strip() for uid in get_optional_env('USE_AGENT_QUERY_WHITELIST', '').split(',')
             if uid.strip()
         ]
     
