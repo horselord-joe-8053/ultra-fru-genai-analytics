@@ -165,6 +165,17 @@ variable "openai_embed_model" {
   }
 }
 
+variable "use_agent_query" {
+  type        = string
+  description = "Enable agent-based query processing (must be provided via .env - single source of truth)"
+  default     = ""
+  
+  validation {
+    condition     = length(var.use_agent_query) > 0
+    error_message = "use_agent_query cannot be empty. Please set USE_AGENT_QUERY in your .env file."
+  }
+}
+
 variable "health_check_path" {
   type        = string
   description = "Health check path"

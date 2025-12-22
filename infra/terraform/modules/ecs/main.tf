@@ -120,6 +120,10 @@ resource "aws_ecs_task_definition" "fru_api" {
         {
           name  = "OPENAI_EMBED_MODEL"
           value = var.openai_embed_model
+        },
+        {
+          name  = "USE_AGENT_QUERY"
+          value = var.use_agent_query
         }
       ]
 

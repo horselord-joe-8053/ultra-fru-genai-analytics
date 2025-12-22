@@ -52,6 +52,7 @@ module "ecs" {
   log_level = var.log_level
   allowed_origins = var.allowed_origins
   openai_embed_model = var.openai_embed_model
+  use_agent_query = var.use_agent_query
 
   alb_target_group_arn  = module.alb.target_group_arn
   alb_security_group_id = module.alb.security_group_id

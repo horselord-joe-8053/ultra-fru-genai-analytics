@@ -18,8 +18,10 @@ from backend.llm.bedrock_client import claude_complete, get_bedrock_client
 from backend.services.analytics_scheduler import start_analytics_scheduler
 from backend.utils.env_helpers import get_required_env, get_optional_env, get_optional_bool_env, get_optional_int_env
 
-# Feature flag for agent-based query processing (optional, defaults to False)
-USE_AGENT_QUERY = get_optional_bool_env('USE_AGENT_QUERY', False)
+# Feature flag for agent-based query processing
+# Single source of truth: .env file (USE_AGENT_QUERY=true/false)
+# Default: True (enabled by default, but should be set in .env)
+USE_AGENT_QUERY = get_optional_bool_env('USE_AGENT_QUERY', True)
 
 # Agent will be initialized after DB pool is ready
 query_agent = None
@@ -328,6 +330,10 @@ def ensure_agent():
 @app.route("/analytics", methods=["GET"])
 def get_analytics():
     """Get latest batch analytics results from PostgreSQL."""
+    import uuid
+    request_id = str(uuid.uuid4())[:8]
+    app.logger.info(f"[{request_id}] Analytics request received")
+    
     try:
         conn = get_db_conn()
         try:
@@ -352,8 +358,10 @@ def get_analytics():
                 row = cur.fetchone()
                 
                 if not row:
+                    app.logger.warning(f"[{request_id}] No analytics data available")
                     return jsonify({
-                        "error": "No analytics data available yet. Analytics will be available after the first batch run."
+                        "error": "No analytics data available yet. Analytics will be available after the first batch run.",
+                        "request_id": request_id
                     }), 404
                 
                 # Convert to dict and format
@@ -368,16 +376,17 @@ def get_analytics():
                         except:
                             pass
                 
+                app.logger.info(f"[{request_id}] Analytics data returned successfully")
                 return jsonify(result)
         finally:
             return_db_conn(conn)
             
     except Psycopg2Error as e:
-        app.logger.error(f"Database error in /analytics: {e}")
-        return jsonify({"error": "Database error"}), 500
+        app.logger.error(f"[{request_id}] Database error: {e}")
+        return jsonify({"error": "Database error", "request_id": request_id}), 500
     except Exception as e:
-        app.logger.error(f"Unexpected error in /analytics: {e}", exc_info=True)
-        return jsonify({"error": "Internal server error"}), 500
+        app.logger.error(f"[{request_id}] Unexpected error: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error", "request_id": request_id}), 500
 
 
 @app.route("/health", methods=["GET"])
@@ -482,56 +491,141 @@ def agent_metrics_endpoint():
 
 @app.route("/query", methods=["POST"])
 def query():
-    """Main query endpoint for natural language questions."""
+    """Main query endpoint - uses agent if available, falls back to simple method."""
+    import uuid
+    request_id = str(uuid.uuid4())[:8]
+    
     try:
         body = request.get_json(silent=True) or {}
         question = body.get("query") or body.get("q") or ""
-
+        
+        app.logger.info(f"[{request_id}] Received query: '{question}'")
+        
         # Validate input
         is_valid, error_msg = validate_query(question)
         if not is_valid:
-            app.logger.warning(f"Invalid query: {error_msg}")
+            app.logger.warning(f"[{request_id}] Invalid query: {error_msg}")
             return jsonify({"error": error_msg}), 400
-
+        
+        # Try agent first (if enabled)
+        app.logger.debug(f"[{request_id}] USE_AGENT_QUERY={USE_AGENT_QUERY}, query_agent is None={query_agent is None}")
+        if USE_AGENT_QUERY and query_agent is not None:
+            app.logger.info(f"[{request_id}] ===== AGENT PROCESSING START =====")
+            app.logger.info(f"[{request_id}] Query: '{question}'")
+            app.logger.info(f"[{request_id}] Using agent-based processing")
+            try:
+                result = query_agent.process_query(question)
+                
+                # Build response compatible with existing frontend
+                response = {
+                    "question": question,
+                    "answer": result.get("answer", ""),
+                    "method": "agentic",
+                    "mode": "agentic",  # For compatibility
+                    "stats": {},  # Agent doesn't return stats in same format
+                    "sample_records": [],  # Agent doesn't return sample records
+                    "iterations": result.get("iterations", 0),
+                    "execution_time_ms": result.get("execution_time_ms", 0),
+                    "request_id": request_id
+                }
+                
+                # Add debug info if available
+                if app.debug or app.logger.level <= logging.DEBUG:
+                    response["debug_info"] = result.get("debug_info")
+                    response["tool_calls"] = result.get("tool_calls", [])
+                
+                app.logger.info(f"[{request_id}] ===== AGENT PROCESSING COMPLETE =====")
+                app.logger.info(f"[{request_id}] Method: {response.get('method')}, Iterations: {response.get('iterations')}, Time: {response.get('execution_time_ms', 0):.2f}ms")
+                app.logger.info(f"[{request_id}] Answer length: {len(response.get('answer', ''))} chars")
+                if response.get('tool_calls'):
+                    app.logger.info(f"[{request_id}] Tool calls: {len(response.get('tool_calls'))}")
+                    for i, tool_call in enumerate(response.get('tool_calls', []), 1):
+                        app.logger.info(f"[{request_id}]   Tool {i}: {tool_call.get('tool')} - Success: {tool_call.get('output', {}).get('success', False)}")
+                app.logger.info(f"[{request_id}] Agent processing completed successfully")
+                return jsonify(response)
+                
+            except Exception as e:
+                app.logger.error(f"[{request_id}] Agent processing failed: {e}", exc_info=True)
+                # Fall through to simple method as fallback
+        
+        # Fallback to simple method (existing logic)
+        if USE_AGENT_QUERY and query_agent is None:
+            app.logger.warning(f"[{request_id}] Agent is enabled but not initialized. Attempting to initialize...")
+            ensure_agent()
+            if query_agent is not None:
+                app.logger.info(f"[{request_id}] Agent initialized, retrying with agent...")
+                # Retry with agent
+                try:
+                    result = query_agent.process_query(question)
+                    response = {
+                        "question": question,
+                        "answer": result.get("answer", ""),
+                        "method": "agentic",
+                        "mode": "agentic",
+                        "stats": {},
+                        "sample_records": [],
+                        "iterations": result.get("iterations", 0),
+                        "execution_time_ms": result.get("execution_time_ms", 0),
+                        "request_id": request_id
+                    }
+                    if app.debug or app.logger.level <= logging.DEBUG:
+                        response["debug_info"] = result.get("debug_info")
+                        response["tool_calls"] = result.get("tool_calls", [])
+                    app.logger.info(f"[{request_id}] Agent processing completed successfully (after retry)")
+                    return jsonify(response)
+                except Exception as e:
+                    app.logger.error(f"[{request_id}] Agent processing failed after retry: {e}", exc_info=True)
+        
+        app.logger.info(f"[{request_id}] Using simple processing (agent not available)")
+        
         qualitative = is_qualitative(question)
-
+        
         # 1) Retrieve rows via pgvector
         try:
             rows = pgvector_search_feedback(question, limit=50)
         except ValueError as e:
-            app.logger.error(f"Database search error: {e}")
+            app.logger.error(f"[{request_id}] Database search error: {e}")
             return jsonify({"error": "Failed to search database"}), 500
         except Exception as e:
-            app.logger.error(f"Unexpected error in vector search: {e}")
+            app.logger.error(f"[{request_id}] Unexpected error in vector search: {e}")
             return jsonify({"error": "Internal server error during search"}), 500
-
+        
+        app.logger.info(f"[{request_id}] Found {len(rows)} matching records")
+        
         stats = compute_simple_stats(rows)
-
+        app.logger.info(f"[{request_id}] Stats computed: {stats}")
+        
         # 2) Build payload for Claude
         system_prompt = build_claude_system_prompt()
         user_payload = build_claude_user_payload(question, rows, stats)
-
+        
+        app.logger.debug(f"[{request_id}] Sending to Claude: {user_payload[:200]}...")
+        
         # 3) Call Claude via Bedrock
         try:
             answer_text = claude_complete(system_prompt, user_payload)
+            app.logger.info(f"[{request_id}] Claude response received ({len(answer_text)} chars)")
         except ValueError as e:
-            app.logger.error(f"Bedrock error: {e}")
+            app.logger.error(f"[{request_id}] Bedrock error: {e}")
             return jsonify({"error": "Failed to generate answer from AI service"}), 500
         except Exception as e:
-            app.logger.error(f"Unexpected error in Bedrock call: {e}")
+            app.logger.error(f"[{request_id}] Unexpected error in Bedrock call: {e}")
             return jsonify({"error": "Internal server error during AI processing"}), 500
-
+        
         response = {
             "question": question,
             "mode": "qualitative" if qualitative else "mixed",
             "stats": stats,
             "sample_records": rows[:5],
             "answer": answer_text,
+            "request_id": request_id
         }
+        
+        app.logger.info(f"[{request_id}] Query completed successfully")
         return jsonify(response)
     
     except Exception as e:
-        app.logger.error(f"Unexpected error in /query endpoint: {e}", exc_info=True)
+        app.logger.error(f"[{request_id}] Unexpected error in /query endpoint: {e}", exc_info=True)
         return jsonify({"error": "Internal server error"}), 500
 
 

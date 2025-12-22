@@ -81,6 +81,7 @@ inputs = {
   log_level = include.env.inputs.log_level
   allowed_origins = include.env.inputs.allowed_origins
   openai_embed_model = include.env.inputs.openai_embed_model
+  use_agent_query = include.env.inputs.use_agent_query
   
   deletion_protection = include.env.inputs.deletion_protection
   

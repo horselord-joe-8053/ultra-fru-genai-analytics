@@ -18,7 +18,7 @@ class SQLGeneratorTool(BaseTool):
     def __init__(self, bedrock_client, schema_info: Dict[str, Any]):
         super().__init__(
             name="generate_sql",
-            description="Generate SQL SELECT queries from natural language questions. Returns valid PostgreSQL SQL."
+            description="Generate SQL SELECT queries from natural language questions. Returns a dict with 'sql' field containing the PostgreSQL SQL query. IMPORTANT: After generating SQL, you MUST call execute_sql with the 'sql' value from this tool's output."
         )
         self.bedrock_client = bedrock_client
         self.schema_info = schema_info
@@ -101,16 +101,20 @@ LIMIT 1;
         
         return True, None
     
-    def execute(self, question: str, **kwargs) -> Dict[str, Any]:
-        """
-        Generate SQL from natural language question.
+    def execute(self, question: str = None, query: str = None, **kwargs) -> Dict[str, Any]:
+        """Generate SQL from natural language. Accepts 'question' or 'query' parameter."""
+        # Handle both parameter names
+        if question is None and query is not None:
+            question = query
+        elif question is None:
+            return {
+                "success": False,
+                "error": "Question is required (provide 'question' or 'query' parameter)",
+                "execution_time_ms": 0
+            }
         
-        Args:
-            question: Natural language question
-        
-        Returns:
-            Dict with success, sql, error, execution_time_ms
-        """
+        logger.info(f"[SQLGeneratorTool] ===== SQL GENERATION START =====")
+        logger.info(f"[SQLGeneratorTool] Question: '{question}'")
         start_time = time.time()
         
         # Validate input
@@ -123,22 +127,44 @@ LIMIT 1;
             }
         
         try:
+            # Log schema info being used
+            logger.info(f"[SQLGeneratorTool] Schema info being used:")
+            logger.info(f"[SQLGeneratorTool]   Table: {self.schema_info.get('table', 'N/A')}")
+            columns = self.schema_info.get('columns', {})
+            logger.info(f"[SQLGeneratorTool]   Available columns ({len(columns)}): {list(columns.keys())}")
+            for col_name, col_type in columns.items():
+                logger.info(f"[SQLGeneratorTool]     - {col_name}: {col_type}")
+            
             system_prompt = self._build_system_prompt()
             user_message = f"Generate a SQL query for this question: {question}"
             
+            # Log prompts being sent (truncated for readability)
+            logger.debug(f"[SQLGeneratorTool] System prompt (first 500 chars): {system_prompt[:500]}...")
+            logger.debug(f"[SQLGeneratorTool] User message: {user_message}")
+            
             # Call Claude
+            logger.info(f"[SQLGeneratorTool] Calling LLM to generate SQL...")
             response = claude_complete(
                 system_prompt=system_prompt,
                 user_message=user_message,
                 max_tokens=500
             )
             
+            logger.info(f"[SQLGeneratorTool] LLM response received: {len(response)} chars")
+            logger.info(f"[SQLGeneratorTool] LLM response (full): {response}")
+            
             # Extract SQL
             sql = self._extract_sql(response)
             
             execution_time = (time.time() - start_time) * 1000
             
-            logger.info(f"SQL generated successfully in {execution_time:.2f}ms")
+            logger.info(f"[SQLGeneratorTool] ===== SQL GENERATION SUCCESS =====")
+            logger.info(f"[SQLGeneratorTool] Generated SQL (FULL - split across lines):")
+            # Log SQL in multiple lines to avoid truncation
+            for i, line in enumerate(sql.split('\n'), 1):
+                logger.info(f"[SQLGeneratorTool]   Line {i}: {line}")
+            logger.info(f"[SQLGeneratorTool] SQL length: {len(sql)} chars")
+            logger.info(f"[SQLGeneratorTool] Generation time: {execution_time:.2f}ms")
             
             return {
                 "success": True,
@@ -148,7 +174,9 @@ LIMIT 1;
         
         except Exception as e:
             error_msg = f"SQL generation failed: {str(e)}"
-            logger.error(f"SQL generation error: {error_msg}")
+            logger.error(f"[SQLGeneratorTool] ===== SQL GENERATION FAILED =====")
+            logger.error(f"[SQLGeneratorTool] Error: {error_msg}")
+            logger.error(f"[SQLGeneratorTool] Question that failed: '{question}'")
             return {
                 "success": False,
                 "error": error_msg,

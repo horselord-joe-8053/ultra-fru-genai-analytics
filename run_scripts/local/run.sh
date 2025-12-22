@@ -88,13 +88,9 @@ main() {
         log_info "Or run: ./run_scripts/local/start-frontend.sh"
     fi
     
-    # Run verification
+    # Run verification and show manual test hints (combined)
     echo ""
-    "$SCRIPT_DIR/post_run_verify.sh"
-    
-    # Show manual test hints
-    echo ""
-    "$SCRIPT_DIR/manual_test_hint.sh" "false"
+    "$SCRIPT_DIR/auto_verify_and_manual_hint.sh" "false"
 }
 
 # Run main function

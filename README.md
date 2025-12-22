@@ -210,7 +210,6 @@ fru-genai-analytics-all/
 │
 ├─ run_scripts/                   # Automated setup/deployment scripts
 │   ├─ local/                     # Local development
-│   ├─ local-prod/                # Local production simulation
 │   ├─ aws/                       # AWS deployments (ECS, EKS, Terraform)
 │   │   ├─ common_ecs_eks/        # Shared ECS/EKS scripts
 │   │   ├─ bedrock/               # Bedrock model access

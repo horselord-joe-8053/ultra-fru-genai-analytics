@@ -42,13 +42,16 @@ services:
       AWS_BEDROCK_INFERENCE_PROFILE_ID: ${AWS_BEDROCK_INFERENCE_PROFILE_ID:-}
       # Fallback: Model ID (for ON_DEMAND models)
       AWS_BEDROCK_MODEL_ID: ${AWS_BEDROCK_MODEL_ID:-}
+      
+      # Claude API (for local dev - mimics Bedrock)
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
 
       # Application configuration
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
 
-      # Optional: Feature flags
-      USE_AGENT_QUERY: ${USE_AGENT_QUERY:-false}
+      # Optional: Feature flags (single source of truth: .env file)
+      USE_AGENT_QUERY: ${USE_AGENT_QUERY}
       USE_AGENT_QUERY_PERCENTAGE: ${USE_AGENT_QUERY_PERCENTAGE:-0}
       USE_AGENT_QUERY_WHITELIST: ${USE_AGENT_QUERY_WHITELIST:-}
 

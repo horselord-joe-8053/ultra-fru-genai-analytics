@@ -49,16 +49,20 @@ class SemanticSearchTool(BaseTool):
     
     def execute(
         self,
-        query_text: str,
+        query_text: str = None,
+        question: str = None,
+        query: str = None,
         limit: int = 50,
         filters: Optional[Dict[str, List[str]]] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Execute semantic search.
+        Execute semantic search. Accepts 'query_text', 'question', or 'query' parameter.
         
         Args:
-            query_text: Text to search for
+            query_text: Text to search for (or use 'question' or 'query')
+            question: Alternative parameter name
+            query: Alternative parameter name
             limit: Maximum number of results
             filters: Optional dict with keys: store_name, brand, feedback_rating
                     Values are lists of strings to filter by
@@ -66,6 +70,22 @@ class SemanticSearchTool(BaseTool):
         Returns:
             Dict with success, rows, row_count, error, execution_time_ms
         """
+        # Handle multiple parameter names
+        if query_text is None:
+            if question is not None:
+                query_text = question
+            elif query is not None:
+                query_text = query
+            else:
+                return {
+                    "success": False,
+                    "error": "query_text is required (or use 'question' or 'query' parameter)",
+                    "execution_time_ms": 0
+                }
+        
+        logger.info(f"[SemanticSearchTool] ===== SEMANTIC SEARCH START =====")
+        logger.info(f"[SemanticSearchTool] Query text: '{query_text}'")
+        logger.info(f"[SemanticSearchTool] Limit: {limit}, Filters: {filters}")
         start_time = time.time()
         
         # Validate input
@@ -80,7 +100,9 @@ class SemanticSearchTool(BaseTool):
         conn = None
         try:
             # Generate embedding
+            logger.info(f"[SemanticSearchTool] Generating embedding for query...")
             embedding = self._embed_text(query_text)
+            logger.info(f"[SemanticSearchTool] Embedding generated (dimension: {len(embedding)})")
             
             # Build SQL with optional filters
             base_sql = (
@@ -118,6 +140,9 @@ class SemanticSearchTool(BaseTool):
             sql += "ORDER BY embedding <-> %s LIMIT %s;"
             params.extend([embedding, limit])
             
+            logger.info(f"[SemanticSearchTool] SQL query: {sql[:200]}...")
+            logger.info(f"[SemanticSearchTool] Executing semantic search...")
+            
             # Execute query
             conn = self.db_pool.getconn()
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -126,6 +151,12 @@ class SemanticSearchTool(BaseTool):
                 result_rows = [dict(row) for row in rows]
                 
                 execution_time = (time.time() - start_time) * 1000
+                
+                logger.info(f"[SemanticSearchTool] ===== SEMANTIC SEARCH SUCCESS =====")
+                logger.info(f"[SemanticSearchTool] Rows returned: {len(result_rows)}")
+                logger.info(f"[SemanticSearchTool] Execution time: {execution_time:.2f}ms")
+                if len(result_rows) > 0:
+                    logger.info(f"[SemanticSearchTool] First result: {result_rows[0]}")
                 
                 logger.info(f"Semantic search completed: {len(result_rows)} results in {execution_time:.2f}ms")
                 
@@ -147,7 +178,9 @@ class SemanticSearchTool(BaseTool):
         
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
-            logger.error(f"Semantic search error: {error_msg}")
+            logger.error(f"[SemanticSearchTool] ===== SEMANTIC SEARCH FAILED =====")
+            logger.error(f"[SemanticSearchTool] Error: {error_msg}")
+            logger.error(f"[SemanticSearchTool] Query text that failed: '{query_text}'")
             return {
                 "success": False,
                 "error": error_msg,

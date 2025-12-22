@@ -242,43 +242,66 @@ deploy_ecs_full() {
         }
     }
 
+    # Load data into Aurora database (idempotent: checks if data already exists)
+    load_data_to_aurora() {
+        log_step "Loading data into Aurora database"
+
+        # Check if data loading script exists
+        if [ ! -f "$SCRIPT_DIR/terraform/load_data_to_aurora.sh" ]; then
+            log_warning "Data loading script not found; skipping data load"
+            log_info "You can manually load data later:"
+            log_info "  ./run_scripts/aws/terraform/load_data_to_aurora.sh $ENVIRONMENT"
+            return 0
+        fi
+
+        AWS_PROFILE="${AWS_PROFILE:-admin}" \
+        AWS_REGION="${AWS_REGION:-$DEFAULT_AWS_REGION}" \
+        "$SCRIPT_DIR/terraform/load_data_to_aurora.sh" "$ENVIRONMENT" || {
+            log_warning "Data loading failed (tables may already have data)"
+            log_info "This is usually safe to ignore if data already exists"
+        }
+    }
+
     # Step 1: Check/build container image (idempotent)
-    log_step "Step 1/4: Checking container image availability"
+    log_step "Step 1/6: Checking container image availability"
     if ! check_or_build_image; then
-        log_error "Step 1/4 FAILED: Container image check/build failed"
+        log_error "Step 1/6 FAILED: Container image check/build failed"
         log_info "Reason: Unable to check ECR for existing image or build/push new image"
         log_info "Check AWS credentials, ECR permissions, and Docker availability"
         exit 1
     fi
-    log_success "Step 1/4 PASSED: Container image ready"
+    log_success "Step 1/6 PASSED: Container image ready"
     
     # Step 2: Setup Terraform state bucket
-    log_step "Step 2/4: Setting up Terraform state bucket"
+    log_step "Step 2/6: Setting up Terraform state bucket"
     if ! "$SCRIPT_DIR/terraform/setup-s3-bucket.sh"; then
-        log_error "Step 2/4 FAILED: Terraform state bucket setup failed"
+        log_error "Step 2/6 FAILED: Terraform state bucket setup failed"
         log_info "Reason: Unable to create or configure S3 bucket for Terraform state"
         log_info "Check AWS credentials, S3 permissions, and TF_STATE_BUCKET in .env"
         exit 1
     fi
-    log_success "Step 2/4 PASSED: Terraform state bucket ready"
+    log_success "Step 2/6 PASSED: Terraform state bucket ready"
     
     # Step 3: Deploy infrastructure
-    log_step "Step 3/4: Deploying infrastructure layer"
+    log_step "Step 3/6: Deploying infrastructure layer"
     if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" infrastructure; then
-        log_error "Step 3/4 FAILED: Infrastructure deployment failed"
+        log_error "Step 3/6 FAILED: Infrastructure deployment failed"
         log_info "Reason: Terraform plan or apply failed for infrastructure layer"
         log_info "Check Terraform configuration, AWS permissions, and plan output above"
         exit 1
     fi
-    log_success "Step 3/4 PASSED: Infrastructure layer deployed"
+    log_success "Step 3/6 PASSED: Infrastructure layer deployed"
 
     # Step 3.5: Ensure pgvector extension exists (Aurora/Postgres)
     ensure_pgvector_extension
 
     # Step 3.6: Initialize database schema (creates tables: fru_sales_embeddings, batch_analytics)
     init_db_schema
+
+    # Step 3.7: Load data into Aurora database (idempotent: checks if data already exists)
+    load_data_to_aurora
     
-    # Step 3.7: Validate infrastructure outputs before deploying application
+    # Step 3.8: Validate infrastructure outputs before deploying application
     validate_infrastructure_outputs() {
         local env="$1"
         local terraform_dir="$REPO_ROOT/infra/terraform/environments"
@@ -324,33 +347,40 @@ deploy_ecs_full() {
     }
     
     if ! validate_infrastructure_outputs "$ENVIRONMENT"; then
-        log_error "Step 4/5 FAILED: Infrastructure outputs validation failed"
+        log_error "Step 4/6 FAILED: Infrastructure outputs validation failed"
         log_info "Reason: Required infrastructure outputs are missing"
         log_info "Fix infrastructure deployment issues before deploying application layer"
         exit 1
     fi
     
     # Step 4: Deploy application (CONTAINER_IMAGE is already exported from check_or_build_image)
-    log_step "Step 4/5: Deploying application layer (ECS, ALB, CloudFront)"
+    log_step "Step 4/6: Deploying application layer (ECS, ALB, CloudFront)"
     log_info "Using container image: $CONTAINER_IMAGE"
     if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" application; then
-        log_error "Step 4/5 FAILED: Application deployment failed"
+        log_error "Step 4/6 FAILED: Application deployment failed"
         log_info "Reason: Terraform plan or apply failed for application layer"
         log_info "Check Terraform configuration, AWS permissions, CONTAINER_IMAGE, and plan output above"
         exit 1
     fi
-    log_success "Step 4/5 PASSED: Application layer deployed"
+    log_success "Step 4/6 PASSED: Application layer deployed"
     
     # Step 5: Deploy frontend to S3 (for CloudFront to serve)
-    log_step "Step 5/5: Deploying frontend to S3"
+    log_step "Step 5/6: Deploying frontend to S3"
     export ENVIRONMENT="$ENVIRONMENT"
     if ! "$SCRIPT_DIR/common_ecs_eks/deploy-frontend.sh"; then
-        log_error "Step 5/5 FAILED: Frontend deployment failed"
+        log_error "Step 5/6 FAILED: Frontend deployment failed"
         log_info "Reason: Failed to build frontend or sync to S3"
         log_info "Check frontend build, AWS credentials, S3 permissions, and Terraform outputs"
         exit 1
     fi
-    log_success "Step 5/5 PASSED: Frontend deployed to S3"
+    log_success "Step 5/6 PASSED: Frontend deployed to S3"
+    
+    # Step 6: Post-deployment verification and manual test hints
+    log_step "Step 6/6: Verifying deployment and generating test instructions"
+    "$SCRIPT_DIR/auto_verify_and_manual_hint.sh" "$ENVIRONMENT" || {
+        log_warning "Post-deployment verification had issues (deployment may still be successful)"
+        log_info "Check the verification output above for details"
+    }
     
     log_success "Complete ECS deployment finished successfully!"
     log_info "Your application should now be running on AWS ECS"

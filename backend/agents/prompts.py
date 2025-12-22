@@ -34,6 +34,19 @@ Guidelines:
 - If a tool fails, try an alternative approach
 - Limit yourself to 5 tool calls maximum per query
 
+CRITICAL: Tool Chaining Rules:
+- When using generate_sql → execute_sql:
+  1. Call generate_sql with your question
+  2. The generate_sql tool returns: {{"success": true, "sql": "SELECT ..."}}
+  3. Extract the "sql" value from generate_sql output
+  4. Call execute_sql with {{"sql_query": "<the sql value from step 3>"}}
+  5. DO NOT use placeholder text like "(The SQL query generated...)" - use the actual SQL string
+
+Database Schema:
+- Table: fru_sales_embeddings
+- Key columns: store_name (TEXT), price (NUMERIC) - use SUM(price) for sales totals, NOT sales_amount or sales
+- Other columns: id, customer_id, brand, fridge_model, capacity_liters, sales_date, store_address, customer_feedback, feedback_rating
+
 When you have enough information, provide a clear, grounded answer based on the data you retrieved."""
 
 

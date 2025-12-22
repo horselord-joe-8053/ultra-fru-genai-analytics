@@ -88,4 +88,20 @@ class AgentLogger:
     def to_json(self) -> str:
         """Convert to JSON string."""
         return json.dumps(self.get_debug_info(), indent=2)
+    
+    def error(self, message: str):
+        """Log an error message."""
+        logger.error(f"[{self.query_id}] {message}")
+    
+    def warning(self, message: str):
+        """Log a warning message."""
+        logger.warning(f"[{self.query_id}] {message}")
+    
+    def info(self, message: str):
+        """Log an info message."""
+        logger.info(f"[{self.query_id}] {message}")
+    
+    def debug(self, message: str):
+        """Log a debug message."""
+        logger.debug(f"[{self.query_id}] {message}")
 

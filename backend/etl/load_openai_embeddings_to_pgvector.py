@@ -22,7 +22,7 @@ def main():
     csv_path = get_optional_env("FRU_CSV_PATH", "data/raw/fridge_sales_with_rating.csv")
     df = pd.read_csv(csv_path)
 
-    required = ["ID","BRAND","FRIDGE_MODEL","PRICE","SALES_DATE","STORE_NAME","CUSTOMER_FEEDBACK","FEEDBACK_RATING"]
+    required = ["ID","CUSTOMER_ID","BRAND","FRIDGE_MODEL","CAPACITY_LITERS","PRICE","SALES_DATE","STORE_NAME","STORE_ADDRESS","CUSTOMER_FEEDBACK","FEEDBACK_RATING"]
     for c in required:
         if c not in df.columns:
             raise RuntimeError(f"Missing required column: {c}")
@@ -49,11 +49,14 @@ def main():
         for r, emb in zip(batch, embeddings):
             payload.append((
                 str(r["ID"]),
+                str(r.get("CUSTOMER_ID", "")),
                 str(r["BRAND"]),
                 str(r["FRIDGE_MODEL"]),
+                float(r.get("CAPACITY_LITERS", 0)) if pd.notna(r.get("CAPACITY_LITERS")) else None,
                 float(r["PRICE"]),
                 r["SALES_DATE"],
                 str(r["STORE_NAME"]),
+                str(r.get("STORE_ADDRESS", "")),
                 str(r.get("CUSTOMER_FEEDBACK","")),
                 str(r.get("FEEDBACK_RATING","")),
                 emb,
@@ -61,14 +64,17 @@ def main():
 
         sql = """
         INSERT INTO fru_sales_embeddings
-        (id, brand, fridge_model, price, sales_date, store_name, customer_feedback, feedback_rating, embedding)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        (id, customer_id, brand, fridge_model, capacity_liters, price, sales_date, store_name, store_address, customer_feedback, feedback_rating, embedding)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (id) DO UPDATE SET
+          customer_id = EXCLUDED.customer_id,
           brand = EXCLUDED.brand,
           fridge_model = EXCLUDED.fridge_model,
+          capacity_liters = EXCLUDED.capacity_liters,
           price = EXCLUDED.price,
           sales_date = EXCLUDED.sales_date,
           store_name = EXCLUDED.store_name,
+          store_address = EXCLUDED.store_address,
           customer_feedback = EXCLUDED.customer_feedback,
           feedback_rating = EXCLUDED.feedback_rating,
           embedding = EXCLUDED.embedding;

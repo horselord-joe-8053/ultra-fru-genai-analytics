@@ -19,9 +19,7 @@ This guide provides detailed manual instructions for running FRU in various envi
      - [Step 1: Ingest CSV into Delta Lake format](#step-1-ingest-csv-into-delta-lake-format)
      - [Step 2: Generate NLQ→SQL training pairs](#step-2-generate-nlqsql-training-pairs)
      - [Step 3: Run Batch Analytics](#step-3-run-batch-analytics)
-4. [🧪 Local "Prod Simulation" Mode (Option A – Docker Only)](#-3-local-prod-simulation-mode-option-a--docker-only)
-   - [3.1 Build backend image](#31-build-backend-image)
-5. [🚀 AWS Production – ECS Fargate + Aurora + Bedrock (Option A1 + Aurora)](#-4-aws-production--ecs-fargate--aurora--bedrock-option-a1--aurora)
+4. [🚀 AWS Production – ECS Fargate + Aurora + Bedrock (Option A1 + Aurora)](#-4-aws-production--ecs-fargate--aurora--bedrock-option-a1--aurora)
    - [4.1 Aurora PostgreSQL + pgvector](#41-aurora-postgresql--pgvector)
    - [4.2 Build & push backend image to ECR](#42-build--push-backend-image-to-ecr)
    - [4.3 Create ECS Fargate Service](#43-create-ecs-fargate-service)
@@ -68,7 +66,6 @@ FRU (**Fridges R Us**) is a GenAI analytics assistant over fridge sales data, bu
 **For the fastest setup, use our automated scripts:**
 
 - **Local Development**: `./run_scripts/local/run.sh` - One command to set up everything
-- **Local Production**: `./run_scripts/local-prod/run.sh` - Docker-based production simulation
 - **AWS Deployment**: `./run_scripts/aws/run.sh` - Complete AWS deployment workflows
 
 **AWS Deployment Workflows:**

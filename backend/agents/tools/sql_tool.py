@@ -25,7 +25,7 @@ class SQLTool(BaseTool):
     def __init__(self, db_connection_pool):
         super().__init__(
             name="execute_sql",
-            description="Execute SQL queries on the fru_sales_embeddings table. Returns query results as JSON."
+            description="Execute SQL queries on the fru_sales_embeddings table. Requires 'sql_query' or 'sql' parameter containing the SQL query string. IMPORTANT: Use the 'sql' value from generate_sql tool output as the input. Returns query results as JSON with 'rows', 'row_count', and 'columns' fields."
         )
         self.db_pool = db_connection_pool
     
@@ -47,16 +47,29 @@ class SQLTool(BaseTool):
         
         return True, None
     
-    def execute(self, sql_query: str, **kwargs) -> Dict[str, Any]:
+    def execute(self, sql_query: str = None, sql: str = None, **kwargs) -> Dict[str, Any]:
         """
-        Execute SQL query.
+        Execute SQL query. Accepts either 'sql_query' or 'sql' parameter.
         
         Args:
-            sql_query: SQL SELECT query string
+            sql_query: SQL SELECT query string (or use 'sql' parameter)
+            sql: Alternative parameter name for SQL query
         
         Returns:
             Dict with success, rows, columns, row_count, error, execution_time_ms
         """
+        # Handle both parameter names
+        if sql_query is None and sql is not None:
+            sql_query = sql
+        elif sql_query is None:
+            return {
+                "success": False,
+                "error": "SQL query is required (provide 'sql_query' or 'sql' parameter)",
+                "execution_time_ms": 0
+            }
+        
+        logger.info(f"[SQLTool] ===== SQL EXECUTION START =====")
+        logger.info(f"[SQLTool] SQL Query: {sql_query}")
         start_time = time.time()
         
         # Validate input
@@ -83,32 +96,49 @@ class SQLTool(BaseTool):
                 
                 execution_time = (time.time() - start_time) * 1000
                 
-                logger.info(f"SQL executed successfully: {len(result_rows)} rows in {execution_time:.2f}ms")
+                logger.info(f"[SQLTool] ===== SQL EXECUTION SUCCESS =====")
+                logger.info(f"[SQLTool] Rows returned: {len(result_rows)}")
+                logger.info(f"[SQLTool] Columns returned: {columns}")
+                logger.info(f"[SQLTool] Execution time: {execution_time:.2f}ms")
+                if len(result_rows) > 0:
+                    logger.info(f"[SQLTool] First row sample: {result_rows[0]}")
+                    if len(result_rows) <= 5:
+                        logger.info(f"[SQLTool] All rows: {result_rows}")
+                    else:
+                        logger.info(f"[SQLTool] First 3 rows: {result_rows[:3]}")
+                        logger.info(f"[SQLTool] ... and {len(result_rows) - 3} more rows")
                 
                 return {
                     "success": True,
                     "rows": result_rows,
                     "columns": columns,
                     "row_count": len(result_rows),
-                    "execution_time_ms": execution_time
+                    "execution_time_ms": execution_time,
+                    "sql": sql_query  # Include SQL in response for debugging
                 }
         
         except Psycopg2Error as e:
             error_msg = f"Database error: {str(e)}"
-            logger.error(f"SQL execution error: {error_msg}")
+            logger.error(f"[SQLTool] ===== SQL EXECUTION FAILED =====")
+            logger.error(f"[SQLTool] Error: {error_msg}")
+            logger.error(f"[SQLTool] SQL that failed: {sql_query}")
             return {
                 "success": False,
                 "error": error_msg,
-                "execution_time_ms": (time.time() - start_time) * 1000
+                "execution_time_ms": (time.time() - start_time) * 1000,
+                "sql": sql_query
             }
         
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
-            logger.error(f"SQL execution error: {error_msg}")
+            logger.error(f"[SQLTool] ===== SQL EXECUTION FAILED =====")
+            logger.error(f"[SQLTool] Error: {error_msg}")
+            logger.error(f"[SQLTool] SQL that failed: {sql_query}")
             return {
                 "success": False,
                 "error": error_msg,
-                "execution_time_ms": (time.time() - start_time) * 1000
+                "execution_time_ms": (time.time() - start_time) * 1000,
+                "sql": sql_query
             }
         
         finally:

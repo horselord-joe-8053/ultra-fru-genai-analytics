@@ -41,8 +41,10 @@ class QueryAgent:
                 "table": "fru_sales_embeddings",
                 "columns": {
                     "id": "TEXT PRIMARY KEY",
+                    "customer_id": "TEXT",
                     "brand": "TEXT",
                     "fridge_model": "TEXT",
+                    "capacity_liters": "NUMERIC",
                     "price": "NUMERIC",
                     "sales_date": "DATE",
                     "store_name": "TEXT",
@@ -81,6 +83,10 @@ class QueryAgent:
         
         tool_results = []
         iteration = 0
+        should_break_early = False
+        
+        # Store current question for fallback parameter mapping
+        self._current_question = question
         
         try:
             # Agent planning and execution loop
@@ -89,6 +95,10 @@ class QueryAgent:
                 logger.log_iteration(iteration)
                 
                 # Planning phase: Agent decides what to do
+                logger.info(f"===== ITERATION {iteration} =====")
+                logger.info(f"Planning phase: Generating tool calls for query: '{question}'")
+                logger.info(f"Previous tool results: {len(tool_results)} result(s)")
+                
                 planning_prompt = get_planning_prompt(question, [], tool_results)
                 agent_response = claude_complete(
                     system_prompt=self.system_prompt,
@@ -97,18 +107,27 @@ class QueryAgent:
                 )
                 
                 logger.log_thought(agent_response)
+                logger.info(f"Agent response (planning): {agent_response[:200]}...")
                 
                 # Parse agent response to extract tool calls
                 tool_calls = self._parse_agent_response(agent_response)
+                logger.info(f"Parsed {len(tool_calls)} tool call(s) from agent response")
                 
                 if not tool_calls:
                     # Agent thinks it's done
+                    logger.info(f"✅ No more tool calls - agent thinks it's done. Proceeding to synthesis.")
                     break
                 
                 # Execute tools
+                last_tool_name = None
+                last_tool_output = None
                 for tool_call in tool_calls:
                     tool_name = tool_call.get("tool")
                     tool_input = tool_call.get("input", {})
+                    last_tool_name = tool_name
+                    
+                    logger.info(f"--- Executing tool: {tool_name} ---")
+                    logger.info(f"Tool input (raw): {tool_input}")
                     
                     if tool_name not in self.tools:
                         logger.warning(f"Unknown tool: {tool_name}")
@@ -117,8 +136,42 @@ class QueryAgent:
                     # Execute tool
                     tool = self.tools[tool_name]
                     tool_start = time.time()
-                    tool_output = tool.execute(**tool_input)
+                    
+                    # Normalize parameter names for tool execution
+                    normalized_input = self._normalize_tool_input(tool_name, tool_input)
+                    
+                    # Auto-extract SQL from previous generate_sql results if execute_sql is called without SQL
+                    if tool_name == "execute_sql":
+                        has_sql = normalized_input.get("sql_query") or normalized_input.get("sql")
+                        if not has_sql or (isinstance(has_sql, str) and has_sql.lower().startswith(("(the sql", "the sql query", "[the sql"))):
+                            # Look for SQL from previous generate_sql tool results
+                            logger.info(f"🔗 execute_sql called without valid SQL. Searching previous tool results...")
+                            for prev_result in reversed(tool_results):  # Check most recent first
+                                if prev_result.get("tool") == "generate_sql":
+                                    prev_output = prev_result.get("output", {})
+                                    if prev_output.get("success") and "sql" in prev_output:
+                                        sql = prev_output["sql"]
+                                        logger.info(f"✅ Found SQL from previous generate_sql result")
+                                        logger.info(f"   Extracted SQL: {sql[:200]}...")
+                                        normalized_input["sql_query"] = sql
+                                        break
+                            else:
+                                logger.warning(f"⚠️  No SQL found in previous tool results. execute_sql will likely fail.")
+                    
+                    logger.info(f"Tool input (normalized): {normalized_input}")
+                    
+                    tool_output = tool.execute(**normalized_input)
                     tool_time = (time.time() - tool_start) * 1000
+                    last_tool_output = tool_output
+                    
+                    logger.info(f"Tool execution result: Success={tool_output.get('success', False)}, Time={tool_time:.2f}ms")
+                    if tool_output.get('success'):
+                        if 'row_count' in tool_output:
+                            logger.info(f"  Rows returned: {tool_output.get('row_count', 0)}")
+                        if 'sql' in tool_output:
+                            logger.info(f"  SQL executed: {tool_output.get('sql', '')[:200]}...")
+                    else:
+                        logger.warning(f"  Error: {tool_output.get('error', 'Unknown error')}")
                     
                     # Log tool call
                     logger.log_tool_call(tool_name, tool_input, tool_output, tool_time)
@@ -137,15 +190,66 @@ class QueryAgent:
                     # If tool failed, agent might want to try alternative
                     if not tool_output.get("success"):
                         logger.log_thought(f"Tool {tool_name} failed: {tool_output.get('error')}")
+                    else:
+                        # If SQL execution succeeded with results, we can break early
+                        if tool_name == "execute_sql" and tool_output.get("success") and tool_output.get("row_count", 0) > 0:
+                            logger.info(f"✅ SQL execution succeeded with {tool_output.get('row_count')} rows. Breaking loop to proceed to synthesis.")
+                            should_break_early = True
+                            break
+                
+                # Break out of while loop if we broke from tool execution
+                if should_break_early:
+                    logger.info(f"✅ Early break triggered - SQL execution succeeded. Stopping iterations.")
+                    break
+                
+                # Also check if we have successful SQL results from any previous iteration
+                has_successful_sql = any(
+                    r.get("tool") == "execute_sql" and 
+                    r.get("output", {}).get("success") and 
+                    r.get("output", {}).get("row_count", 0) > 0
+                    for r in tool_results
+                )
+                if has_successful_sql:
+                    logger.info(f"✅ Found successful SQL execution in tool results. Stopping iterations to proceed to synthesis.")
+                    break
             
             # Synthesis phase: Generate final answer
+            logger.info(f"===== SYNTHESIS PHASE =====")
+            logger.info(f"Tool results collected: {len(tool_results)} result(s)")
             if tool_results:
+                for i, result in enumerate(tool_results, 1):
+                    logger.info(f"  Result {i}: Tool={result.get('tool')}, Success={result.get('output', {}).get('success', False)}")
+                    if result.get('output', {}).get('row_count'):
+                        logger.info(f"    Rows: {result.get('output', {}).get('row_count', 0)}")
+                    if result.get('output', {}).get('rows') and len(result.get('output', {}).get('rows', [])) > 0:
+                        logger.info(f"    Sample data (first row): {result.get('output', {}).get('rows', [])[0]}")
+                
                 synthesis_prompt = get_synthesis_prompt(question, tool_results)
+                logger.info(f"[SYNTHESIS] ===== GENERATING FINAL ANSWER =====")
+                logger.info(f"[SYNTHESIS] Question: '{question}'")
+                logger.info(f"[SYNTHESIS] Generating final answer from {len(tool_results)} tool result(s)...")
+                logger.info(f"[SYNTHESIS] Synthesis prompt (first 1000 chars): {synthesis_prompt[:1000]}...")
+                if len(synthesis_prompt) > 1000:
+                    logger.info(f"[SYNTHESIS] ... (prompt truncated, total length: {len(synthesis_prompt)} chars)")
+                
+                logger.info(f"[SYNTHESIS] Calling LLM for final answer synthesis...")
                 final_answer = claude_complete(
                     system_prompt=self.system_prompt,
                     user_message=synthesis_prompt,
                     max_tokens=1000
                 )
+                
+                logger.info(f"[SYNTHESIS] ===== FINAL ANSWER GENERATED =====")
+                logger.info(f"[SYNTHESIS] Final answer length: {len(final_answer)} chars")
+                logger.info(f"[SYNTHESIS] Final answer (FULL TEXT):")
+                logger.info(f"[SYNTHESIS] {'='*80}")
+                # Log answer in chunks to avoid truncation
+                for i, line in enumerate(final_answer.split('\n'), 1):
+                    logger.info(f"[SYNTHESIS] {line}")
+                if '\n' not in final_answer:
+                    # If no newlines, log the whole thing
+                    logger.info(f"[SYNTHESIS] {final_answer}")
+                logger.info(f"[SYNTHESIS] {'='*80}")
             else:
                 final_answer = "I couldn't gather enough information to answer your question. Please try rephrasing it."
             
@@ -237,6 +341,44 @@ class QueryAgent:
                 result[key] = match.group(1).strip()
         
         return result
+    
+    def _normalize_tool_input(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize tool input parameters to match tool signatures."""
+        normalized = tool_input.copy()
+        
+        # Map common parameter names to tool-specific names
+        if tool_name == "semantic_search":
+            # Map "question" or "query" to "query_text"
+            if "question" in normalized and "query_text" not in normalized:
+                normalized["query_text"] = normalized.pop("question")
+            elif "query" in normalized and "query_text" not in normalized:
+                normalized["query_text"] = normalized.pop("query")
+            
+            # Fallback: if query_text is still missing, use the original question
+            # This handles cases where LLM doesn't provide proper parameters
+            if "query_text" not in normalized and hasattr(self, '_current_question'):
+                normalized["query_text"] = self._current_question
+        
+        elif tool_name == "execute_sql":
+            # Map "sql_query" or "query" to "sql"
+            if "sql_query" in normalized and "sql" not in normalized:
+                normalized["sql"] = normalized.pop("sql_query")
+            elif "query" in normalized and "sql" not in normalized:
+                normalized["sql"] = normalized.pop("query")
+        
+        elif tool_name == "generate_sql":
+            # Map "query" to "question"
+            if "query" in normalized and "question" not in normalized:
+                normalized["question"] = normalized.pop("query")
+        
+        elif tool_name == "semantic_search":
+            # Map "question" or "query" to "query_text" (already handled above, but ensure it's there)
+            if "question" in normalized and "query_text" not in normalized:
+                normalized["query_text"] = normalized.pop("question")
+            elif "query" in normalized and "query_text" not in normalized:
+                normalized["query_text"] = normalized.pop("query")
+        
+        return normalized
     
     def _summarize_tool_result(self, result: Dict[str, Any]) -> str:
         """Create a summary of tool result for agent."""

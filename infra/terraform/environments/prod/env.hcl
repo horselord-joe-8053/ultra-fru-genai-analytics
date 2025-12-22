@@ -53,6 +53,7 @@ inputs = {
   log_level = get_env("LOG_LEVEL", "")
   allowed_origins = get_env("ALLOWED_ORIGINS", "")
   openai_embed_model = get_env("OPENAI_EMBED_MODEL", "")
+  use_agent_query = get_env("USE_AGENT_QUERY", "")
   
   # Feature flags
   enable_nat_gateway = true

@@ -7,8 +7,7 @@ This directory contains **idempotent shell scripts** to automate setup and deplo
 1. [🎯 Quick Start](#-1-quick-start)
 2. [📁 Script Structure](#-2-script-structure)
 3. [🧪 Local Development](#-3-local-development)
-4. [🐳 Local Production Simulation](#-4-local-production-simulation)
-5. [☁️ AWS Deployment](#-5-aws-deployment)
+4. [☁️ AWS Deployment](#-4-aws-deployment)
 6. [🛠️ Common Utilities](#-6-common-utilities)
 7. [🔧 Script Features](#-7-script-features)
 8. [🐛 Troubleshooting](#-8-troubleshooting)
@@ -36,13 +35,6 @@ This will:
 - ✅ Verify deployment and show usage instructions
 
 **That's it!** Open `http://localhost:5173` and start coding.
-
-### Local Production Simulation
-
-```bash
-# Build and deploy everything using Docker
-./run_scripts/local-prod/run.sh
-```
 
 ### AWS Deployment
 
@@ -88,14 +80,6 @@ run_scripts/
 │   ├── load-data.sh               # ETL script
 │   ├── start-frontend.sh          # Start Vite dev server
 │   └── stop-services.sh           # Stop Docker services
-│
-├── local-prod/                     # Local production simulation
-│   ├── run.sh                     # 🎯 MAIN ORCHESTRATOR
-│   ├── post_run_verify.sh         # Post-deployment verification
-│   ├── build-images.sh            # Build Docker images
-│   ├── build-frontend.sh          # Build frontend
-│   ├── deploy.sh                  # Deploy with Docker
-│   └── teardown.sh                # Stop and remove services
 │
 └── aws/                           # AWS deployments
     ├── run.sh                     # 🎯 MAIN ORCHESTRATOR
@@ -177,47 +161,7 @@ run_scripts/
 
 ---
 
-# 🐳 4. Local Production Simulation
-
-### Full Deployment
-
-```bash
-./run_scripts/local-prod/run.sh
-```
-
-This will:
-- ✅ Build Docker images
-- ✅ Build frontend for production
-- ✅ Deploy all services using Docker Compose
-- ✅ Serve everything in production mode
-
-### Options
-
-```bash
-# Skip Docker image build (use existing images)
-./run_scripts/local-prod/run.sh --skip-build
-
-# Skip frontend build
-./run_scripts/local-prod/run.sh --skip-frontend
-```
-
-### Viewing Logs
-
-```bash
-cd infra/docker
-docker compose logs -f
-```
-
-### Stopping Services
-
-```bash
-cd infra/docker
-docker compose down
-```
-
----
-
-# ☁️ 5. AWS Deployment
+# ☁️ 4. AWS Deployment
 
 ### Prerequisites
 
@@ -355,7 +299,7 @@ You can provide AWS credentials in **three ways** (in order of preference):
 
 ---
 
-# 🛠️ 6. Common Utilities
+# 🛠️ 5. Common Utilities
 
 ### Logger (`common/logger.sh`)
 
@@ -390,7 +334,7 @@ wait_for_service "http://localhost:5000/health" 30 2
 
 ---
 
-# 🔧 7. Script Features
+# 🔧 6. Script Features
 
 All scripts are:
 
@@ -404,7 +348,7 @@ All scripts are:
 
 ---
 
-# 🐛 8. Troubleshooting
+# 🐛 7. Troubleshooting
 
 ### "Command not found" errors
 
@@ -537,7 +481,6 @@ DELTA_TABLE_PATH=data/delta/fru_sales
 | Scenario | Command |
 |----------|---------|
 | **Local Dev Setup** | `./run_scripts/local/run.sh` |
-| **Local Prod** | `./run_scripts/local-prod/run.sh` |
 | **AWS ECS Full** | `./run_scripts/aws/run.sh ecs-full dev` |
 | **AWS EKS Full** | `./run_scripts/aws/run.sh eks-full dev` |
 | **AWS Infrastructure** | `./run_scripts/aws/run.sh infrastructure dev` |

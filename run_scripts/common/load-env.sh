@@ -46,6 +46,10 @@ load_env_file() {
     export AWS_BEDROCK_INFERENCE_PROFILE_ID="${AWS_BEDROCK_INFERENCE_PROFILE_ID:-}"  # Primary for Claude 3.5
     export AWS_BEDROCK_MODEL_ID="${AWS_BEDROCK_MODEL_ID:-}"  # Fallback for ON_DEMAND models
     export OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+    export USE_AGENT_QUERY="${USE_AGENT_QUERY:-}"  # Agent-based query processing (single source of truth: .env)
+    export LOG_LEVEL="${LOG_LEVEL:-}"  # Logging level (single source of truth: .env)
+    export ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-}"  # CORS allowed origins (single source of truth: .env)
+    export OPENAI_EMBED_MODEL="${OPENAI_EMBED_MODEL:-}"  # OpenAI embedding model (single source of truth: .env)
     
     # Database configuration (for Terragrunt get_env())
     export PGUSER="${PGUSER:-}"

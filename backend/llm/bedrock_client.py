@@ -8,6 +8,23 @@ from backend.utils.env_helpers import get_required_env
 logger = logging.getLogger(__name__)
 
 
+def get_claude_client():
+    """Return Claude API client if CLAUDE_API_KEY is set (for local dev).
+    
+    This allows local development to mimic AWS Bedrock LLM calls using Claude API.
+    Returns None if CLAUDE_API_KEY is not set or if anthropic package is not installed.
+    """
+    claude_api_key = os.environ.get("CLAUDE_API_KEY", "").strip()
+    if claude_api_key:
+        try:
+            from anthropic import Anthropic
+            return Anthropic(api_key=claude_api_key)
+        except ImportError:
+            logger.warning("anthropic package not installed. Install with: pip install anthropic")
+            return None
+    return None
+
+
 def get_bedrock_client():
     """Return a Bedrock Runtime client using AWS profile or IAM role.
     
@@ -35,9 +52,13 @@ def get_bedrock_client():
 
 def claude_complete(system_prompt, user_message, model_id=None, max_tokens=800):
     """
-    Call an Anthropic Claude model on Bedrock and return the text reply.
+    Call Claude via API (local dev) or Bedrock (AWS production).
     
-    Priority order for model/inference profile selection:
+    Priority:
+    1. CLAUDE_API_KEY (local dev) - uses Anthropic API directly
+    2. AWS Bedrock (production) - uses inference profile or model ID
+    
+    Priority order for Bedrock model/inference profile selection:
     1. AWS_BEDROCK_INFERENCE_PROFILE_ID
     2. model_id parameter (if provided)
     3. AWS_BEDROCK_MODEL_ID
@@ -52,8 +73,25 @@ def claude_complete(system_prompt, user_message, model_id=None, max_tokens=800):
         str: Generated text response
     
     Raises:
-        ValueError: If Bedrock API call fails
+        ValueError: If API call fails
     """
+    # Try Claude API first (for local dev)
+    claude_client = get_claude_client()
+    if claude_client:
+        logger.info("Using Claude API (local development)")
+        try:
+            response = claude_client.messages.create(
+                model="claude-3-5-haiku-20241022",  # Match Bedrock model
+                max_tokens=max_tokens,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_message}]
+            )
+            return response.content[0].text
+        except Exception as e:
+            logger.error(f"Claude API error: {e}")
+            raise ValueError(f"Claude API error: {e}")
+    
+    # Fallback to Bedrock (for AWS deployment)
     # Try to get inference profile ID (preferred for Claude 3.5 and newer models)
     # Strip whitespace to handle any accidental spaces in environment variable
     inference_profile_id = os.environ.get("AWS_BEDROCK_INFERENCE_PROFILE_ID", "").strip()
@@ -71,7 +109,7 @@ def claude_complete(system_prompt, user_message, model_id=None, max_tokens=800):
             if not model_id:
                 # Fail-fast if neither inference profile nor model ID is set
                 raise ValueError(
-                    "Either AWS_BEDROCK_INFERENCE_PROFILE_ID or AWS_BEDROCK_MODEL_ID must be set"
+                    "Either CLAUDE_API_KEY (for local dev), AWS_BEDROCK_INFERENCE_PROFILE_ID, or AWS_BEDROCK_MODEL_ID must be set"
                 )
 
     try:
