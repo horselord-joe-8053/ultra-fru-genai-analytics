@@ -8,9 +8,23 @@ if [ -z "${ENV_SCRIPT_DIR:-}" ]; then
     ENV_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
 
-# Set common paths (exported for use by calling scripts)
-export REPO_ROOT="${REPO_ROOT:-$(cd "$ENV_SCRIPT_DIR/../.." && pwd)}"
-export ENV_FILE="${ENV_FILE:-$REPO_ROOT/.env}"
+# Detect repo root based on this script's location
+DETECTED_REPO_ROOT="$(cd "$ENV_SCRIPT_DIR/../.." && pwd)"
+
+# Harden REPO_ROOT/ENV_FILE handling:
+# - Always use DETECTED_REPO_ROOT as the single source of truth
+# - If caller pre-set REPO_ROOT/ENV_FILE to something else, log a warning
+if [ -n "${REPO_ROOT:-}" ] && [ "$REPO_ROOT" != "$DETECTED_REPO_ROOT" ]; then
+    echo "[load-env] WARNING: REPO_ROOT was pre-set to '$REPO_ROOT' but detected repo root is '$DETECTED_REPO_ROOT'. Overriding to detected repo root." >&2
+fi
+
+export REPO_ROOT="$DETECTED_REPO_ROOT"
+
+if [ -n "${ENV_FILE:-}" ] && [ "$ENV_FILE" != "$REPO_ROOT/.env" ]; then
+    echo "[load-env] WARNING: ENV_FILE was pre-set to '$ENV_FILE' but expected '$REPO_ROOT/.env'. Overriding to '$REPO_ROOT/.env'." >&2
+fi
+
+export ENV_FILE="$REPO_ROOT/.env"
 export ENV_TEMPLATE="${ENV_TEMPLATE:-$REPO_ROOT/.env.example}"
 
 # Note: We use ENV_SCRIPT_DIR internally to avoid overwriting caller's SCRIPT_DIR

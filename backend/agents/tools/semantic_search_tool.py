@@ -17,13 +17,33 @@ logger = logging.getLogger(__name__)
 class SemanticSearchTool(BaseTool):
     """Tool for semantic search using pgvector."""
     
-    def __init__(self, db_connection_pool, openai_client: OpenAI):
+    def __init__(self, db_connection_pool, openai_client: OpenAI, schema_info: Optional[Dict[str, Any]] = None):
+        """
+        Initialize semantic search tool.
+        
+        Args:
+            db_connection_pool: Database connection pool
+            openai_client: OpenAI client for embeddings
+            schema_info: Database schema information (optional, for dynamic filter support)
+        """
+        # Build description dynamically from schema_info if available
+        if schema_info and "columns" in schema_info:
+            excluded_columns = {"id", "embedding"}
+            filterable_cols = [
+                col for col, col_type in schema_info["columns"].items()
+                if col not in excluded_columns and "TEXT" in str(col_type).upper()
+            ]
+            filter_desc = ", ".join(sorted(filterable_cols)) if filterable_cols else "store_name, brand, feedback_rating"
+        else:
+            filter_desc = "store_name, brand, feedback_rating"
+        
         super().__init__(
             name="semantic_search",
-            description="Search customer feedback using semantic similarity. Can filter by store_name, brand, or feedback_rating."
+            description=f"Search customer feedback using semantic similarity. Can filter by: {filter_desc}."
         )
         self.db_pool = db_connection_pool
         self.openai_client = openai_client
+        self.schema_info = schema_info
     
     def _embed_text(self, text: str) -> List[float]:
         """Generate embedding for text using OpenAI."""
@@ -114,22 +134,34 @@ class SemanticSearchTool(BaseTool):
             where_clauses = []
             params = []
             
-            # Add filters
+            # Add filters dynamically based on schema_info
             if filters:
-                if "store_name" in filters and filters["store_name"]:
-                    placeholders = ",".join(["%s"] * len(filters["store_name"]))
-                    where_clauses.append(f"store_name IN ({placeholders})")
-                    params.extend(filters["store_name"])
+                # Determine which columns are filterable (TEXT columns, excluding id, embedding, and customer_feedback)
+                # Note: customer_feedback is the column being searched semantically, not filtered
+                filterable_columns = set()
+                if self.schema_info and "columns" in self.schema_info:
+                    excluded_columns = {
+                        "id",                # Primary key
+                        "embedding",         # Vector column (searched, not filtered)
+                        "customer_feedback"  # This is the text column being searched semantically, not filtered
+                    }
+                    for col_name, col_type in self.schema_info["columns"].items():
+                        if col_name not in excluded_columns and "TEXT" in str(col_type).upper():
+                            filterable_columns.add(col_name)
+                else:
+                    # Fallback to hardcoded list if schema_info not available
+                    filterable_columns = {"store_name", "brand", "feedback_rating"}
                 
-                if "brand" in filters and filters["brand"]:
-                    placeholders = ",".join(["%s"] * len(filters["brand"]))
-                    where_clauses.append(f"brand IN ({placeholders})")
-                    params.extend(filters["brand"])
-                
-                if "feedback_rating" in filters and filters["feedback_rating"]:
-                    placeholders = ",".join(["%s"] * len(filters["feedback_rating"]))
-                    where_clauses.append(f"feedback_rating IN ({placeholders})")
-                    params.extend(filters["feedback_rating"])
+                # Process each filter dynamically
+                for filter_key, filter_values in filters.items():
+                    if filter_key in filterable_columns and filter_values:
+                        # filter_values should be a list
+                        if not isinstance(filter_values, list):
+                            filter_values = [filter_values]
+                        
+                        placeholders = ",".join(["%s"] * len(filter_values))
+                        where_clauses.append(f"{filter_key} IN ({placeholders})")
+                        params.extend(filter_values)
             
             # Build complete SQL
             if where_clauses:
@@ -137,7 +169,10 @@ class SemanticSearchTool(BaseTool):
             else:
                 sql = base_sql
             
-            sql += "ORDER BY embedding <-> %s LIMIT %s;"
+            # Cast embedding parameter to vector type for pgvector operator
+            # Without ::vector cast, psycopg2 passes Python list as numeric[], causing:
+            # "operator does not exist: vector <-> numeric[]"
+            sql += "ORDER BY embedding <-> %s::vector LIMIT %s;"
             params.extend([embedding, limit])
             
             logger.info(f"[SemanticSearchTool] SQL query: {sql[:200]}...")

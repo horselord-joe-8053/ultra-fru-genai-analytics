@@ -1,7 +1,7 @@
 """
 Prompts for the agent-based query system.
 """
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 
 
 def get_agent_system_prompt(tools_info: list) -> str:
@@ -72,23 +72,109 @@ INPUT: [tool input parameters as JSON]
 If you need multiple tools, list them in sequence."""
 
 
-def get_synthesis_prompt(question: str, tool_results: list) -> str:
-    """Get prompt for final answer synthesis."""
-    results_summary = "\n\n".join([
-        f"Tool: {result['tool']}\n"
-        f"Result: {result.get('summary', str(result.get('data', 'No data')))}"
-        for result in tool_results
-    ])
+def get_synthesis_prompt(
+    question: str,
+    primary_sql_result: Optional[Dict[str, Any]] = None,
+    primary_semantic_result: Optional[Dict[str, Any]] = None,
+    context_results: List[Dict[str, Any]] = None,
+) -> str:
+    """
+    Build synthesis prompt from the selected primary result (SQL or semantic_search) and optional context.
+
+    The goal is to:
+    - Ground the answer on the actual rows returned by execute_sql (for quantitative queries)
+      OR semantic_search (for qualitative/RAG queries).
+    - Optionally provide brief context from other successful tools.
+    - Give very explicit instructions to avoid hallucinating store names or numbers.
+    """
+    if context_results is None:
+        context_results = []
+
+    sections: List[str] = []
+    sections.append(f"User Question: {question}")
+    sections.append("")
+
+    # Primary result section (authoritative data)
+    primary_result = primary_sql_result or primary_semantic_result
+    result_type = "SQL" if primary_sql_result else ("Semantic Search" if primary_semantic_result else None)
+
+    if primary_result:
+        rows = primary_result.get("rows") or []
+        row_count = primary_result.get("row_count", len(rows))
+
+        sections.append(f"Primary {result_type} Result (authoritative data):")
+        
+        if primary_sql_result:
+            # SQL-specific information
+            columns = primary_sql_result.get("columns") or []
+            sql = primary_sql_result.get("sql", "")
+            if sql:
+                sections.append("SQL:")
+                sections.append(sql)
+            sections.append(f"Columns: {columns}")
+        else:
+            # Semantic search result
+            sections.append("Semantic search retrieved customer feedback records based on meaning similarity.")
+            sections.append("These records contain actual customer feedback text from the database.")
+        
+        sections.append(f"Row count: {row_count}")
+
+        if rows:
+            sections.append("Rows (up to first 10 shown):")
+            for idx, row in enumerate(rows[:10], start=1):
+                # Format row for readability
+                if isinstance(row, dict):
+                    # For semantic_search, highlight customer_feedback field
+                    if primary_semantic_result and "customer_feedback" in row:
+                        sections.append(f"{idx}) {row}")
+                    else:
+                        sections.append(f"{idx}) {row}")
+                else:
+                    sections.append(f"{idx}) {row}")
+        else:
+            sections.append("Rows: []  # No rows returned")
+    else:
+        sections.append(
+            "Primary Result: NONE (no successful tool result with rows was found)."
+        )
+
+    # Optional context (how we got the data)
+    if context_results:
+        sections.append("")
+        sections.append("Other successful tool results (context, not authoritative data):")
+        for ctx in context_results:
+            tool_name = ctx.get("tool", "unknown_tool")
+            summary = ctx.get("summary", "")
+            sections.append(f"- {tool_name}: {summary}")
+
+    sections.append("")
+    sections.append("Instructions for answering:")
+    sections.append("- Base your answer ONLY on the concrete data in the 'Rows' above.")
     
-    return f"""User Question: {question}
+    if primary_sql_result:
+        sections.append(
+            "- Do NOT invent new store names or numeric values that are not present in those rows."
+        )
+        sections.append(
+            "- If row_count is 3, your answer should list exactly 3 stores with their sales values."
+        )
+    elif primary_semantic_result:
+        sections.append(
+            "- Use the actual customer_feedback text from the rows to answer the question."
+        )
+        sections.append(
+            "- Quote or paraphrase specific feedback from the rows, not generic statements."
+        )
+        sections.append(
+            "- If the question asks about complaints, only mention complaints that appear in the actual feedback text."
+        )
+    
+    sections.append(
+        "- If there are no rows, explicitly say you cannot answer from the available data and do NOT fabricate any information."
+    )
+    sections.append(
+        "- Provide a clear, concise explanation and any insights you can derive from the rows."
+    )
 
-You have gathered the following information:
-
-{results_summary}
-
-Based on this information, provide a clear, comprehensive answer to the user's question.
-- Use specific numbers and facts from the data
-- Explain patterns and insights
-- If the data is insufficient, say so explicitly
-- Be concise but thorough"""
+    return "\n".join(sections)
 
