@@ -230,7 +230,7 @@ def pgvector_search_feedback(query_text: str, limit: int = 30) -> List[Dict[str,
 
     sql = (
         "SELECT id, brand, fridge_model, price, sales_date, store_name, "
-        "customer_feedback, feedback_rating "
+        "customer_feedback, feedback_rating, feedback_sentiment_category "
         "FROM fru_sales_embeddings "
         "ORDER BY embedding <-> %s::vector "
         "LIMIT %s;"
@@ -264,14 +264,17 @@ def compute_simple_stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     for r in rows:
         brand = (r.get("brand") or "").strip()
         store = (r.get("store_name") or "").strip()
-        rating = (r.get("feedback_rating") or "").strip()
+        # feedback_rating is now INTEGER, feedback_sentiment_category is TEXT
+        rating = r.get("feedback_rating")
+        sentiment = (r.get("feedback_sentiment_category") or "").strip()
 
         if brand:
             by_brand[brand] = by_brand.get(brand, 0) + 1
         if store:
             by_store[store] = by_store.get(store, 0) + 1
-        if rating:
-            by_rating[rating] = by_rating.get(rating, 0) + 1
+        # Use sentiment_category for categorical stats (more meaningful than numeric rating)
+        if sentiment:
+            by_rating[sentiment] = by_rating.get(sentiment, 0) + 1
 
     return {
         "total_matches": total,

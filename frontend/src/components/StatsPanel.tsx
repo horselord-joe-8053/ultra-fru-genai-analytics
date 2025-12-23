@@ -129,7 +129,8 @@ const StatsPanel: React.FC<StatsProps> = ({ data, error }) => {
                       {r.store_name}
                     </td>
                     <td className="px-2 py-1 whitespace-nowrap">
-                      {r.feedback_rating}
+                      {r.feedback_rating !== undefined ? r.feedback_rating : 'N/A'} 
+                      {r.feedback_sentiment_category && ` (${r.feedback_sentiment_category})`}
                     </td>
                     <td
                       className="px-2 py-1 max-w-[160px] truncate"

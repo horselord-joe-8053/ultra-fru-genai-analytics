@@ -17,7 +17,7 @@ interface BatchAnalyticsData {
   }>;
   feedback_analysis: Array<{
     brand: string;
-    feedback_rating: string;
+    feedback_sentiment_category: string;
     count: number;
   }>;
   top_models: Array<{

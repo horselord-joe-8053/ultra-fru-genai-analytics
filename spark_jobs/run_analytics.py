@@ -63,8 +63,8 @@ def main(delta_path: str, output_dir: str):
             count("*").alias("total_sales"),
             sum("PRICE").alias("total_revenue"),
             avg("PRICE").alias("avg_sale_price"),
-            count(when(col("FEEDBACK_RATING") == "Negative", 1)).alias("negative_feedback_count"),
-            count(when(col("FEEDBACK_RATING") == "Positive", 1)).alias("positive_feedback_count")
+            count(when(col("FEEDBACK_SENTIMENT_CATEGORY") == "Negative", 1)).alias("negative_feedback_count"),
+            count(when(col("FEEDBACK_SENTIMENT_CATEGORY") == "Positive", 1)).alias("positive_feedback_count")
         )
         .withColumn("negative_feedback_rate", 
                    (col("negative_feedback_count") / col("total_sales") * 100).cast("decimal(5,2)"))
@@ -77,7 +77,7 @@ def main(delta_path: str, output_dir: str):
     print("3. Feedback Analysis by Brand")
     print("=" * 80)
     feedback_by_brand = (
-        df.groupBy("BRAND", "FEEDBACK_RATING")
+        df.groupBy("BRAND", "FEEDBACK_SENTIMENT_CATEGORY")
         .agg(count("*").alias("count"))
         .orderBy("BRAND", col("count").desc())
     )
@@ -161,7 +161,7 @@ def main(delta_path: str, output_dir: str):
     feedback_analysis_list = [
         {
             "brand": row["BRAND"],
-            "feedback_rating": row["FEEDBACK_RATING"],
+            "feedback_sentiment_category": row["FEEDBACK_SENTIMENT_CATEGORY"],
             "count": int(row["count"]),
         }
         for row in feedback_by_brand.collect()

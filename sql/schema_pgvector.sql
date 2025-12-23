@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS fru_sales_embeddings (
     store_name TEXT,
     store_address TEXT,
     customer_feedback TEXT,
-    feedback_rating TEXT,
+    feedback_rating INTEGER,
+    feedback_sentiment_category TEXT,
     embedding VECTOR(1536)
 );
 
@@ -48,7 +49,23 @@ ON batch_analytics(created_at DESC);
 ALTER TABLE fru_sales_embeddings 
 ADD COLUMN IF NOT EXISTS customer_id TEXT,
 ADD COLUMN IF NOT EXISTS capacity_liters NUMERIC,
-ADD COLUMN IF NOT EXISTS store_address TEXT;
+ADD COLUMN IF NOT EXISTS store_address TEXT,
+ADD COLUMN IF NOT EXISTS feedback_sentiment_category TEXT;
+
+-- Migration: Change feedback_rating from TEXT to INTEGER (idempotent)
+-- This will fail if column doesn't exist or is already INTEGER, so we check first
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'fru_sales_embeddings' 
+        AND column_name = 'feedback_rating' 
+        AND data_type = 'text'
+    ) THEN
+        ALTER TABLE fru_sales_embeddings 
+        ALTER COLUMN feedback_rating TYPE INTEGER USING feedback_rating::INTEGER;
+    END IF;
+END $$;
 
 -- Create indexes for new columns (idempotent)
 CREATE INDEX IF NOT EXISTS fru_sales_embeddings_customer_id_idx 
@@ -56,4 +73,13 @@ ON fru_sales_embeddings(customer_id);
 
 CREATE INDEX IF NOT EXISTS fru_sales_embeddings_store_address_idx 
 ON fru_sales_embeddings(store_address);
+
+CREATE INDEX IF NOT EXISTS fru_sales_embeddings_sentiment_category_idx 
+ON fru_sales_embeddings(feedback_sentiment_category);
+
+-- Add comments to document these are "man in the loop" labels
+COMMENT ON COLUMN fru_sales_embeddings.feedback_rating IS 
+  'Human-reviewed numeric satisfaction rating (1-10) assigned to CUSTOMER_FEEDBACK';
+COMMENT ON COLUMN fru_sales_embeddings.feedback_sentiment_category IS 
+  'Human-reviewed sentiment category (Positive/Neutral/Negative) assigned to CUSTOMER_FEEDBACK';
 

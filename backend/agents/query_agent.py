@@ -50,7 +50,8 @@ class QueryAgent:
                     "store_name": "TEXT",
                     "store_address": "TEXT",
                     "customer_feedback": "TEXT",
-                    "feedback_rating": "TEXT",
+                    "feedback_rating": "INTEGER",
+                    "feedback_sentiment_category": "TEXT",
                     "embedding": "VECTOR(1536)"
                 }
             }

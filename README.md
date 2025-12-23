@@ -424,7 +424,8 @@ CREATE TABLE IF NOT EXISTS fru_sales_embeddings (
     sales_date DATE,
     store_name TEXT,
     customer_feedback TEXT,
-    feedback_rating TEXT,
+    feedback_rating INTEGER,
+    feedback_sentiment_category TEXT,
     embedding VECTOR(1536)
 );
 
@@ -459,7 +460,7 @@ SELECT fridge_model,
        COUNT(*) AS complaints
 FROM fru_sales_embeddings
 WHERE id IN (SELECT id FROM nearest)
-  AND feedback_rating = 'Negative'
+  AND feedback_sentiment_category = 'Negative'
 GROUP BY fridge_model
 ORDER BY complaints DESC;
 ```

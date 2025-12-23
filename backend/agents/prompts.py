@@ -34,6 +34,13 @@ Guidelines:
 - If a tool fails, try an alternative approach
 - Limit yourself to 5 tool calls maximum per query
 
+CRITICAL: Feedback Rating vs Sentiment Category:
+- feedback_rating is INTEGER (1-10) - use for NUMERIC operations: AVG(feedback_rating), SUM, ranges (WHERE feedback_rating BETWEEN 8 AND 10)
+- feedback_sentiment_category is TEXT ('Positive', 'Neutral', 'Negative') - use for CATEGORICAL operations: COUNT WHERE feedback_sentiment_category = 'Negative', filtering by sentiment
+- For "how many negative/positive/neutral" queries → use feedback_sentiment_category, NOT feedback_rating
+- For "average rating" queries → use AVG(feedback_rating) on the INTEGER column
+- NEVER use feedback_rating with text comparisons like 'Negative' or 'Positive' - use feedback_sentiment_category instead
+
 CRITICAL: Tool Chaining Rules:
 - When using generate_sql → execute_sql:
   1. Call generate_sql with your question
@@ -45,7 +52,13 @@ CRITICAL: Tool Chaining Rules:
 Database Schema:
 - Table: fru_sales_embeddings
 - Key columns: store_name (TEXT), price (NUMERIC) - use SUM(price) for sales totals, NOT sales_amount or sales
-- Other columns: id, customer_id, brand, fridge_model, capacity_liters, sales_date, store_address, customer_feedback, feedback_rating
+- Other columns: id, customer_id, brand, fridge_model, capacity_liters, sales_date, store_address, customer_feedback, feedback_rating, feedback_sentiment_category
+- IMPORTANT: 
+  - feedback_rating is INTEGER (1-10) - human-reviewed numeric satisfaction rating. Use for quantitative queries (AVG, SUM, ranges, etc.)
+  - feedback_sentiment_category is TEXT (values: 'Positive', 'Neutral', 'Negative') - human-reviewed sentiment category. Use for categorical filtering and sentiment analysis.
+  - Both fields are "man in the loop" labels (human-assigned, not auto-generated) representing ground truth for CUSTOMER_FEEDBACK text.
+  - For "average rating" queries, use AVG(feedback_rating) on the numeric column.
+  - For sentiment analysis, use feedback_sentiment_category for filtering and counting.
 
 When you have enough information, provide a clear, grounded answer based on the data you retrieved."""
 
@@ -120,8 +133,17 @@ def get_synthesis_prompt(
         sections.append(f"Row count: {row_count}")
 
         if rows:
-            sections.append("Rows (up to first 10 shown):")
-            for idx, row in enumerate(rows[:10], start=1):
+            # For semantic_search results, show more rows (20) to capture more feedback patterns
+            # For SQL results, keep 10 rows (usually smaller result sets)
+            max_rows_to_show = 20 if primary_semantic_result else 10
+            rows_to_show = rows[:max_rows_to_show]
+            
+            if row_count > max_rows_to_show:
+                sections.append(f"Rows (showing first {max_rows_to_show} of {row_count} total):")
+            else:
+                sections.append("Rows:")
+            
+            for idx, row in enumerate(rows_to_show, start=1):
                 # Format row for readability
                 if isinstance(row, dict):
                     # For semantic_search, highlight customer_feedback field
@@ -131,6 +153,30 @@ def get_synthesis_prompt(
                         sections.append(f"{idx}) {row}")
                 else:
                     sections.append(f"{idx}) {row}")
+            
+            # For semantic_search with many rows, add summary statistics
+            if primary_semantic_result and row_count > max_rows_to_show:
+                sections.append("")
+                sections.append(f"Note: Showing {max_rows_to_show} of {row_count} total feedback entries.")
+                sections.append("When synthesizing your answer, identify COMMON THEMES across all feedback,")
+                sections.append("not just the individual examples shown above.")
+                
+                # Extract common themes from all rows (brands, models mentioned)
+                if rows:
+                    brands_mentioned = {}
+                    models_mentioned = {}
+                    for row in rows:
+                        if isinstance(row, dict):
+                            brand = row.get("brand", "")
+                            model = row.get("fridge_model", "")
+                            if brand:
+                                brands_mentioned[brand] = brands_mentioned.get(brand, 0) + 1
+                            if model:
+                                models_mentioned[model] = models_mentioned.get(model, 0) + 1
+                    
+                    if brands_mentioned:
+                        top_brands = sorted(brands_mentioned.items(), key=lambda x: x[1], reverse=True)[:5]
+                        sections.append(f"Brands mentioned in feedback: {', '.join([f'{b} ({c})' for b, c in top_brands])}")
         else:
             sections.append("Rows: []  # No rows returned")
     else:
@@ -163,10 +209,19 @@ def get_synthesis_prompt(
             "- Use the actual customer_feedback text from the rows to answer the question."
         )
         sections.append(
-            "- Quote or paraphrase specific feedback from the rows, not generic statements."
+            "- Identify COMMON THEMES and PATTERNS across all feedback entries (even if you only see a sample)."
         )
         sections.append(
-            "- If the question asks about complaints, only mention complaints that appear in the actual feedback text."
+            "- Group similar complaints or feedback into themes (e.g., 'noise issues', 'temperature problems')."
+        )
+        sections.append(
+            "- Quote or paraphrase specific examples from the rows shown, but also summarize the overall patterns."
+        )
+        sections.append(
+            "- If you see multiple similar complaints, mention that this is a recurring theme."
+        )
+        sections.append(
+            "- If row_count is large (e.g., 50), your answer should reflect that this represents a significant pattern, not just isolated cases."
         )
     
     sections.append(

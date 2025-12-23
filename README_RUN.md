@@ -675,7 +675,8 @@ This is the **primary production deployment path**:
      sales_date DATE,
      store_name TEXT,
      customer_feedback TEXT,
-     feedback_rating TEXT,
+     feedback_rating INTEGER,
+    feedback_sentiment_category TEXT,
      embedding vector(1536) -- or 3072 depending on model
    );
    ```

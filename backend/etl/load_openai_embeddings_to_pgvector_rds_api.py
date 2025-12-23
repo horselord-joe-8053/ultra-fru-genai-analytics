@@ -50,7 +50,8 @@ def format_value(value):
         if value.lower() == 'nan' or value == '':
             return "NULL"
         # Escape single quotes
-        return f"'{value.replace("'", "''")}'"
+        escaped = value.replace("'", "''")
+        return f"'{escaped}'"
     elif isinstance(value, (int, float)):
         return str(value)
     elif isinstance(value, list):
@@ -65,9 +66,19 @@ def format_value(value):
 def execute_insert_via_rds_api(rds_client, cluster_arn, secret_arn, db_name, row_data, embedding):
     """Execute a single INSERT statement via RDS Data API."""
     # Build SQL with proper formatting
+    # Convert FEEDBACK_RATING to integer
+    feedback_rating = row_data.get('FEEDBACK_RATING', '')
+    if feedback_rating:
+        try:
+            feedback_rating_int = int(feedback_rating)
+        except (ValueError, TypeError):
+            feedback_rating_int = None
+    else:
+        feedback_rating_int = None
+    
     sql = f"""
     INSERT INTO fru_sales_embeddings
-    (id, customer_id, brand, fridge_model, capacity_liters, price, sales_date, store_name, store_address, customer_feedback, feedback_rating, embedding)
+    (id, customer_id, brand, fridge_model, capacity_liters, price, sales_date, store_name, store_address, customer_feedback, feedback_rating, feedback_sentiment_category, embedding)
     VALUES (
         {format_value(row_data['ID'])},
         {format_value(row_data.get('CUSTOMER_ID', ''))},
@@ -79,7 +90,8 @@ def execute_insert_via_rds_api(rds_client, cluster_arn, secret_arn, db_name, row
         {format_value(row_data['STORE_NAME'])},
         {format_value(row_data.get('STORE_ADDRESS', ''))},
         {format_value(row_data.get('CUSTOMER_FEEDBACK', ''))},
-        {format_value(row_data.get('FEEDBACK_RATING', ''))},
+        {feedback_rating_int if feedback_rating_int is not None else 'NULL'},
+        {format_value(row_data.get('FEEDBACK_SENTIMENT_CATEGORY', ''))},
         {format_value(embedding)}::vector
     )
     ON CONFLICT (id) DO UPDATE SET
@@ -93,6 +105,7 @@ def execute_insert_via_rds_api(rds_client, cluster_arn, secret_arn, db_name, row
       store_address = EXCLUDED.store_address,
       customer_feedback = EXCLUDED.customer_feedback,
       feedback_rating = EXCLUDED.feedback_rating,
+      feedback_sentiment_category = EXCLUDED.feedback_sentiment_category,
       embedding = EXCLUDED.embedding;
     """
     
@@ -117,7 +130,7 @@ def main():
     
     df = pd.read_csv(csv_path)
     
-    required = ["ID","CUSTOMER_ID","BRAND","FRIDGE_MODEL","CAPACITY_LITERS","PRICE","SALES_DATE","STORE_NAME","STORE_ADDRESS","CUSTOMER_FEEDBACK","FEEDBACK_RATING"]
+    required = ["ID","CUSTOMER_ID","BRAND","FRIDGE_MODEL","CAPACITY_LITERS","PRICE","SALES_DATE","STORE_NAME","STORE_ADDRESS","CUSTOMER_FEEDBACK","FEEDBACK_RATING","FEEDBACK_SENTIMENT_CATEGORY"]
     for c in required:
         if c not in df.columns:
             raise RuntimeError(f"Missing required column: {c}")

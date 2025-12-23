@@ -14,7 +14,7 @@ def main(delta_path: str, out_jsonl: str):
             print("Warning: column", c, "missing in Delta table")
 
     df_sample = (
-        df.select("BRAND", "FRIDGE_MODEL", "STORE_NAME", "SALES_DATE", "FEEDBACK_RATING")
+        df.select("BRAND", "FRIDGE_MODEL", "STORE_NAME", "SALES_DATE", "FEEDBACK_SENTIMENT_CATEGORY")
         .dropna()
         .dropDuplicates()
         .limit(200)
@@ -26,7 +26,7 @@ def main(delta_path: str, out_jsonl: str):
         brand = row.get("BRAND")
         model = row.get("FRIDGE_MODEL")
         store = row.get("STORE_NAME")
-        rating = row.get("FEEDBACK_RATING")
+        sentiment_category = row.get("FEEDBACK_SENTIMENT_CATEGORY")
 
         q1 = f"How many {brand} fridges were sold at {store}?"
         sql1 = (
@@ -46,13 +46,15 @@ def main(delta_path: str, out_jsonl: str):
         )
         records.append({"question": q2, "sql": sql2})
 
-        if rating:
-            q3 = f"How many sales at {store} had {rating.lower()} feedback?"
+        if sentiment_category:
+            # Use FEEDBACK_SENTIMENT_CATEGORY for categorical sentiment queries
+            # Note: FEEDBACK_SENTIMENT_CATEGORY is a human-reviewed label (ground truth)
+            q3 = f"How many sales at {store} had {sentiment_category.lower()} feedback?"
             sql3 = (
-                "SELECT STORE_NAME, FEEDBACK_RATING, COUNT(*) AS cnt "
-                "FROM fru_sales "
-                f"WHERE STORE_NAME = '{store}' AND FEEDBACK_RATING = '{rating}' "
-                "GROUP BY STORE_NAME, FEEDBACK_RATING;"
+                "SELECT STORE_NAME, FEEDBACK_SENTIMENT_CATEGORY, COUNT(*) AS cnt "
+                "FROM fru_sales_embeddings "
+                f"WHERE STORE_NAME = '{store}' AND FEEDBACK_SENTIMENT_CATEGORY = '{sentiment_category}' "
+                "GROUP BY STORE_NAME, FEEDBACK_SENTIMENT_CATEGORY;"
             )
             records.append({"question": q3, "sql": sql3})
 

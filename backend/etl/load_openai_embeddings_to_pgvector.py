@@ -22,7 +22,7 @@ def main():
     csv_path = get_optional_env("FRU_CSV_PATH", "data/raw/fridge_sales_with_rating.csv")
     df = pd.read_csv(csv_path)
 
-    required = ["ID","CUSTOMER_ID","BRAND","FRIDGE_MODEL","CAPACITY_LITERS","PRICE","SALES_DATE","STORE_NAME","STORE_ADDRESS","CUSTOMER_FEEDBACK","FEEDBACK_RATING"]
+    required = ["ID","CUSTOMER_ID","BRAND","FRIDGE_MODEL","CAPACITY_LITERS","PRICE","SALES_DATE","STORE_NAME","STORE_ADDRESS","CUSTOMER_FEEDBACK","FEEDBACK_RATING","FEEDBACK_SENTIMENT_CATEGORY"]
     for c in required:
         if c not in df.columns:
             raise RuntimeError(f"Missing required column: {c}")
@@ -58,14 +58,15 @@ def main():
                 str(r["STORE_NAME"]),
                 str(r.get("STORE_ADDRESS", "")),
                 str(r.get("CUSTOMER_FEEDBACK","")),
-                str(r.get("FEEDBACK_RATING","")),
+                int(r.get("FEEDBACK_RATING", 0)) if r.get("FEEDBACK_RATING") else None,
+                str(r.get("FEEDBACK_SENTIMENT_CATEGORY","")),
                 emb,
             ))
 
         sql = """
         INSERT INTO fru_sales_embeddings
-        (id, customer_id, brand, fridge_model, capacity_liters, price, sales_date, store_name, store_address, customer_feedback, feedback_rating, embedding)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        (id, customer_id, brand, fridge_model, capacity_liters, price, sales_date, store_name, store_address, customer_feedback, feedback_rating, feedback_sentiment_category, embedding)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (id) DO UPDATE SET
           customer_id = EXCLUDED.customer_id,
           brand = EXCLUDED.brand,
@@ -77,6 +78,7 @@ def main():
           store_address = EXCLUDED.store_address,
           customer_feedback = EXCLUDED.customer_feedback,
           feedback_rating = EXCLUDED.feedback_rating,
+          feedback_sentiment_category = EXCLUDED.feedback_sentiment_category,
           embedding = EXCLUDED.embedding;
         """
         execute_batch(cur, sql, payload)

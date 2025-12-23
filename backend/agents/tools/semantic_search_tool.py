@@ -33,9 +33,9 @@ class SemanticSearchTool(BaseTool):
                 col for col, col_type in schema_info["columns"].items()
                 if col not in excluded_columns and "TEXT" in str(col_type).upper()
             ]
-            filter_desc = ", ".join(sorted(filterable_cols)) if filterable_cols else "store_name, brand, feedback_rating"
+            filter_desc = ", ".join(sorted(filterable_cols)) if filterable_cols else "store_name, brand, feedback_sentiment_category"
         else:
-            filter_desc = "store_name, brand, feedback_rating"
+            filter_desc = "store_name, brand, feedback_sentiment_category"
         
         super().__init__(
             name="semantic_search",
@@ -84,8 +84,9 @@ class SemanticSearchTool(BaseTool):
             question: Alternative parameter name
             query: Alternative parameter name
             limit: Maximum number of results
-            filters: Optional dict with keys: store_name, brand, feedback_rating
+            filters: Optional dict with keys: store_name, brand, feedback_sentiment_category
                     Values are lists of strings to filter by
+                    Note: feedback_rating is INTEGER (not filterable), use feedback_sentiment_category for sentiment filtering
         
         Returns:
             Dict with success, rows, row_count, error, execution_time_ms
@@ -127,7 +128,7 @@ class SemanticSearchTool(BaseTool):
             # Build SQL with optional filters
             base_sql = (
                 "SELECT id, brand, fridge_model, price, sales_date, store_name, "
-                "customer_feedback, feedback_rating "
+                "customer_feedback, feedback_rating, feedback_sentiment_category "
                 "FROM fru_sales_embeddings "
             )
             
@@ -150,7 +151,8 @@ class SemanticSearchTool(BaseTool):
                             filterable_columns.add(col_name)
                 else:
                     # Fallback to hardcoded list if schema_info not available
-                    filterable_columns = {"store_name", "brand", "feedback_rating"}
+                    # Note: feedback_rating is INTEGER, not filterable; use feedback_sentiment_category instead
+                    filterable_columns = {"store_name", "brand", "feedback_sentiment_category"}
                 
                 # Process each filter dynamically
                 for filter_key, filter_values in filters.items():
