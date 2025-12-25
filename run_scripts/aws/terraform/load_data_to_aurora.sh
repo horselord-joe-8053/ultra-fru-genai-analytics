@@ -88,11 +88,38 @@ load_data() {
     # Activate virtual environment
     source "$REPO_ROOT/venv/bin/activate"
     
-    # Check if data is already loaded using RDS Data API
-    log_info "Checking if data is already loaded..."
+    # Check if data needs to be reloaded using change detection
+    log_info "Checking if data needs to be reloaded..."
     
+    # Calculate current CSV file hash
+    local csv_hash
+    if command -v sha256sum >/dev/null 2>&1; then
+        csv_hash=$(sha256sum "$CSV_FILE" | cut -d' ' -f1)
+    elif command -v shasum >/dev/null 2>&1; then
+        csv_hash=$(shasum -a 256 "$CSV_FILE" | cut -d' ' -f1)
+    else
+        log_warning "Cannot calculate CSV hash (sha256sum/shasum not found). Using timestamp-based check."
+        csv_hash="unknown-$(stat -f %m "$CSV_FILE" 2>/dev/null || stat -c %Y "$CSV_FILE" 2>/dev/null || echo "0")"
+    fi
+    
+    # Calculate current schema version hash
+    local schema_file="$REPO_ROOT/sql/schema_pgvector.sql"
+    local schema_hash
+    if [ -f "$schema_file" ]; then
+        if command -v sha256sum >/dev/null 2>&1; then
+            schema_hash=$(sha256sum "$schema_file" | cut -d' ' -f1)
+        elif command -v shasum >/dev/null 2>&1; then
+            schema_hash=$(shasum -a 256 "$schema_file" | cut -d' ' -f1)
+        else
+            schema_hash="unknown"
+        fi
+    else
+        log_warning "Schema file not found: $schema_file"
+        schema_hash="unknown"
+    fi
+    
+    # Check row count
     local row_count=0
-    # Use AWS CLI to check row count via RDS Data API
     row_count=$(aws rds-data execute-statement \
         --resource-arn "$db_cluster_arn" \
         --secret-arn "$db_secret_arn" \
@@ -103,19 +130,76 @@ load_data() {
         --output text \
         --query 'records[0][0].longValue' 2>/dev/null || echo "0")
     
-    if [ "$row_count" -gt 0 ] && [ "$row_count" != "0" ]; then
-        log_info "Data already loaded ($row_count rows found)."
-        # For automated testing, allow FORCE_RELOAD env var to skip prompt
-        if [ "${FORCE_RELOAD:-false}" != "true" ]; then
-            read -p "Do you want to reload data? This will upsert existing rows. (y/N): " -n 1 -r
-            echo # Add a newline after the prompt
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                log_info "Skipping data reload."
-                return 0
-            fi
-        else
-            log_info "FORCE_RELOAD=true, proceeding with reload..."
+    # Check stored metadata (CSV hash and schema version)
+    local stored_csv_hash stored_schema_hash
+    stored_csv_hash=$(aws rds-data execute-statement \
+        --resource-arn "$db_cluster_arn" \
+        --secret-arn "$db_secret_arn" \
+        --database "$db_name" \
+        --sql "SELECT value FROM metadata WHERE key='csv_hash';" \
+        --profile "$AWS_PROFILE" \
+        --region "$AWS_REGION" \
+        --output text \
+        --query 'records[0][0].stringValue' 2>/dev/null || echo "")
+    
+    stored_schema_hash=$(aws rds-data execute-statement \
+        --resource-arn "$db_cluster_arn" \
+        --secret-arn "$db_secret_arn" \
+        --database "$db_name" \
+        --sql "SELECT value FROM metadata WHERE key='schema_version';" \
+        --profile "$AWS_PROFILE" \
+        --region "$AWS_REGION" \
+        --output text \
+        --query 'records[0][0].stringValue' 2>/dev/null || echo "")
+    
+    # Determine if reload is needed
+    local needs_reload=false
+    local reload_reason=""
+    
+    if [ "$row_count" -eq 0 ] || [ "$row_count" = "0" ]; then
+        needs_reload=true
+        reload_reason="No data found in database"
+    elif [ -z "$stored_csv_hash" ]; then
+        # Metadata table doesn't exist or is empty - reload to establish baseline
+        needs_reload=true
+        reload_reason="Metadata not found (first load or metadata table missing)"
+    elif [ "$csv_hash" != "$stored_csv_hash" ]; then
+        needs_reload=true
+        reload_reason="CSV file has changed (hash: ${csv_hash:0:8}... vs stored: ${stored_csv_hash:0:8}...)"
+    elif [ "$schema_hash" != "$stored_schema_hash" ] && [ "$schema_hash" != "unknown" ]; then
+        needs_reload=true
+        reload_reason="Schema has changed (hash: ${schema_hash:0:8}... vs stored: ${stored_schema_hash:0:8}...)"
+    fi
+    
+    if [ "$needs_reload" = false ]; then
+        log_info "Data is up to date:"
+        log_info "  - Row count: $row_count"
+        log_info "  - CSV hash matches stored hash"
+        if [ "$schema_hash" != "unknown" ]; then
+            log_info "  - Schema version matches stored version"
         fi
+        log_info "Skipping data reload."
+        return 0
+    fi
+    
+    # Reload needed
+    log_info "Data reload needed: $reload_reason"
+    log_info "  - Current CSV hash: ${csv_hash:0:16}..."
+    log_info "  - Current schema hash: ${schema_hash:0:16}..."
+    
+    # For non-interactive mode (automated deployments), auto-reload
+    # For interactive mode, prompt user
+    if [ -t 0 ] && [ "${FORCE_RELOAD:-false}" != "true" ]; then
+        # Interactive mode: prompt user
+        read -p "Do you want to reload data? This will upsert existing rows. (y/N): " -n 1 -r
+        echo # Add a newline after the prompt
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Skipping data reload."
+            return 0
+        fi
+    else
+        # Non-interactive mode: auto-reload
+        log_info "Non-interactive mode: Auto-reloading data..."
     fi
     
     # Set environment variables for RDS Data API ETL script
@@ -139,6 +223,54 @@ load_data() {
     
     if [ $? -eq 0 ]; then
         log_success "Data loaded successfully"
+        
+        # Store metadata after successful load
+        log_info "Storing metadata (CSV hash, schema version)..."
+        
+        # Ensure metadata table exists
+        aws rds-data execute-statement \
+            --resource-arn "$db_cluster_arn" \
+            --secret-arn "$db_secret_arn" \
+            --database "$db_name" \
+            --sql "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);" \
+            --profile "$AWS_PROFILE" \
+            --region "$AWS_REGION" \
+            >/dev/null 2>&1 || true
+        
+        # Store CSV hash
+        aws rds-data execute-statement \
+            --resource-arn "$db_cluster_arn" \
+            --secret-arn "$db_secret_arn" \
+            --database "$db_name" \
+            --sql "INSERT INTO metadata (key, value, updated_at) VALUES ('csv_hash', '$csv_hash', CURRENT_TIMESTAMP) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP;" \
+            --profile "$AWS_PROFILE" \
+            --region "$AWS_REGION" \
+            >/dev/null 2>&1 || log_warning "Failed to store CSV hash in metadata"
+        
+        # Store schema version
+        if [ "$schema_hash" != "unknown" ]; then
+            aws rds-data execute-statement \
+                --resource-arn "$db_cluster_arn" \
+                --secret-arn "$db_secret_arn" \
+                --database "$db_name" \
+                --sql "INSERT INTO metadata (key, value, updated_at) VALUES ('schema_version', '$schema_hash', CURRENT_TIMESTAMP) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP;" \
+                --profile "$AWS_PROFILE" \
+                --region "$AWS_REGION" \
+                >/dev/null 2>&1 || log_warning "Failed to store schema version in metadata"
+        fi
+        
+        # Store embedding model version
+        local embed_model="${OPENAI_EMBED_MODEL:-text-embedding-3-small}"
+        aws rds-data execute-statement \
+            --resource-arn "$db_cluster_arn" \
+            --secret-arn "$db_secret_arn" \
+            --database "$db_name" \
+            --sql "INSERT INTO metadata (key, value, updated_at) VALUES ('embedding_model', '$embed_model', CURRENT_TIMESTAMP) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP;" \
+            --profile "$AWS_PROFILE" \
+            --region "$AWS_REGION" \
+            >/dev/null 2>&1 || log_warning "Failed to store embedding model in metadata"
+        
+        log_success "Metadata stored successfully"
     else
         log_error "ETL script failed"
         exit 1

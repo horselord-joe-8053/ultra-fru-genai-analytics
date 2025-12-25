@@ -65,6 +65,12 @@ build_and_push_ecr() {
         export ECR_REPO_URI
     fi
     
+    # Extract ECR_URL (base URL without repo name) for docker login
+    # ECR_REPO_URI format: account.dkr.ecr.region.amazonaws.com/repo-name
+    # ECR_URL format: account.dkr.ecr.region.amazonaws.com
+    ECR_URL="${ECR_REPO_URI%/*}"
+    export ECR_URL
+    
     log_info "ECR Repository: $ECR_REPO_URI"
     log_info "Image Tag: $IMAGE_TAG"
     log_info "Full Image URI: $ECR_REPO_URI:$IMAGE_TAG"

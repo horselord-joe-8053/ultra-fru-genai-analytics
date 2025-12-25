@@ -266,8 +266,10 @@ deploy_ecs_full() {
         AWS_PROFILE="${AWS_PROFILE:-admin}" \
         AWS_REGION="${AWS_REGION:-$DEFAULT_AWS_REGION}" \
         "$SCRIPT_DIR/terraform/load_data_to_aurora.sh" "$ENVIRONMENT" || {
-            log_warning "Data loading failed (tables may already have data)"
-            log_info "This is usually safe to ignore if data already exists"
+            log_warning "Data loading failed or was skipped"
+            log_info "This is usually safe to ignore if:"
+            log_info "  - Data already exists and is up to date (CSV/schema unchanged)"
+            log_info "  - You can manually reload with: ./run_scripts/aws/terraform/load_data_to_aurora.sh $ENVIRONMENT"
         }
     }
 
