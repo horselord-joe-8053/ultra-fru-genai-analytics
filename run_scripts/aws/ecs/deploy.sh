@@ -8,6 +8,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$SCRIPT_DIR/../../common/logger.sh"
+source "$SCRIPT_DIR/../../common/load-env.sh"
 
 # Parse command line arguments
 SKIP_BUILD=false

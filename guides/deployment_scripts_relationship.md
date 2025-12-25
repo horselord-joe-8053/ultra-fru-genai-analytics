@@ -38,7 +38,8 @@ The project provides **two different deployment approaches** for AWS:
 **What it requires:**
 - Terraform >= 1.5.0
 - Terragrunt >= 0.50.0
-- `CONTAINER_IMAGE` environment variable (ECR image URI)
+- `IMAGE_PREFIX` in `.env` (default: `fru-api-img-default-prefix`)
+- `CONTAINER_IMAGE` is automatically generated from `IMAGE_PREFIX:IMAGE_TAG` (IMAGE_TAG from git SHA)
 - All infrastructure resources are created automatically
 
 **Usage:**
@@ -154,8 +155,9 @@ The project provides **two different deployment approaches** for AWS:
 # 1. Build and push container image
 ./run_scripts/aws/ecs/build-push-ecr.sh
 
-# 2. Set CONTAINER_IMAGE in .env
-export CONTAINER_IMAGE=<ecr-uri>
+# 2. CONTAINER_IMAGE is automatically generated from IMAGE_PREFIX:IMAGE_TAG
+#    IMAGE_PREFIX is set in .env (default: fru-api-img-default-prefix)
+#    IMAGE_TAG is auto-generated from git commit SHA
 
 # 3. Deploy everything with Terraform
 ./run_scripts/aws/terraform/deploy.sh dev all
@@ -204,8 +206,8 @@ export CONTAINER_IMAGE=<ecr-uri>
 # Step 1: Build container image
 ./run_scripts/aws/ecs/build-push-ecr.sh
 
-# Step 2: Set CONTAINER_IMAGE in .env
-# Edit .env: CONTAINER_IMAGE=<ecr-uri>
+# Step 2: Ensure IMAGE_PREFIX is set in .env (default: fru-api-img-default-prefix)
+# CONTAINER_IMAGE is automatically generated from IMAGE_PREFIX:IMAGE_TAG
 
 # Step 3: Deploy everything with Terraform
 ./run_scripts/aws/terraform/deploy.sh dev all
@@ -222,7 +224,7 @@ export CONTAINER_IMAGE=<ecr-uri>
 # 1. Build new container image
 ./run_scripts/aws/ecs/build-push-ecr.sh
 
-# 2. Update CONTAINER_IMAGE in .env (if changed)
+# 2. CONTAINER_IMAGE is automatically generated (no manual update needed)
 
 # 3. Update via Terraform (updates ECS service with new image)
 ./run_scripts/aws/terraform/deploy.sh dev application

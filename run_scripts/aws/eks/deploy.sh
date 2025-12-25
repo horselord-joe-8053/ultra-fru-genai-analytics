@@ -174,9 +174,23 @@ generate_manifests() {
 # Apply Kubernetes manifests
 apply_manifests() {
     local manifests_dir=$1
-    local container_image="${CONTAINER_IMAGE:-}"
     
     log_step "Applying Kubernetes manifests"
+    
+    # Resolve CONTAINER_IMAGE for AWS deployment
+    # This ensures IMAGE_PREFIX is replaced with actual ECR URI
+    if [ -z "${CONTAINER_IMAGE:-}" ]; then
+        # CONTAINER_IMAGE not set: generate it (will resolve IMAGE_PREFIX to ECR URI)
+        CONTAINER_IMAGE=$(resolve_container_image_for_aws)
+        export CONTAINER_IMAGE
+    elif [[ "$CONTAINER_IMAGE" != *".dkr.ecr."* ]]; then
+        # CONTAINER_IMAGE set but doesn't look like ECR URI: resolve it
+        # This handles cases where IMAGE_PREFIX from .env is not an ECR URI
+        CONTAINER_IMAGE=$(resolve_container_image_for_aws)
+        export CONTAINER_IMAGE
+    fi
+    
+    local container_image="$CONTAINER_IMAGE"
     
     # Generate ConfigMap and Secret from templates first
     generate_manifests "$manifests_dir"

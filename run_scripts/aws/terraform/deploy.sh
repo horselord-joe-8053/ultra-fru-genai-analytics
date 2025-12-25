@@ -497,18 +497,23 @@ deploy_terragrunt() {
         exit 1
     fi
     
-    # Preserve CONTAINER_IMAGE if it was exported by parent script (run.sh)
-    # This ensures the git SHA tag from run.sh is not overridden by .env file
-    PRESERVED_CONTAINER_IMAGE="${CONTAINER_IMAGE:-}"
-    
     # Load environment variables (needed for bootstrap script)
     load_env_file
     
-    # Restore CONTAINER_IMAGE if it was set before loading .env
-    # This ensures run.sh's exported CONTAINER_IMAGE (with git SHA tag) takes precedence
-    if [ -n "$PRESERVED_CONTAINER_IMAGE" ]; then
-        export CONTAINER_IMAGE="$PRESERVED_CONTAINER_IMAGE"
+    # Resolve CONTAINER_IMAGE for AWS deployment
+    # This ensures IMAGE_PREFIX is replaced with actual ECR URI before Terraform
+    # Terraform requires a valid Docker URI format
+    if [ -z "${CONTAINER_IMAGE:-}" ]; then
+        # CONTAINER_IMAGE not set: generate it (will resolve IMAGE_PREFIX to ECR URI)
+        CONTAINER_IMAGE=$(resolve_container_image_for_aws)
+        export CONTAINER_IMAGE
+    elif [[ "$CONTAINER_IMAGE" != *".dkr.ecr."* ]]; then
+        # CONTAINER_IMAGE set but doesn't look like ECR URI: resolve it
+        # This handles cases where IMAGE_PREFIX from .env is not an ECR URI
+        CONTAINER_IMAGE=$(resolve_container_image_for_aws)
+        export CONTAINER_IMAGE
     fi
+    # Now CONTAINER_IMAGE is guaranteed to be a valid Docker URI for Terraform
     
     # Setup Terraform state bucket (if needed)
     log_step "Ensuring Terraform state bucket exists"

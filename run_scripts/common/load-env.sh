@@ -75,6 +75,10 @@ load_env_file() {
     # Environment variable (for Terragrunt get_env())
     export ENVIRONMENT="${ENVIRONMENT:-}"
     
+    # Container image configuration
+    # IMAGE_PREFIX: Base image URI prefix (from .env or built dynamically)
+    export IMAGE_PREFIX="${IMAGE_PREFIX:-}"
+    
     log_success "Loaded environment variables from $env_path"
     log_info "Note: AWS credential variables (AWS_ADMIN_*, AWS_BEDROCK_*) are loaded but not exported"
     log_info "      Use AWS profiles (admin/bedrock) instead via --profile flag or AWS_PROFILE env var"
@@ -85,4 +89,112 @@ load_env_file() {
 if [ -z "${RED:-}" ]; then
     source "$ENV_SCRIPT_DIR/logger.sh"
 fi
+
+# ============================================================================
+# Container Image Configuration Functions
+# ============================================================================
+# These functions centralize all image-related logic:
+# - IMAGE_PREFIX: Base image URI prefix (from .env or built dynamically)
+# - IMAGE_TAG: Image tag (auto-generated from git or manually set)
+# - CONTAINER_IMAGE: Full image URI = IMAGE_PREFIX:IMAGE_TAG
+#
+# For AWS deployments, IMAGE_PREFIX is replaced with dynamically built ECR URI
+# to ensure the correct repository is used regardless of .env configuration.
+
+# Ensure IMAGE_TAG is generated if not set
+# Uses git_helpers.sh to generate tag from git commit SHA
+# Detects uncommitted changes and includes working tree hash when dirty
+# Format: git-<short-sha>[-dirty-<working-tree-hash>]
+ensure_image_tag() {
+    if [ -z "${IMAGE_TAG:-}" ]; then
+        # Source git_helpers if not already available
+        if ! command -v generate_image_tag >/dev/null 2>&1; then
+            source "$ENV_SCRIPT_DIR/git_helpers.sh"
+        fi
+        export IMAGE_TAG=$(generate_image_tag)
+    fi
+}
+
+# Build ECR repository URI from AWS account and region
+# Lazy evaluation: only builds when needed (requires AWS credentials)
+# Returns: account.dkr.ecr.region.amazonaws.com/repo-name
+# Usage: ECR_REPO_URI=$(build_ecr_repo_uri)
+build_ecr_repo_uri() {
+    local aws_profile="${AWS_PROFILE:-admin}"
+    local aws_region="${AWS_REGION:-us-east-1}"
+    local ecr_repo_name="${ECR_REPO_NAME:-fru-api}"
+    
+    # Get AWS account ID (requires AWS credentials)
+    local aws_account_id
+    aws_account_id=$(aws sts get-caller-identity --profile "$aws_profile" --query Account --output text 2>/dev/null || echo "")
+    
+    if [ -z "$aws_account_id" ]; then
+        log_warning "Could not get AWS account ID. ECR URI cannot be built."
+        return 1
+    fi
+    
+    echo "${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com/${ecr_repo_name}"
+}
+
+# Generate CONTAINER_IMAGE from IMAGE_PREFIX:IMAGE_TAG
+# This is the base format used everywhere
+# If IMAGE_PREFIX not set, attempts to build from AWS account (fallback)
+# Usage: CONTAINER_IMAGE=$(generate_container_image)
+generate_container_image() {
+    ensure_image_tag
+    
+    local image_prefix="${IMAGE_PREFIX:-}"
+    
+    if [ -z "$image_prefix" ]; then
+        # Fallback: try to build from AWS account (if available)
+        if ecr_uri=$(build_ecr_repo_uri 2>/dev/null); then
+            image_prefix="$ecr_uri"
+            log_info "IMAGE_PREFIX not set in .env, using AWS account-based ECR URI: $image_prefix"
+        else
+            log_warning "IMAGE_PREFIX not set in .env and cannot build from AWS account"
+            log_warning "CONTAINER_IMAGE will be incomplete. Set IMAGE_PREFIX in .env or ensure AWS credentials are available."
+            image_prefix="unknown"
+        fi
+    fi
+    
+    echo "${image_prefix}:${IMAGE_TAG}"
+}
+
+# Resolve CONTAINER_IMAGE for AWS deployments
+# Replaces IMAGE_PREFIX with dynamically built ECR URI
+# This ensures AWS deployments always use the correct ECR URI
+# Usage: CONTAINER_IMAGE=$(resolve_container_image_for_aws)
+resolve_container_image_for_aws() {
+    local container_image="${CONTAINER_IMAGE:-}"
+    
+    # If CONTAINER_IMAGE not set, generate it first
+    if [ -z "$container_image" ]; then
+        container_image=$(generate_container_image)
+    fi
+    
+    # Extract IMAGE_PREFIX and IMAGE_TAG from CONTAINER_IMAGE
+    local image_prefix="${container_image%%:*}"
+    local image_tag="${container_image##*:}"
+    
+    # Check if IMAGE_PREFIX needs to be replaced with ECR URI
+    # Replace if:
+    # 1. Contains variables (e.g., $IMAGE_PREFIX)
+    # 2. Is "unknown" (fallback value)
+    # 3. Doesn't look like an ECR URI (doesn't contain .dkr.ecr.)
+    if [[ "$image_prefix" == *"\$"* ]] || \
+       [[ "$image_prefix" == "unknown" ]] || \
+       [[ "$image_prefix" != *".dkr.ecr."* ]]; then
+        # Build ECR URI dynamically and replace IMAGE_PREFIX
+        local ecr_uri
+        if ecr_uri=$(build_ecr_repo_uri); then
+            echo "${ecr_uri}:${image_tag}"
+        else
+            log_error "Cannot build ECR URI for AWS deployment"
+            return 1
+        fi
+    else
+        # Already a valid ECR URI, use as-is
+        echo "$container_image"
+    fi
+}
 

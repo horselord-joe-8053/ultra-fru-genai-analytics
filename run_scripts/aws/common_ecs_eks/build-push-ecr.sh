@@ -13,9 +13,6 @@ BUILD_SCRIPT_DIR="$SCRIPT_DIR"
 source "$SCRIPT_DIR/../../common/load-env.sh"
 # Restore our SCRIPT_DIR
 SCRIPT_DIR="$BUILD_SCRIPT_DIR"
-# Source git helpers for image tag generation
-source "$SCRIPT_DIR/../../common/git_helpers.sh"
-
 ECR_REPO_NAME="fru-api"
 
 # Check for dry-run mode (from parent script)
@@ -25,21 +22,29 @@ DRY_RUN="${DRY_RUN:-false}"
 # Set FORCE_REBUILD=true to rebuild even if image exists
 FORCE_REBUILD="${FORCE_REBUILD:-false}"
 
-# Generate image tag if not explicitly provided
-# Purpose: Ensure unique tags per code change so Terraform detects updates
-# Strategy: Use git commit SHA for automatic, unique, traceable tags
-#          Detects uncommitted changes and includes working tree hash when dirty
-if [ -z "${IMAGE_TAG:-}" ]; then
-    # Auto-generate tag using shared function (detects uncommitted changes)
-    IMAGE_TAG=$(generate_image_tag)
-    log_info "Auto-generated image tag: $IMAGE_TAG"
-else
-    # Use explicitly provided tag (allows manual override)
-    log_info "Using provided image tag: $IMAGE_TAG"
+# Generate IMAGE_TAG if not set (using centralized function from load-env.sh)
+# This ensures consistent tag generation across all scripts
+ensure_image_tag
+
+# Build ECR_REPO_URI if not set (using centralized function from load-env.sh)
+# If CONTAINER_IMAGE is set, extract ECR_REPO_URI from it
+# Otherwise, build from AWS account/region
+if [ -z "${ECR_REPO_URI:-}" ]; then
+    if [ -n "${CONTAINER_IMAGE:-}" ]; then
+        # Extract ECR URI from CONTAINER_IMAGE (format: ECR_URI:IMAGE_TAG)
+        ECR_REPO_URI="${CONTAINER_IMAGE%%:*}"
+    else
+        # Build ECR URI dynamically
+        ECR_REPO_URI=$(build_ecr_repo_uri)
+    fi
+    export ECR_REPO_URI
 fi
 
-# Export IMAGE_TAG so parent scripts can use it
-export IMAGE_TAG
+# Ensure IMAGE_TAG matches what's in CONTAINER_IMAGE (if set)
+if [ -n "${CONTAINER_IMAGE:-}" ]; then
+    IMAGE_TAG="${CONTAINER_IMAGE##*:}"
+    export IMAGE_TAG
+fi
 
 build_and_push_ecr() {
     log_step "Building and pushing Docker image to ECR"
@@ -54,11 +59,11 @@ build_and_push_ecr() {
     AWS_PROFILE="${AWS_PROFILE:-admin}"
     log_info "Using AWS profile: $AWS_PROFILE (for infrastructure operations)"
     
-    # Get AWS account and region
-    AWS_ACCOUNT_ID=$(aws sts get-caller-identity --profile "$AWS_PROFILE" --query Account --output text)
-    AWS_REGION="${AWS_REGION:-us-east-1}"
-    ECR_URL="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
-    ECR_REPO_URI="$ECR_URL/$ECR_REPO_NAME"
+    # Ensure ECR_REPO_URI is set (should already be set above, but double-check)
+    if [ -z "${ECR_REPO_URI:-}" ]; then
+        ECR_REPO_URI=$(build_ecr_repo_uri)
+        export ECR_REPO_URI
+    fi
     
     log_info "ECR Repository: $ECR_REPO_URI"
     log_info "Image Tag: $IMAGE_TAG"
