@@ -398,10 +398,12 @@ class QueryAgent:
                     )
 
                 logger.info("[SYNTHESIS] Calling LLM for final answer synthesis...")
+                # Increase max_tokens for synthesis to avoid truncation of complex answers
+                # 2000 tokens should be sufficient for most synthesis tasks
                 final_answer = claude_complete(
                     system_prompt=self.system_prompt,
                     user_message=synthesis_prompt,
-                    max_tokens=1000,
+                    max_tokens=2000,
                 )
 
                 logger.info("[SYNTHESIS] ===== FINAL ANSWER GENERATED =====")

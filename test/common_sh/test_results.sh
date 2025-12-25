@@ -51,7 +51,6 @@ initialize_log_file() {
         echo "Per-Test Timeout: ${timeout_seconds}s"
         echo ""
         echo "═══════════════════════════════════════════════════════════════════════════════"
-        echo ""
     } > "$LOG_FILE"
 }
 

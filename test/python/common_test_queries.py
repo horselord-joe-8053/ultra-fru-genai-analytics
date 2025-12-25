@@ -34,10 +34,12 @@ class QueryTestCase:
         name: str,
         query: str,
         validator: Callable[[Dict], None],
+        expected_answer: Optional[str] = None,
     ) -> None:
         self.name = name
         self.query = query
         self.validator = validator
+        self.expected_answer = expected_answer or "Answer should contain expected substring(s) as defined by validator"
 
 
 def _validate_has_answer_and_iterations(resp: Dict, label: str) -> str:
@@ -90,51 +92,61 @@ def get_test_queries() -> Dict[str, QueryTestCase]:
             name="Average feedback rating",
             query="What is the average feedback rating?",
             validator=_validate_avg_feedback_rating,
+            expected_answer="Answer should mention 'average' and include a numeric rating (e.g., around 6.62 out of 10)",
         ),
         "BRD": QueryTestCase(
             name="Brand with highest average rating",
             query="Which brand has the highest average customer rating, and what is that average?",
             validator=_validate_brand_highest_avg,
+            expected_answer="Answer should mention 'Samsung' as the brand with highest average rating around 9.0 out of 10",
         ),
         "CNT": QueryTestCase(
             name="Count negative feedbacks",
             query="How many negative feedbacks are there?",
             validator=_validate_count_negative,
+            expected_answer="Answer should mention '50' negative feedbacks",
         ),
         "PCT": QueryTestCase(
             name="Percentage positive feedback",
             query="What percentage of feedback is positive?",
             validator=_validate_percentage_positive,
+            expected_answer="Answer should mention around 50% positive feedback",
         ),
         "NOI": QueryTestCase(
             name="Negative feedback about noise",
             query="What do customers with negative feedback say about noise?",
             validator=_validate_noise_feedback,
+            expected_answer="Answer should mention 'noise' and include phrases like 'constant humming noise', 'freight train', or 'very annoying'",
         ),
         "R07": QueryTestCase(
             name="Count feedbacks rating above 7",
             query="How many feedbacks have a rating above 7?",
             validator=_validate_count_above_seven,
+            expected_answer="Answer should mention a count of feedbacks with rating above 7",
         ),
         "AVP": QueryTestCase(
             name="Average rating for positive feedbacks",
             query="What is the average rating for positive feedbacks?",
             validator=_validate_avg_positive,
+            expected_answer="Answer should mention the average rating for positive feedbacks (typically around 8-9 out of 10)",
         ),
         "TMP": QueryTestCase(
             name="Negative feedback about temperature control",
             query="What do customers with negative feedback say about temperature control?",
             validator=_validate_temperature_feedback,
+            expected_answer="Answer should mention 'temperature' and include phrases related to temperature control issues",
         ),
         "RDS": QueryTestCase(
             name="Rating distribution summary",
             query="Summarize how many feedbacks are Negative, Neutral, and Positive.",
             validator=_validate_rating_distribution,
+            expected_answer="Answer should summarize the distribution of Negative, Neutral, and Positive feedbacks",
         ),
         "TOP": QueryTestCase(
             name="Top 3 problems for low-rating feedbacks",
             query="For the low rating customer feedbacks, what are the top 3 problems?",
             validator=_validate_top3_low_rating_problems,
+            expected_answer="Answer should list the top 3 problems mentioned in low-rating customer feedbacks",
         ),
     }
 
@@ -207,7 +219,9 @@ def run_single_test(
             test_case.validator(resp)
         
         _print("Result: OK")
-        _print(f"Actual Answer: {actual_response}")
+        # ANSI codes: \033[1m = bold, \033[0m = reset
+        _print(f"- \033[1mExpected Answer:\033[0m {test_case.expected_answer}")
+        _print(f"- \033[1mActual Answer:\033[0m {actual_response}")
         return True
     except AssertionError as e:
         # Parse assertion error to extract Expected and Actual
@@ -229,21 +243,23 @@ def run_single_test(
                     actual_full = line.replace("ACTUAL_FULL: ", "").strip()
             
             if expected:
-                _print(f"Expected (substring): {expected}")
+                _print(f"- \033[1mExpected Answer:\033[0m {expected}")
             if actual_full:
-                _print(f"Actual (full answer): {actual_full}")
+                _print(f"- \033[1mActual Answer:\033[0m {actual_full}")
         else:
             # Fallback for other assertion errors
             _print(f"Error: {error_str}")
             if actual_response:
-                _print(f"Actual Answer: {actual_response}")
+                _print(f"- \033[1mExpected Answer:\033[0m {test_case.expected_answer}")
+                _print(f"- \033[1mActual Answer:\033[0m {actual_response}")
         
         _print("=" * 80)
         raise
     except Exception as e:
         _print(f"Result: FAILED - {e}")
         if actual_response:
-            _print(f"Actual Answer: {actual_response}")
+            _print(f"- \033[1mExpected Answer:\033[0m {test_case.expected_answer}")
+            _print(f"- \033[1mActual Answer:\033[0m {actual_response}")
         raise
 
 

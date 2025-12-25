@@ -110,6 +110,7 @@ run_test_suite() {
         local test_start=$(date +%s)
         
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting Test $test_num/$total_tests ($test_code)..." | tee -a "$LOG_FILE"
+        echo "═══════════════════════════════════════════════════════════════════════════════" >> "$LOG_FILE"
         
         # Run test with timeout
         run_single_test_with_timeout "$test_code" "$API_BASE_URL" "$LOG_FILE" "$PER_TEST_TIMEOUT_SECONDS" "$TIMEOUT_CMD"
@@ -128,7 +129,8 @@ run_test_suite() {
         case "$status" in
             PASS)
                 passed=$((passed + 1))
-                echo "[$(date '+%Y-%m-%d %H:%M:%S')] Test $test_num/$total_tests: PASSED (${test_duration}s)" | tee -a "$LOG_FILE"
+                # Green color for PASSED
+                echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] Test $test_num/$total_tests: \033[0;32mPASSED\033[0m (${test_duration}s)" | tee -a "$LOG_FILE"
                 ;;
             TIMEOUT)
                 timed_out=$((timed_out + 1))
@@ -136,7 +138,8 @@ run_test_suite() {
                 ;;
             FAIL)
                 failed=$((failed + 1))
-                echo "[$(date '+%Y-%m-%d %H:%M:%S')] Test $test_num/$total_tests: FAILED (${test_duration}s)" | tee -a "$LOG_FILE"
+                # Red color for FAILED
+                echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] Test $test_num/$total_tests: \033[0;31mFAILED\033[0m (${test_duration}s)" | tee -a "$LOG_FILE"
                 ;;
         esac
     done

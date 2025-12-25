@@ -50,7 +50,7 @@ def get_bedrock_client():
         raise ValueError(f"Failed to initialize Bedrock client: {e}")
 
 
-def claude_complete(system_prompt, user_message, model_id=None, max_tokens=800):
+def claude_complete(system_prompt, user_message, model_id=None, max_tokens=2000):
     """
     Call Claude via API (local dev) or Bedrock (AWS production).
     
@@ -163,21 +163,57 @@ def claude_complete(system_prompt, user_message, model_id=None, max_tokens=800):
         raise ValueError(f"Failed to call Bedrock: {e}")
 
     try:
-        resp_body = json.loads(response["body"].read())
+        # Read and decode the response body
+        response_body = response["body"].read()
+        if isinstance(response_body, bytes):
+            response_body = response_body.decode('utf-8')
+        resp_body = json.loads(response_body)
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse Bedrock response: {e}")
+        logger.error(f"Response body (first 500 chars): {response_body[:500] if 'response_body' in locals() else 'N/A'}")
         raise ValueError("Invalid response from Bedrock")
     except Exception as e:
         logger.error(f"Error reading Bedrock response: {e}")
         raise ValueError("Failed to read Bedrock response")
 
+    # Check for truncation (stop_reason indicates why generation stopped)
+    stop_reason = resp_body.get("stop_reason")
+    if stop_reason == "max_tokens":
+        logger.warning(
+            f"Bedrock response was truncated due to max_tokens limit ({max_tokens}). "
+            f"Consider increasing max_tokens for longer responses."
+        )
+    elif stop_reason:
+        logger.debug(f"Bedrock response stop_reason: {stop_reason}")
+
+    # Extract text from content blocks
     chunks = []
-    for block in resp_body.get("content", []):
-        if block.get("type") == "text":
-            chunks.append(block.get("text", ""))
+    content_blocks = resp_body.get("content", [])
     
-    if not chunks:
-        logger.warning("Empty response from Bedrock")
+    if not content_blocks:
+        logger.warning("Empty content blocks in Bedrock response")
+        logger.debug(f"Full response body: {json.dumps(resp_body, indent=2)}")
         return ""
     
-    return "".join(chunks)
+    for block in content_blocks:
+        block_type = block.get("type")
+        if block_type == "text":
+            text = block.get("text", "")
+            if text:
+                chunks.append(text)
+        else:
+            logger.debug(f"Skipping non-text block type: {block_type}")
+    
+    if not chunks:
+        logger.warning("No text content found in Bedrock response blocks")
+        logger.debug(f"Content blocks: {content_blocks}")
+        return ""
+    
+    # Join all text chunks
+    full_text = "".join(chunks)
+    
+    # Validate the response isn't obviously corrupted
+    if len(full_text.strip()) < 10:
+        logger.warning(f"Bedrock response is suspiciously short ({len(full_text)} chars): {full_text[:100]}")
+    
+    return full_text
