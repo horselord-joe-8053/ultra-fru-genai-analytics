@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
 #
-# Enhanced wrapper to run the 10-query API test suite with:
-# - Service status checks (for AWS)
-# - Per-test timeouts
-# - Result logging to timestamped directory
+# Test script for a single query: Top 3 problems for low-rating feedbacks
 #
 # Usage:
 #   From the repo root:
-#     ./test/test_query_10.sh --test-env aws
-#     ./test/test_query_10.sh --test-env local
+#     ./test/test_query_1.sh --test-env aws
+#     ./test/test_query_1.sh --test-env local
 #
 set -euo pipefail
 
 # ============================================================================
 # TEST CONFIGURATION
 # ============================================================================
-TEST_QUERY_PREFIX="query_10"
-TEST_CODES=("AVG" "BRD" "CNT" "PCT" "NOI" "R07" "AVP" "TMP" "RDS" "TOP")
+TEST_QUERY_PREFIX="query_1"
+# TEST_CODES=("TOP")
+TEST_CODES=("AVG")
 
 # ============================================================================
 # SETUP

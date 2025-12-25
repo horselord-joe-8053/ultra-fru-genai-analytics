@@ -15,6 +15,65 @@ import urllib.request
 from typing import Any, Dict, Optional, Tuple
 
 
+class UnifiedLogger:
+    """Centralized logger for test output.
+    
+    This logger ensures all output goes through a single mechanism,
+    preventing duplicates and ordering issues.
+    
+    When log_file is provided:
+    - All output writes directly to file (no stdout)
+    - Prevents duplicates when shell script redirects stdout to log file
+    
+    When log_file is NOT provided:
+    - All output goes to stdout (normal Python behavior)
+    """
+    
+    def __init__(self, log_file: Optional[str] = None):
+        """Initialize logger.
+        
+        Args:
+            log_file: Optional path to log file. If provided, all output
+                     will be written directly to this file. If not provided,
+                     output goes to stdout.
+        """
+        self.log_file = log_file
+    
+    def write(self, msg: str = "") -> None:
+        """Write a message using the unified mechanism.
+        
+        Strategy:
+        - If log_file: write directly to file (immediate, no buffering)
+        - If no log_file: print to stdout (normal Python behavior)
+        
+        This ensures:
+        1. No duplicates (only one write path)
+        2. Consistent ordering (all writes sequential)
+        3. No buffering issues (direct file writes are immediate)
+        """
+        if self.log_file:
+            # Direct file write (immediate, no buffering)
+            # DO NOT print to stdout - shell script redirects it, causing duplicates
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(msg + "\n")
+        else:
+            # Normal stdout output
+            print(msg)
+    
+    def header(self, title: str) -> None:
+        """Print a section header (80-char separator + title)."""
+        self.write("=" * 80)
+        self.write(title)
+        self.write("=" * 80)
+    
+    def subheader(self, title: str) -> None:
+        """Print a subsection header (80-char dash separator + title)."""
+        self.write("")
+        self.write("-" * 80)
+        self.write(title)
+        self.write("-" * 80)
+
+
 def get_api_base_url(explicit: Optional[str] = None) -> str:
     """
     Return the base URL for the backend API.
@@ -141,18 +200,40 @@ def assert_contains(text: str, expected_substring: str, label: str) -> None:
         raise AssertionError(error_msg)
 
 
-def print_header(title: str) -> None:
-    """Pretty-print a section header for CLI output."""
-    print("=" * 80)
-    print(title)
-    print("=" * 80)
+def print_header(title: str, log_file: Optional[str] = None) -> None:
+    """Pretty-print a section header for CLI output.
+    
+    Args:
+        title: Header text
+        log_file: Optional log file path. If provided, uses UnifiedLogger
+                 for consistent output. If not provided, uses stdout (backward compatible).
+    """
+    if log_file:
+        logger = UnifiedLogger(log_file)
+        logger.header(title)
+    else:
+        # Original behavior for backward compatibility
+        print("=" * 80)
+        print(title)
+        print("=" * 80)
 
 
-def print_subheader(title: str) -> None:
-    """Pretty-print a subsection header for CLI output."""
-    print("\n" + "-" * 80)
-    print(title)
-    print("-" * 80)
+def print_subheader(title: str, log_file: Optional[str] = None) -> None:
+    """Pretty-print a subsection header for CLI output.
+    
+    Args:
+        title: Subheader text
+        log_file: Optional log file path. If provided, uses UnifiedLogger
+                 for consistent output. If not provided, uses stdout (backward compatible).
+    """
+    if log_file:
+        logger = UnifiedLogger(log_file)
+        logger.subheader(title)
+    else:
+        # Original behavior for backward compatibility
+        print("\n" + "-" * 80)
+        print(title)
+        print("-" * 80)
 
 
 def main_cli_entry(test_func) -> None:
