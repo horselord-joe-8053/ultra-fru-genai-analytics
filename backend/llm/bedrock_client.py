@@ -86,7 +86,22 @@ def claude_complete(system_prompt, user_message, model_id=None, max_tokens=2000)
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_message}]
             )
-            return response.content[0].text
+            # Extract token usage from Claude API response
+            input_tokens = getattr(response, 'usage', {}).input_tokens if hasattr(response, 'usage') else 0
+            output_tokens = getattr(response, 'usage', {}).output_tokens if hasattr(response, 'usage') else 0
+            total_tokens = input_tokens + output_tokens
+            
+            if total_tokens > 0:
+                logger.debug(f"Token usage (Claude API): input={input_tokens}, output={output_tokens}, total={total_tokens}")
+            
+            return {
+                "text": response.content[0].text,
+                "tokens": {
+                    "input": input_tokens,
+                    "output": output_tokens,
+                    "total": total_tokens
+                }
+            }
         except Exception as e:
             logger.error(f"Claude API error: {e}")
             raise ValueError(f"Claude API error: {e}")
@@ -186,6 +201,17 @@ def claude_complete(system_prompt, user_message, model_id=None, max_tokens=2000)
     elif stop_reason:
         logger.debug(f"Bedrock response stop_reason: {stop_reason}")
 
+    # Extract token usage from response (if available)
+    usage = resp_body.get("usage", {})
+    input_tokens = usage.get("input_tokens", 0)
+    output_tokens = usage.get("output_tokens", 0)
+    total_tokens = input_tokens + output_tokens
+    
+    if total_tokens > 0:
+        logger.debug(f"Token usage: input={input_tokens}, output={output_tokens}, total={total_tokens}")
+    else:
+        logger.debug("Token usage not available in Bedrock response")
+
     # Extract text from content blocks
     chunks = []
     content_blocks = resp_body.get("content", [])
@@ -193,7 +219,7 @@ def claude_complete(system_prompt, user_message, model_id=None, max_tokens=2000)
     if not content_blocks:
         logger.warning("Empty content blocks in Bedrock response")
         logger.debug(f"Full response body: {json.dumps(resp_body, indent=2)}")
-        return ""
+        return {"text": "", "tokens": {"input": 0, "output": 0, "total": 0}}
     
     for block in content_blocks:
         block_type = block.get("type")
@@ -207,7 +233,7 @@ def claude_complete(system_prompt, user_message, model_id=None, max_tokens=2000)
     if not chunks:
         logger.warning("No text content found in Bedrock response blocks")
         logger.debug(f"Content blocks: {content_blocks}")
-        return ""
+        return {"text": "", "tokens": {"input": input_tokens, "output": output_tokens, "total": total_tokens}}
     
     # Join all text chunks
     full_text = "".join(chunks)
@@ -216,4 +242,12 @@ def claude_complete(system_prompt, user_message, model_id=None, max_tokens=2000)
     if len(full_text.strip()) < 10:
         logger.warning(f"Bedrock response is suspiciously short ({len(full_text)} chars): {full_text[:100]}")
     
-    return full_text
+    # Return both text and token usage
+    return {
+        "text": full_text,
+        "tokens": {
+            "input": input_tokens,
+            "output": output_tokens,
+            "total": total_tokens
+        }
+    }

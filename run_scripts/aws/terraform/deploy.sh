@@ -497,8 +497,18 @@ deploy_terragrunt() {
         exit 1
     fi
     
+    # Preserve CONTAINER_IMAGE if it was exported by parent script (run.sh)
+    # This ensures the git SHA tag from run.sh is not overridden by .env file
+    PRESERVED_CONTAINER_IMAGE="${CONTAINER_IMAGE:-}"
+    
     # Load environment variables (needed for bootstrap script)
     load_env_file
+    
+    # Restore CONTAINER_IMAGE if it was set before loading .env
+    # This ensures run.sh's exported CONTAINER_IMAGE (with git SHA tag) takes precedence
+    if [ -n "$PRESERVED_CONTAINER_IMAGE" ]; then
+        export CONTAINER_IMAGE="$PRESERVED_CONTAINER_IMAGE"
+    fi
     
     # Setup Terraform state bucket (if needed)
     log_step "Ensuring Terraform state bucket exists"
@@ -559,6 +569,8 @@ deploy_terragrunt() {
         else
             export CONTAINER_IMAGE
             log_info "Using container image: $CONTAINER_IMAGE"
+            log_info "Note: If this image URI changed from previous deployment, Terraform will detect the diff"
+            log_info "      and create a new task definition, triggering ECS to deploy the new image"
         fi
         
         cd "$ENV_DIR/application"
@@ -575,12 +587,15 @@ deploy_terragrunt() {
             log_info "[DRY-RUN] Plan output shown above. No changes will be made."
         else
             log_info "Applying Terragrunt configuration for application layer..."
+            log_info "This will update the ECS task definition if the image URI changed"
             if ! run_with_lock_retry "apply (application)" terragrunt apply -auto-approve -lock-timeout=30s; then
                 log_error "Terraform apply failed for application layer"
                 log_info "Check the apply output above for errors"
                 exit 1
             fi
             log_success "Application layer deployed successfully!"
+            log_info "ECS service should now be deploying tasks with the new image"
+            log_info "Use 'aws ecs describe-services' to verify deployment status"
         fi
     fi
     

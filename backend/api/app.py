@@ -529,7 +529,8 @@ def query():
                     "sample_records": [],  # Agent doesn't return sample records
                     "iterations": result.get("iterations", 0),
                     "execution_time_ms": result.get("execution_time_ms", 0),
-                    "request_id": request_id
+                    "request_id": request_id,
+                    "token_usage": result.get("token_usage", {})  # Include token usage
                 }
                 
                 # Add debug info if available
@@ -606,7 +607,18 @@ def query():
         
         # 3) Call Claude via Bedrock
         try:
-            answer_text = claude_complete(system_prompt, user_payload)
+            answer_result = claude_complete(system_prompt, user_payload)
+            
+            # Handle both dict (new format) and str (backward compatibility)
+            if isinstance(answer_result, dict):
+                answer_text = answer_result.get("text", "")
+                tokens = answer_result.get("tokens", {})
+                if tokens.get("total", 0) > 0:
+                    app.logger.info(f"[{request_id}] Token usage: input={tokens.get('input', 0)}, output={tokens.get('output', 0)}, total={tokens.get('total', 0)}")
+            else:
+                answer_text = answer_result
+                tokens = {}
+            
             app.logger.info(f"[{request_id}] Claude response received ({len(answer_text)} chars)")
         except ValueError as e:
             app.logger.error(f"[{request_id}] Bedrock error: {e}")
@@ -621,7 +633,12 @@ def query():
             "stats": stats,
             "sample_records": rows[:5],
             "answer": answer_text,
-            "request_id": request_id
+            "request_id": request_id,
+            "token_usage": {
+                "input_tokens": tokens.get("input", 0),
+                "output_tokens": tokens.get("output", 0),
+                "total_tokens": tokens.get("total", 0)
+            } if tokens else {}
         }
         
         app.logger.info(f"[{request_id}] Query completed successfully")

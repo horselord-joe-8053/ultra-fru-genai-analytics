@@ -144,11 +144,21 @@ LIMIT 1;
             
             # Call Claude
             logger.info(f"[SQLGeneratorTool] Calling LLM to generate SQL...")
-            response = claude_complete(
+            response_result = claude_complete(
                 system_prompt=system_prompt,
                 user_message=user_message,
                 max_tokens=500
             )
+            
+            # Handle both dict (new format) and str (backward compatibility)
+            if isinstance(response_result, dict):
+                response = response_result.get("text", "")
+                tokens = response_result.get("tokens", {})
+                if tokens.get("total", 0) > 0:
+                    logger.debug(f"[SQLGeneratorTool] Token usage: input={tokens.get('input', 0)}, output={tokens.get('output', 0)}, total={tokens.get('total', 0)}")
+            else:
+                response = response_result
+                tokens = {}
             
             logger.info(f"[SQLGeneratorTool] LLM response received: {len(response)} chars")
             logger.info(f"[SQLGeneratorTool] LLM response (full): {response}")

@@ -65,6 +65,31 @@ extract_test_name() {
     grep -m1 "^Test $test_code:" "$log_file" 2>/dev/null | sed "s/^Test $test_code: //" || echo "Test $test_code"
 }
 
+# Extract token usage from log
+# Parameters:
+#   $1: Test code
+#   $2: Log file path
+# Returns: Token usage (via global variables TOKEN_INPUT, TOKEN_OUTPUT, TOKEN_TOTAL)
+extract_token_usage() {
+    local test_code="$1"
+    local log_file="$2"
+    
+    # Find the section for this specific test (by code)
+    local test_section
+    test_section=$(awk "/^Test $test_code:/{flag=1} flag && /^Test [A-Z0-9]*:/ && !/^Test $test_code:/{flag=0} flag" "$log_file")
+    
+    if [ -n "$test_section" ]; then
+        # Extract token usage from the log
+        TOKEN_INPUT=$(echo "$test_section" | grep -m1 "Input tokens:" | sed 's/Input tokens: //' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "0")
+        TOKEN_OUTPUT=$(echo "$test_section" | grep -m1 "Output tokens:" | sed 's/Output tokens: //' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "0")
+        TOKEN_TOTAL=$(echo "$test_section" | grep -m1 "Total tokens:" | sed 's/Total tokens: //' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "0")
+    else
+        TOKEN_INPUT="0"
+        TOKEN_OUTPUT="0"
+        TOKEN_TOTAL="0"
+    fi
+}
+
 # Extract failure details from log
 # Parameters:
 #   $1: Test code
@@ -115,8 +140,19 @@ process_test_result() {
     local test_name
     test_name=$(extract_test_name "$test_code" "$LOG_FILE")
     
+    # Extract token usage
+    extract_token_usage "$test_code" "$LOG_FILE"
+    local token_note=""
+    if [ -n "$TOKEN_TOTAL" ] && [ "$TOKEN_TOTAL" != "0" ]; then
+        token_note="Tokens: ${TOKEN_TOTAL} (${TOKEN_INPUT} in, ${TOKEN_OUTPUT} out)"
+    fi
+    
     if [ "$exit_code" -eq 0 ]; then
-        echo "| $test_num | $test_name | ✅ PASS | ${test_duration}s | - |" >> "$SUMMARY_FILE"
+        if [ -n "$token_note" ]; then
+            echo "| $test_num | $test_name | ✅ PASS | ${test_duration}s | $token_note |" >> "$SUMMARY_FILE"
+        else
+            echo "| $test_num | $test_name | ✅ PASS | ${test_duration}s | - |" >> "$SUMMARY_FILE"
+        fi
         echo "PASS"
     elif [ "$exit_code" -eq 124 ]; then
         # Timeout
@@ -176,6 +212,26 @@ finalize_summary_file() {
         } >> "$SUMMARY_FILE"
     fi
     
+    # Calculate total token usage across all tests
+    local total_input_tokens=0
+    local total_output_tokens=0
+    local total_tokens=0
+    
+    # Extract token usage from log file for all tests
+    if [ -f "$LOG_FILE" ]; then
+        while IFS= read -r line; do
+            if [[ "$line" =~ Input\ tokens:\ ([0-9]+) ]]; then
+                total_input_tokens=$((total_input_tokens + BASH_REMATCH[1]))
+            fi
+            if [[ "$line" =~ Output\ tokens:\ ([0-9]+) ]]; then
+                total_output_tokens=$((total_output_tokens + BASH_REMATCH[1]))
+            fi
+            if [[ "$line" =~ Total\ tokens:\ ([0-9]+) ]]; then
+                total_tokens=$((total_tokens + BASH_REMATCH[1]))
+            fi
+        done < "$LOG_FILE"
+    fi
+    
     # Finalize summary
     {
         echo ""
@@ -186,6 +242,18 @@ finalize_summary_file() {
         echo "- **❌ Failed:** $failed"
         echo "- **⏱️ Timed Out:** $timed_out"
         echo ""
+        if [ "$total_tokens" -gt 0 ]; then
+            echo "## Token Usage"
+            echo ""
+            echo "- **Total Input Tokens:** $total_input_tokens"
+            echo "- **Total Output Tokens:** $total_output_tokens"
+            echo "- **Total Tokens:** $total_tokens"
+            if [ "$total_tests" -gt 0 ]; then
+                local avg_tokens=$((total_tokens / total_tests))
+                echo "- **Average Tokens per Test:** $avg_tokens"
+            fi
+            echo ""
+        fi
         echo "**Overall Status:** $([ $failed -eq 0 ] && [ $timed_out -eq 0 ] && echo '✅ ALL PASSED' || echo '⚠️ SOME FAILURES')"
         echo ""
         echo "---"

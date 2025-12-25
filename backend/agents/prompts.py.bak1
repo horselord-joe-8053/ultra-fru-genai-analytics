@@ -195,15 +195,9 @@ def get_synthesis_prompt(
 
     sections.append("")
     sections.append("Instructions for answering:")
-    sections.append("- Answer the question directly using ONLY the data from the 'Rows' above.")
-    sections.append("- Be concise and factual. Do NOT add implications, suggestions, or business recommendations.")
-    sections.append("- Do NOT include phrases like 'This suggests...', 'This indicates...', 'Companies might want to...', etc.")
-    sections.append("- Focus on answering WHAT the data shows, not WHY it matters or what should be done about it.")
+    sections.append("- Base your answer ONLY on the concrete data in the 'Rows' above.")
     
     if primary_sql_result:
-        sections.append(
-            "- State the numeric result or answer directly from the rows."
-        )
         sections.append(
             "- Do NOT invent new store names or numeric values that are not present in those rows."
         )
@@ -215,23 +209,26 @@ def get_synthesis_prompt(
             "- Use the actual customer_feedback text from the rows to answer the question."
         )
         sections.append(
-            "- Identify COMMON THEMES and PATTERNS across all feedback entries."
+            "- Identify COMMON THEMES and PATTERNS across all feedback entries (even if you only see a sample)."
         )
         sections.append(
             "- Group similar complaints or feedback into themes (e.g., 'noise issues', 'temperature problems')."
         )
         sections.append(
-            "- Quote or paraphrase specific examples from the rows shown."
+            "- Quote or paraphrase specific examples from the rows shown, but also summarize the overall patterns."
         )
         sections.append(
-            "- If row_count is large (e.g., 50), mention the count but focus on the themes, not implications."
+            "- If you see multiple similar complaints, mention that this is a recurring theme."
+        )
+        sections.append(
+            "- If row_count is large (e.g., 50), your answer should reflect that this represents a significant pattern, not just isolated cases."
         )
     
     sections.append(
         "- If there are no rows, explicitly say you cannot answer from the available data and do NOT fabricate any information."
     )
     sections.append(
-        "- Keep your answer focused and brief. Answer the question, nothing more."
+        "- Provide a clear, concise explanation and any insights you can derive from the rows."
     )
 
     return "\n".join(sections)

@@ -219,9 +219,25 @@ def run_single_test(
             test_case.validator(resp)
         
         _print("Result: OK")
-        # ANSI codes: \033[1m = bold, \033[0m = reset
-        _print(f"- \033[1mExpected Answer:\033[0m {test_case.expected_answer}")
-        _print(f"- \033[1mActual Answer:\033[0m {actual_response}")
+        # Format with separator lines instead of bold
+        _print("----- Expected Answer: ----")
+        _print(test_case.expected_answer)
+        _print("----- Actual Answer: -------")
+        _print(actual_response)
+        
+        # Log token usage if available
+        token_usage = resp.get("token_usage", {})
+        if token_usage:
+            input_tokens = token_usage.get("input_tokens", 0)
+            output_tokens = token_usage.get("output_tokens", 0)
+            total_tokens = token_usage.get("total_tokens", 0)
+            if total_tokens > 0:
+                _print("----- Token Usage: -------")
+                _print(f"Input tokens: {input_tokens}")
+                _print(f"Output tokens: {output_tokens}")
+                _print(f"Total tokens: {total_tokens}")
+        
+        _print("----------------------------")
         return True
     except AssertionError as e:
         # Parse assertion error to extract Expected and Actual
@@ -243,23 +259,32 @@ def run_single_test(
                     actual_full = line.replace("ACTUAL_FULL: ", "").strip()
             
             if expected:
-                _print(f"- \033[1mExpected Answer:\033[0m {expected}")
+                _print("----- Expected Answer: ----")
+                _print(expected)
             if actual_full:
-                _print(f"- \033[1mActual Answer:\033[0m {actual_full}")
+                _print("----- Actual Answer: -------")
+                _print(actual_full)
+                _print("----------------------------")
         else:
             # Fallback for other assertion errors
             _print(f"Error: {error_str}")
             if actual_response:
-                _print(f"- \033[1mExpected Answer:\033[0m {test_case.expected_answer}")
-                _print(f"- \033[1mActual Answer:\033[0m {actual_response}")
+                _print("----- Expected Answer: ----")
+                _print(test_case.expected_answer)
+                _print("----- Actual Answer: -------")
+                _print(actual_response)
+                _print("----------------------------")
         
         _print("=" * 80)
         raise
     except Exception as e:
         _print(f"Result: FAILED - {e}")
         if actual_response:
-            _print(f"- \033[1mExpected Answer:\033[0m {test_case.expected_answer}")
-            _print(f"- \033[1mActual Answer:\033[0m {actual_response}")
+            _print("----- Expected Answer: ----")
+            _print(test_case.expected_answer)
+            _print("----- Actual Answer: -------")
+            _print(actual_response)
+            _print("----------------------------")
         raise
 
 

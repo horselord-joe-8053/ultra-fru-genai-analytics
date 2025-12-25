@@ -162,11 +162,21 @@ class QueryAgent:
                 logger.info(f"Previous tool results: {len(tool_results)} result(s)")
                 
                 planning_prompt = get_planning_prompt(question, [], tool_results)
-                agent_response = claude_complete(
+                planning_result = claude_complete(
                     system_prompt=self.system_prompt,
                     user_message=planning_prompt,
                     max_tokens=500
                 )
+                
+                # Handle both dict (new format) and str (backward compatibility)
+                if isinstance(planning_result, dict):
+                    agent_response = planning_result.get("text", "")
+                    tokens = planning_result.get("tokens", {})
+                    if tokens.get("total", 0) > 0:
+                        logger.debug(f"Planning tokens: input={tokens.get('input', 0)}, output={tokens.get('output', 0)}, total={tokens.get('total', 0)}")
+                else:
+                    agent_response = planning_result
+                    tokens = {}
                 
                 logger.log_thought(agent_response)
                 logger.info(f"Agent response (planning): {agent_response[:200]}...")
@@ -400,11 +410,19 @@ class QueryAgent:
                 logger.info("[SYNTHESIS] Calling LLM for final answer synthesis...")
                 # Increase max_tokens for synthesis to avoid truncation of complex answers
                 # 2000 tokens should be sufficient for most synthesis tasks
-                final_answer = claude_complete(
+                synthesis_result = claude_complete(
                     system_prompt=self.system_prompt,
                     user_message=synthesis_prompt,
                     max_tokens=2000,
                 )
+                
+                # Handle both dict (new format) and str (backward compatibility)
+                if isinstance(synthesis_result, dict):
+                    final_answer = synthesis_result.get("text", "")
+                    synthesis_tokens = synthesis_result.get("tokens", {})
+                else:
+                    final_answer = synthesis_result
+                    synthesis_tokens = {}
 
                 logger.info("[SYNTHESIS] ===== FINAL ANSWER GENERATED =====")
                 logger.info(f"[SYNTHESIS] Final answer length: {len(final_answer)} chars")
@@ -425,12 +443,15 @@ class QueryAgent:
             
             execution_time = (time.time() - start_time) * 1000
             
-            # Record metrics
+            # Record metrics (include token usage from synthesis)
             agent_metrics.record_query(
                 query_type="agentic",
                 latency_ms=execution_time,
                 iterations=iteration,
-                success=True
+                success=True,
+                input_tokens=synthesis_tokens.get("input", 0),
+                output_tokens=synthesis_tokens.get("output", 0),
+                total_tokens=synthesis_tokens.get("total", 0)
             )
             
             logger.end_query(success=True, answer=final_answer)
@@ -441,7 +462,12 @@ class QueryAgent:
                 "iterations": iteration,
                 "tool_calls": logger.tool_calls,
                 "execution_time_ms": execution_time,
-                "debug_info": logger.get_debug_info()
+                "debug_info": logger.get_debug_info(),
+                "token_usage": {
+                    "input_tokens": synthesis_tokens.get("input", 0),
+                    "output_tokens": synthesis_tokens.get("output", 0),
+                    "total_tokens": synthesis_tokens.get("total", 0)
+                }
             }
         
         except Exception as e:

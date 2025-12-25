@@ -37,10 +37,21 @@ check_ecs_service_status() {
         running_count=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].runningCount" --output text 2>/dev/null || echo "0")
         desired_count=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].desiredCount" --output text 2>/dev/null || echo "0")
         
+        # Check deployment status to verify new image is being deployed
+        local primary_deployment running_deployment
+        primary_deployment=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].deployments[?status=='PRIMARY'].runningCount | [0]" --output text 2>/dev/null || echo "0")
+        running_deployment=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].deployments[?status=='PRIMARY'].desiredCount | [0]" --output text 2>/dev/null || echo "0")
+        
         if [ "$running_count" = "$desired_count" ] && [ "$running_count" -gt 0 ]; then
             log_success "ECS service is running ($running_count/$desired_count tasks)"
+            if [ "$primary_deployment" = "$running_deployment" ] && [ "$primary_deployment" -gt 0 ]; then
+                log_success "Primary deployment is stable ($primary_deployment/$running_deployment tasks)"
+            else
+                log_info "Primary deployment: $primary_deployment/$running_deployment tasks (may still be rolling out)"
+            fi
         else
             log_warning "ECS service may still be starting ($running_count/$desired_count tasks)"
+            log_info "Primary deployment: $primary_deployment/$running_deployment tasks"
         fi
     else
         log_info "No ECS services found in cluster: $cluster_name"

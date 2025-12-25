@@ -13,9 +13,10 @@ BUILD_SCRIPT_DIR="$SCRIPT_DIR"
 source "$SCRIPT_DIR/../../common/load-env.sh"
 # Restore our SCRIPT_DIR
 SCRIPT_DIR="$BUILD_SCRIPT_DIR"
+# Source git helpers for image tag generation
+source "$SCRIPT_DIR/../../common/git_helpers.sh"
 
 ECR_REPO_NAME="fru-api"
-IMAGE_TAG="${IMAGE_TAG:-latest}"
 
 # Check for dry-run mode (from parent script)
 DRY_RUN="${DRY_RUN:-false}"
@@ -23,6 +24,22 @@ DRY_RUN="${DRY_RUN:-false}"
 # Check for force rebuild flag
 # Set FORCE_REBUILD=true to rebuild even if image exists
 FORCE_REBUILD="${FORCE_REBUILD:-false}"
+
+# Generate image tag if not explicitly provided
+# Purpose: Ensure unique tags per code change so Terraform detects updates
+# Strategy: Use git commit SHA for automatic, unique, traceable tags
+#          Detects uncommitted changes and includes working tree hash when dirty
+if [ -z "${IMAGE_TAG:-}" ]; then
+    # Auto-generate tag using shared function (detects uncommitted changes)
+    IMAGE_TAG=$(generate_image_tag)
+    log_info "Auto-generated image tag: $IMAGE_TAG"
+else
+    # Use explicitly provided tag (allows manual override)
+    log_info "Using provided image tag: $IMAGE_TAG"
+fi
+
+# Export IMAGE_TAG so parent scripts can use it
+export IMAGE_TAG
 
 build_and_push_ecr() {
     log_step "Building and pushing Docker image to ECR"
@@ -45,6 +62,7 @@ build_and_push_ecr() {
     
     log_info "ECR Repository: $ECR_REPO_URI"
     log_info "Image Tag: $IMAGE_TAG"
+    log_info "Full Image URI: $ECR_REPO_URI:$IMAGE_TAG"
     
     # Check if ECR repository exists
     local repo_exists=false
@@ -55,12 +73,15 @@ build_and_push_ecr() {
         log_info "ECR repository does not exist"
     fi
     
-    # Check if image exists
+    # Check if image exists (by tag)
+    # Note: We check by tag, not by content, so code changes with same tag won't be detected
+    # This is why we use git SHA tags - each commit gets a unique tag
     local image_exists=false
     if [ "$repo_exists" = true ]; then
         if aws ecr describe-images --profile "$AWS_PROFILE" --repository-name "$ECR_REPO_NAME" --image-ids imageTag="$IMAGE_TAG" --region "$AWS_REGION" >/dev/null 2>&1; then
             image_exists=true
             log_info "Container image already exists: $ECR_REPO_URI:$IMAGE_TAG"
+            log_info "Note: If code changed but tag is the same, set FORCE_REBUILD=true to rebuild"
         fi
     fi
     
@@ -152,8 +173,15 @@ build_and_push_ecr() {
     log_info "Pushing image to ECR..."
     docker push "$ECR_REPO_URI:$IMAGE_TAG"
     
+    # Also tag as 'latest' for convenience (Terraform will use the git SHA tag)
+    # This allows manual operations to use 'latest' while Terraform uses specific version
+    log_info "Tagging as 'latest' for convenience..."
+    docker tag "$ECR_REPO_URI:$IMAGE_TAG" "$ECR_REPO_URI:latest"
+    docker push "$ECR_REPO_URI:latest" || log_warning "Failed to push 'latest' tag (non-critical)"
+    
     log_success "Image pushed successfully: $ECR_REPO_URI:$IMAGE_TAG"
-    log_info "Use this image URI in your ECS task definition"
+    log_info "Image URI for Terraform: $ECR_REPO_URI:$IMAGE_TAG"
+    log_info "Note: Terraform will use the git SHA tag to detect changes automatically"
 }
 
 main() {
