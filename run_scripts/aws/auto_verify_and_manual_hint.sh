@@ -1,7 +1,7 @@
 #!/bin/bash
 # Auto-verify deployment and show manual test hints
 # Replaces: post_run_verify.sh + manual_test_hint.sh
-# Usage: ./auto_verify_and_manual_hint.sh <deployment-type> <environment> [api_url] [frontend_url] [dry-run]
+# Usage: ./auto_verify_and_manual_hint.sh <deployment-type> <environment> [dry-run]
 
 set -e
 
@@ -17,12 +17,10 @@ load_env_file || log_warning "Could not load .env"
 # Get parameters
 DEPLOYMENT_TYPE="${1:-ecs-full}"
 ENVIRONMENT="${2:-dev}"
-API_URL="${3:-}"
-FRONTEND_URL="${4:-}"
-DRY_RUN="${5:-false}"
+DRY_RUN="${3:-false}"
 
 # Export for child scripts
-export DEPLOYMENT_TYPE ENVIRONMENT API_URL FRONTEND_URL DRY_RUN REPO_ROOT
+export DEPLOYMENT_TYPE ENVIRONMENT DRY_RUN REPO_ROOT
 
 echo ""
 log_step "═══════════════════════════════════════════════════════════════════════════════"
@@ -32,7 +30,7 @@ echo ""
 
 # Step 1: Fetch deployment information
 log_step "Step 1/4: Fetching deployment information from Terraform..."
-source "$VERIFICATION_DIR/fetch-deployment-info.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "$API_URL" "$FRONTEND_URL" "$DRY_RUN"
+source "$VERIFICATION_DIR/fetch-deployment-info.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "$DRY_RUN"
 
 # Step 2: Quick service status checks (lightweight, no retry)
 if [ "$DRY_RUN" != "true" ]; then

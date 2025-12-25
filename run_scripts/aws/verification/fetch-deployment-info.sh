@@ -1,14 +1,12 @@
 #!/bin/bash
 # Fetch deployment information from Terraform outputs
 # Exports: ALB_DNS, CLOUDFRONT_DOMAIN, ECS_*, EKS_*, API_URL, FRONTEND_URL
-# Usage: source fetch-deployment-info.sh <deployment-type> <environment> [api_url] [frontend_url] [dry-run]
+# Usage: source fetch-deployment-info.sh <deployment-type> <environment> [dry-run]
 
 # Get parameters
 DEPLOYMENT_TYPE="${1:-${DEPLOYMENT_TYPE:-ecs-full}}"
 ENVIRONMENT="${2:-${ENVIRONMENT:-dev}}"
-API_URL="${3:-${API_URL:-}}"
-FRONTEND_URL="${4:-${FRONTEND_URL:-}}"
-DRY_RUN="${5:-${DRY_RUN:-false}}"
+DRY_RUN="${3:-${DRY_RUN:-false}}"
 
 # Helper function to check if command exists
 command_exists() {
@@ -63,12 +61,73 @@ fetch_terraform_outputs() {
                 ECS_CLUSTER_NAME=$(echo "$ECS_CLUSTER_ID" | awk -F'/' '{print $NF}' || echo "")
             fi
             
-            # Set API_URL and FRONTEND_URL if not already set
-            if [ -z "$API_URL" ] && [ -n "$ALB_DNS" ]; then
+            # Set API_URL and FRONTEND_URL from discovered values
+            if [ -n "$ALB_DNS" ]; then
                 API_URL="http://$ALB_DNS"
             fi
-            if [ -z "$FRONTEND_URL" ] && [ -n "$CLOUDFRONT_DOMAIN" ]; then
+            if [ -n "$CLOUDFRONT_DOMAIN" ]; then
                 FRONTEND_URL="https://$CLOUDFRONT_DOMAIN"
+            fi
+        fi
+
+        # Fallback: if Terragrunt outputs are unavailable, try AWS CLI to infer ALB DNS
+        if [ -z "$ALB_DNS" ] && command_exists aws; then
+            log_info "Attempting to discover ECS cluster/service and ALB DNS via AWS CLI (fallback)..."
+
+            # Find an ECS cluster whose ARN contains the environment name
+            # Use same pattern as check-service-status.sh: let AWS CLI use defaults for region/profile
+            ECS_CLUSTER_ID=$(aws ecs list-clusters \
+                --query "clusterArns[?contains(@, '$ENVIRONMENT')]" \
+                --output text 2>/dev/null | head -1 || echo "")
+
+            if [ -n "$ECS_CLUSTER_ID" ] && [ "$ECS_CLUSTER_ID" != "None" ]; then
+                ECS_CLUSTER_NAME=$(echo "$ECS_CLUSTER_ID" | awk -F'/' '{print $NF}' || echo "")
+                log_info "Discovered ECS cluster via AWS CLI: $ECS_CLUSTER_NAME"
+
+                # Find first service in that cluster
+                local service_arn
+                service_arn=$(aws ecs list-services \
+                    --cluster "$ECS_CLUSTER_ID" \
+                    --query "serviceArns[0]" \
+                    --output text 2>/dev/null || echo "")
+
+                if [ -n "$service_arn" ] && [ "$service_arn" != "None" ]; then
+                    ECS_SERVICE_NAME=$(echo "$service_arn" | awk -F'/' '{print $NF}' || echo "")
+                    log_info "Discovered ECS service via AWS CLI: $ECS_SERVICE_NAME"
+
+                    # From the ECS service, get target group ARN
+                    local target_group_arn
+                    target_group_arn=$(aws ecs describe-services \
+                        --cluster "$ECS_CLUSTER_ID" \
+                        --services "$ECS_SERVICE_NAME" \
+                        --query "services[0].loadBalancers[0].targetGroupArn" \
+                        --output text 2>/dev/null || echo "")
+
+                    if [ -n "$target_group_arn" ] && [ "$target_group_arn" != "None" ]; then
+                        # From target group, get load balancer ARN
+                        local lb_arn
+                        lb_arn=$(aws elbv2 describe-target-groups \
+                            --target-group-arns "$target_group_arn" \
+                            --query "TargetGroups[0].LoadBalancerArns[0]" \
+                            --output text 2>/dev/null || echo "")
+
+                        if [ -n "$lb_arn" ] && [ "$lb_arn" != "None" ]; then
+                            ALB_DNS=$(aws elbv2 describe-load-balancers \
+                                --load-balancer-arns "$lb_arn" \
+                                --query "LoadBalancers[0].DNSName" \
+                                --output text 2>/dev/null || echo "")
+
+                            if [ -n "$ALB_DNS" ] && [ "$ALB_DNS" != "None" ]; then
+                                log_info "Discovered ALB DNS via AWS CLI fallback: $ALB_DNS"
+                                API_URL="http://$ALB_DNS"
+                            else
+                                log_warning "AWS CLI fallback could not determine ALB DNS."
+                            fi
+                        fi
+                    fi
+                fi
+            else
+                log_warning "AWS CLI fallback could not find an ECS cluster for environment '$ENVIRONMENT'."
             fi
         fi
     fi

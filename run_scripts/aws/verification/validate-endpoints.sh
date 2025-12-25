@@ -434,10 +434,12 @@ validate_urls() {
 
 # Main execution (if run standalone)
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    # Determine script directory (always set it, even if log_info exists)
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+    
     # Source logger if not already sourced
     if [ -z "${log_info:-}" ]; then
-        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
         source "$SCRIPT_DIR/../../common/logger.sh" 2>/dev/null || true
         source "$SCRIPT_DIR/../../common/load-env.sh" 2>/dev/null || true
         load_env_file 2>/dev/null || true
@@ -449,10 +451,16 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
         ENVIRONMENT="${ENVIRONMENT:-dev}"
         
         log_info "No URLs provided. Fetching from Terraform outputs..."
-        if [ -f "$SCRIPT_DIR/fetch-deployment-info.sh" ]; then
-            source "$SCRIPT_DIR/fetch-deployment-info.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "" "" "${DRY_RUN:-false}"
+        # fetch-deployment-info.sh is in the same directory as this script
+        FETCH_SCRIPT="$SCRIPT_DIR/fetch-deployment-info.sh"
+        if [ -f "$FETCH_SCRIPT" ]; then
+            source "$FETCH_SCRIPT" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "${DRY_RUN:-false}"
         else
-            log_warning "fetch-deployment-info.sh not found. Please set API_URL and FRONTEND_URL environment variables."
+            log_warning "fetch-deployment-info.sh not found at $FETCH_SCRIPT"
+            log_warning "Cannot automatically discover API_URL and FRONTEND_URL from Terraform outputs."
+            log_info "Please either:"
+            log_info "  1. Ensure fetch-deployment-info.sh exists at: run_scripts/aws/verification/fetch-deployment-info.sh, or"
+            log_info "  2. Set API_URL and FRONTEND_URL environment variables manually"
         fi
     fi
     

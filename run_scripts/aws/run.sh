@@ -377,7 +377,7 @@ deploy_ecs_full() {
     
     # Step 6: Post-deployment verification and manual test hints
     log_step "Step 6/6: Verifying deployment and generating test instructions"
-    "$SCRIPT_DIR/auto_verify_and_manual_hint.sh" "$ENVIRONMENT" || {
+    "$SCRIPT_DIR/auto_verify_and_manual_hint.sh" "ecs-full" "$ENVIRONMENT" || {
         log_warning "Post-deployment verification had issues (deployment may still be successful)"
         log_info "Check the verification output above for details"
     }
@@ -583,7 +583,7 @@ main() {
     # Run post-deployment verification and show manual test hints
     # (replaces both post_run_verify.sh and manual_test_hint.sh)
     echo ""
-    "$SCRIPT_DIR/auto_verify_and_manual_hint.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "" "" "$DRY_RUN"
+    "$SCRIPT_DIR/auto_verify_and_manual_hint.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "$DRY_RUN"
 }
 
 main "$@"

@@ -44,6 +44,9 @@ study/
 *.log
 logs/
 
+# Test results
+test/test_results/
+
 # AWS/Terraform
 .terraform/
 *.tfstate

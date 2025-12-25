@@ -162,7 +162,7 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     fi
     
     # Source fetch-deployment-info to get values
-    source "$SCRIPT_DIR/fetch-deployment-info.sh" "${1:-ecs-full}" "${2:-dev}" "${3:-}" "${4:-}" "${5:-false}"
+    source "$SCRIPT_DIR/fetch-deployment-info.sh" "${1:-ecs-full}" "${2:-dev}" "${3:-false}"
     
     print_manual_test_hints
 else
