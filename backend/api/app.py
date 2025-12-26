@@ -533,10 +533,11 @@ def query():
                     "token_usage": result.get("token_usage", {})  # Include token usage
                 }
                 
+                # Always include tool_calls (needed for test result extraction)
+                response["tool_calls"] = result.get("tool_calls", [])
                 # Add debug info if available
                 if app.debug or app.logger.level <= logging.DEBUG:
                     response["debug_info"] = result.get("debug_info")
-                    response["tool_calls"] = result.get("tool_calls", [])
                 
                 app.logger.info(f"[{request_id}] ===== AGENT PROCESSING COMPLETE =====")
                 app.logger.info(f"[{request_id}] Method: {response.get('method')}, Iterations: {response.get('iterations')}, Time: {response.get('execution_time_ms', 0):.2f}ms")

@@ -35,16 +35,22 @@ class AgentLogger:
     def log_tool_call(self, tool_name: str, input_data: Dict[str, Any], 
                      output_data: Dict[str, Any], execution_time_ms: float):
         """Log tool execution."""
+        # Preserve SQL in output for SQL-related tools
+        output_dict = {
+            "success": output_data.get("success", False),
+            "summary": self._summarize_output(output_data),
+            "error": output_data.get("error"),
+            "row_count": output_data.get("row_count"),
+            "execution_time_ms": execution_time_ms
+        }
+        # Preserve SQL field for SQL tools (needed for test result extraction)
+        if "sql" in output_data:
+            output_dict["sql"] = output_data["sql"]
+        
         tool_call = {
             "tool": tool_name,
             "input": input_data,
-            "output": {
-                "success": output_data.get("success", False),
-                "summary": self._summarize_output(output_data),
-                "error": output_data.get("error"),
-                "row_count": output_data.get("row_count"),
-                "execution_time_ms": execution_time_ms
-            },
+            "output": output_dict,
             "timestamp": datetime.now().isoformat()
         }
         self.tool_calls.append(tool_call)

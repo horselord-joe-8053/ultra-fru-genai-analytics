@@ -58,6 +58,11 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
     
     # Check if agent mode was used
     tool_calls = resp.get("tool_calls", [])
+    debug_info = resp.get("debug_info", {})
+    
+    # If debug_info has tool_calls, prefer those (they may have more complete data)
+    if debug_info and "tool_calls" in debug_info:
+        tool_calls = debug_info.get("tool_calls", tool_calls)
     
     if method == "agentic" or tool_calls:
         # Agent-based processing
@@ -69,17 +74,53 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
             tool_input = tool_call.get("input", {})
             tool_output = tool_call.get("output", {})
             
-            if tool_name == "execute_sql":
-                # Extract SQL query from tool input or output
-                # SQL can be in input (sql_query, sql) or output (sql)
-                sql = (
-                    tool_input.get("sql_query") or 
-                    tool_input.get("sql") or 
-                    tool_output.get("sql", "") or
-                    (tool_output if isinstance(tool_output, str) else "")
-                )
-                if sql and isinstance(sql, str):
-                    sql_queries.append(sql)
+            if tool_name == "generate_sql":
+                # Extract SQL from generate_sql tool output
+                # SQL should now be preserved in output["sql"] by the logger
+                sql = None
+                if isinstance(tool_output, dict):
+                    sql = tool_output.get("sql") or tool_output.get("sql_query")
+                # Fallback: try to extract from summary if SQL field not available
+                if not sql and isinstance(tool_output, dict):
+                    summary = tool_output.get("summary", "")
+                    if summary and "Generated SQL:" in summary:
+                        sql_match = summary.split("Generated SQL:", 1)
+                        if len(sql_match) > 1:
+                            sql = sql_match[1].strip()
+                            if sql.endswith("..."):
+                                sql = sql[:-3].strip()
+                # Store for later use by execute_sql
+                if sql and isinstance(sql, str) and sql.strip() and len(sql) > 10:
+                    sql_queries.append(sql.strip())
+            elif tool_name == "execute_sql":
+                # Extract SQL query - try multiple sources in order of reliability
+                sql = None
+                # 1. Try output["sql"] (now preserved by logger)
+                if isinstance(tool_output, dict):
+                    sql = tool_output.get("sql") or tool_output.get("sql_query")
+                # 2. Try input (the SQL passed to execute_sql)
+                if not sql or (isinstance(sql, str) and len(sql.strip()) < 20):
+                    if isinstance(tool_input, dict):
+                        sql = tool_input.get("sql_query") or tool_input.get("sql")
+                # 3. If still not found, look backwards for generate_sql call
+                if not sql or (isinstance(sql, str) and (
+                    sql.lower().startswith(("the sql", "(the sql", "[the sql")) or
+                    len(sql.strip()) < 20
+                )):
+                    current_idx = next((i for i, tc in enumerate(tool_calls) if tc == tool_call), -1)
+                    if current_idx > 0:
+                        for prev_call in reversed(tool_calls[:current_idx]):
+                            if prev_call.get("tool") == "generate_sql":
+                                prev_output = prev_call.get("output", {})
+                                if isinstance(prev_output, dict):
+                                    sql = prev_output.get("sql") or prev_output.get("sql_query")
+                                    if sql:
+                                        break
+                # Only add if we have a valid SQL string
+                if sql and isinstance(sql, str) and sql.strip() and len(sql) > 10:
+                    sql_clean = sql.strip()
+                    if not sql_clean.lower().startswith(("the sql", "(the sql", "[the sql")):
+                        sql_queries.append(sql_clean)
             elif tool_name == "semantic_search":
                 # Extract semantic search query
                 query_text = tool_input.get("query_text") or tool_input.get("query") or tool_input.get("question", "")
@@ -115,6 +156,12 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
                 for line in sql_lines:
                     process_parts.append(f"   {line}")
             step_num += 1
+        elif method == "agentic" and tool_calls:
+            # Agent was used but no SQL extracted - show a note
+            has_sql_tools = any(tc.get("tool") in ("generate_sql", "execute_sql") for tc in tool_calls)
+            if has_sql_tools:
+                process_parts.append(f"{step_num}. SQL Analysis: SQL queries were executed, but full SQL text is not available in the response.")
+                step_num += 1
         
         if not process_parts:
             # Fallback if no specific tools detected
