@@ -42,6 +42,109 @@ class QueryTestCase:
         self.expected_answer = expected_answer or "Answer should contain expected substring(s) as defined by validator"
 
 
+def _extract_deriving_process(resp: Dict, question: str) -> str:
+    """
+    Extract the deriving process summary including SQL queries executed.
+    
+    Args:
+        resp: API response dictionary
+        question: Original question asked
+        
+    Returns:
+        Formatted string describing the process and SQL queries
+    """
+    method = resp.get("method", "simple")
+    mode = resp.get("mode", "simple")
+    
+    # Check if agent mode was used
+    tool_calls = resp.get("tool_calls", [])
+    
+    if method == "agentic" or tool_calls:
+        # Agent-based processing
+        sql_queries = []
+        semantic_searches = []
+        
+        for tool_call in tool_calls:
+            tool_name = tool_call.get("tool", "")
+            tool_input = tool_call.get("input", {})
+            tool_output = tool_call.get("output", {})
+            
+            if tool_name == "execute_sql":
+                # Extract SQL query from tool input or output
+                # SQL can be in input (sql_query, sql) or output (sql)
+                sql = (
+                    tool_input.get("sql_query") or 
+                    tool_input.get("sql") or 
+                    tool_output.get("sql", "") or
+                    (tool_output if isinstance(tool_output, str) else "")
+                )
+                if sql and isinstance(sql, str):
+                    sql_queries.append(sql)
+            elif tool_name == "semantic_search":
+                # Extract semantic search query
+                query_text = tool_input.get("query_text") or tool_input.get("query") or tool_input.get("question", "")
+                if query_text:
+                    semantic_searches.append(query_text)
+        
+        process_parts = []
+        step_num = 1
+        
+        if semantic_searches:
+            # Semantic search was used
+            process_parts.append(f"{step_num}. Semantic Search: Used pgvector to find semantically similar feedback records.")
+            process_parts.append("   SQL Query:")
+            # Construct the SQL query template
+            base_sql = (
+                "SELECT id, brand, fridge_model, price, sales_date, store_name, "
+                "customer_feedback, feedback_rating, feedback_sentiment_category "
+                "FROM fru_sales_embeddings "
+                "ORDER BY embedding <-> $query_vector::vector "
+                "LIMIT 50;"
+            )
+            process_parts.append(f"   {base_sql}")
+            process_parts.append(f"   Search query: '{semantic_searches[0]}'")
+            step_num += 1
+        
+        if sql_queries:
+            # SQL queries were executed
+            process_parts.append(f"{step_num}. SQL Analysis: Executed SQL queries to analyze data.")
+            for i, sql in enumerate(sql_queries, 1):
+                process_parts.append(f"   SQL Query {i}:")
+                # Format SQL for readability (indent each line)
+                sql_lines = sql.split("\n")
+                for line in sql_lines:
+                    process_parts.append(f"   {line}")
+            step_num += 1
+        
+        if not process_parts:
+            # Fallback if no specific tools detected
+            process_parts.append(f"{step_num}. Agent-based processing: Used multiple tools to gather information.")
+            step_num += 1
+        
+        # Add LLM analysis step
+        process_parts.append(f"{step_num}. LLM Analysis: Analyzed retrieved data using Claude to synthesize the final answer.")
+        
+        return "\n".join(process_parts)
+    
+    else:
+        # Simple processing mode (pgvector + LLM)
+        process_parts = [
+            "1. Semantic Search: Used pgvector to find semantically similar feedback records.",
+            "   SQL Query:",
+            "   SELECT id, brand, fridge_model, price, sales_date, store_name,",
+            "          customer_feedback, feedback_rating, feedback_sentiment_category",
+            "   FROM fru_sales_embeddings",
+            "   ORDER BY embedding <-> $query_vector::vector",
+            "   LIMIT 50;",
+            f"   Search query: '{question}'",
+            "",
+            "2. LLM Analysis: Analyzed the 50 most semantically similar feedback records using Claude.",
+            "   The LLM filtered records with feedback_rating <= 3 and extracted the top 3 problems",
+            "   mentioned in those low-rating customer feedbacks."
+        ]
+        return "\n".join(process_parts)
+
+
 def _validate_has_answer_and_iterations(resp: Dict, label: str) -> str:
     """
     Basic sanity checks shared by all tests:
@@ -189,12 +292,13 @@ def run_single_test(
             # Print to stdout when no log file is provided
             print(msg)
     
+    # Capture response for error handling
+    resp = None
+    actual_response = None
+    
     try:
         _print(f"Test {test_code}: {test_case.name}")
         _print(f"Query: {test_case.query}")
-        
-        # Capture the actual response for logging
-        actual_response = None
         
         # Apply timeout if specified (for systems without timeout command)
         if timeout is not None:
@@ -224,6 +328,12 @@ def run_single_test(
         _print(test_case.expected_answer)
         _print("----- Actual Answer: -------")
         _print(actual_response)
+        
+        # Extract and log deriving process
+        deriving_process = _extract_deriving_process(resp, test_case.query)
+        if deriving_process:
+            _print("----- Deriving Process: -----")
+            _print(deriving_process)
         
         # Log token usage if available
         token_usage = resp.get("token_usage", {})
@@ -264,6 +374,12 @@ def run_single_test(
             if actual_full:
                 _print("----- Actual Answer: -------")
                 _print(actual_full)
+                # Extract deriving process if we have the response
+                if resp:
+                    deriving_process = _extract_deriving_process(resp, test_case.query)
+                    if deriving_process:
+                        _print("----- Deriving Process: -----")
+                        _print(deriving_process)
                 _print("----------------------------")
         else:
             # Fallback for other assertion errors
@@ -273,6 +389,12 @@ def run_single_test(
                 _print(test_case.expected_answer)
                 _print("----- Actual Answer: -------")
                 _print(actual_response)
+                # Extract deriving process if we have the response
+                if resp:
+                    deriving_process = _extract_deriving_process(resp, test_case.query)
+                    if deriving_process:
+                        _print("----- Deriving Process: -----")
+                        _print(deriving_process)
                 _print("----------------------------")
         
         _print("=" * 80)
@@ -284,6 +406,12 @@ def run_single_test(
             _print(test_case.expected_answer)
             _print("----- Actual Answer: -------")
             _print(actual_response)
+            # Extract deriving process if we have the response
+            if resp:
+                deriving_process = _extract_deriving_process(resp, test_case.query)
+                if deriving_process:
+                    _print("----- Deriving Process: -----")
+                    _print(deriving_process)
             _print("----------------------------")
         raise
 
