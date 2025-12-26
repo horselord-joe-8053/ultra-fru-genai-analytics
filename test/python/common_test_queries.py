@@ -133,7 +133,7 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
         if semantic_searches:
             # Semantic search was used
             process_parts.append(f"{step_num}. Semantic Search: Used pgvector to find semantically similar feedback records.")
-            process_parts.append("   SQL Query:")
+            process_parts.append("   -- SQL Query: --")
             # Construct the SQL query template
             base_sql = (
                 "SELECT id, brand, fridge_model, price, sales_date, store_name, "
@@ -150,7 +150,7 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
             # SQL queries were executed
             process_parts.append(f"{step_num}. SQL Analysis: Executed SQL queries to analyze data.")
             for i, sql in enumerate(sql_queries, 1):
-                process_parts.append(f"   SQL Query {i}:")
+                process_parts.append(f"   -- SQL Query {i}: --")
                 # Format SQL for readability (indent each line)
                 sql_lines = sql.split("\n")
                 for line in sql_lines:
@@ -177,7 +177,7 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
         # Simple processing mode (pgvector + LLM)
         process_parts = [
             "1. Semantic Search: Used pgvector to find semantically similar feedback records.",
-            "   SQL Query:",
+            "   -- SQL Query: --",
             "   SELECT id, brand, fridge_model, price, sales_date, store_name,",
             "          customer_feedback, feedback_rating, feedback_sentiment_category",
             "   FROM fru_sales_embeddings",
