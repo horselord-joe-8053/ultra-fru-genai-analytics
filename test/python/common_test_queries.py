@@ -75,36 +75,20 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
             tool_output = tool_call.get("output", {})
             
             if tool_name == "generate_sql":
-                # Extract SQL from generate_sql tool output
-                # SQL should now be preserved in output["sql"] by the logger
-                sql = None
-                if isinstance(tool_output, dict):
-                    sql = tool_output.get("sql") or tool_output.get("sql_query")
-                # Fallback: try to extract from summary if SQL field not available
-                if not sql and isinstance(tool_output, dict):
-                    summary = tool_output.get("summary", "")
-                    if summary and "Generated SQL:" in summary:
-                        sql_match = summary.split("Generated SQL:", 1)
-                        if len(sql_match) > 1:
-                            sql = sql_match[1].strip()
-                            if sql.endswith("..."):
-                                sql = sql[:-3].strip()
-                # Store for later use by execute_sql
-                if sql and isinstance(sql, str) and sql.strip() and len(sql) > 10:
-                    sql_queries.append(sql.strip())
+                # Don't extract SQL from generate_sql - it's only generated, not executed
+                # We'll extract it from execute_sql which actually runs it
+                # This prevents duplicate SQL queries in the output
+                pass
             elif tool_name == "execute_sql":
-                # Extract SQL query - try multiple sources in order of reliability
+                # Extract SQL query - prioritize output SQL (actual executed SQL)
                 sql = None
-                # 1. Try output["sql"] (now preserved by logger)
+                # 1. Try output["sql"] (now preserved by logger) - this is the actual executed SQL
                 if isinstance(tool_output, dict):
                     sql = tool_output.get("sql") or tool_output.get("sql_query")
-                # 2. Try input (the SQL passed to execute_sql)
-                if not sql or (isinstance(sql, str) and len(sql.strip()) < 20):
-                    if isinstance(tool_input, dict):
-                        sql = tool_input.get("sql_query") or tool_input.get("sql")
-                # 3. If still not found, look backwards for generate_sql call
+                
+                # 2. If output SQL not found, look backwards for generate_sql call
                 if not sql or (isinstance(sql, str) and (
-                    sql.lower().startswith(("the sql", "(the sql", "[the sql")) or
+                    sql.lower().startswith(("the sql", "(the sql", "[the sql", "i will use")) or
                     len(sql.strip()) < 20
                 )):
                     current_idx = next((i for i, tc in enumerate(tool_calls) if tc == tool_call), -1)
@@ -116,11 +100,29 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
                                     sql = prev_output.get("sql") or prev_output.get("sql_query")
                                     if sql:
                                         break
-                # Only add if we have a valid SQL string
-                if sql and isinstance(sql, str) and sql.strip() and len(sql) > 10:
+                
+                # 3. Last resort: try input, but only if it doesn't look like placeholder text
+                if not sql or (isinstance(sql, str) and (
+                    sql.lower().startswith(("the sql", "(the sql", "[the sql", "i will use")) or
+                    len(sql.strip()) < 20
+                )):
+                    if isinstance(tool_input, dict):
+                        input_sql = tool_input.get("sql_query") or tool_input.get("sql")
+                        # Only use input SQL if it doesn't look like placeholder text
+                        if input_sql and isinstance(input_sql, str) and len(input_sql.strip()) > 20:
+                            input_sql_lower = input_sql.lower().strip()
+                            if not input_sql_lower.startswith(("the sql", "(the sql", "[the sql", "i will use")):
+                                sql = input_sql
+                
+                # Only add if we have a valid SQL string (not placeholder text)
+                if sql and isinstance(sql, str) and sql.strip() and len(sql.strip()) > 20:
                     sql_clean = sql.strip()
-                    if not sql_clean.lower().startswith(("the sql", "(the sql", "[the sql")):
-                        sql_queries.append(sql_clean)
+                    sql_lower = sql_clean.lower()
+                    # Skip placeholder text patterns
+                    if not sql_lower.startswith(("the sql", "(the sql", "[the sql", "i will use")):
+                        # Additional check: must look like actual SQL (contains SELECT, FROM, etc.)
+                        if any(keyword in sql_lower for keyword in ["select", "from", "where", "insert", "update", "delete"]):
+                            sql_queries.append(sql_clean)
             elif tool_name == "semantic_search":
                 # Extract semantic search query
                 query_text = tool_input.get("query_text") or tool_input.get("query") or tool_input.get("question", "")
