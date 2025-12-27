@@ -65,113 +65,158 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
         tool_calls = debug_info.get("tool_calls", tool_calls)
     
     if method == "agentic" or tool_calls:
-        # Agent-based processing
-        sql_queries = []
-        semantic_searches = []
-        
-        for tool_call in tool_calls:
-            tool_name = tool_call.get("tool", "")
-            tool_input = tool_call.get("input", {})
-            tool_output = tool_call.get("output", {})
-            
-            if tool_name == "generate_sql":
-                # Don't extract SQL from generate_sql - it's only generated, not executed
-                # We'll extract it from execute_sql which actually runs it
-                # This prevents duplicate SQL queries in the output
-                pass
-            elif tool_name == "execute_sql":
-                # Extract SQL query - prioritize output SQL (actual executed SQL)
-                sql = None
-                # 1. Try output["sql"] (now preserved by logger) - this is the actual executed SQL
-                if isinstance(tool_output, dict):
-                    sql = tool_output.get("sql") or tool_output.get("sql_query")
-                
-                # 2. If output SQL not found, look backwards for generate_sql call
-                if not sql or (isinstance(sql, str) and (
-                    sql.lower().startswith(("the sql", "(the sql", "[the sql", "i will use")) or
-                    len(sql.strip()) < 20
-                )):
-                    current_idx = next((i for i, tc in enumerate(tool_calls) if tc == tool_call), -1)
-                    if current_idx > 0:
-                        for prev_call in reversed(tool_calls[:current_idx]):
-                            if prev_call.get("tool") == "generate_sql":
-                                prev_output = prev_call.get("output", {})
-                                if isinstance(prev_output, dict):
-                                    sql = prev_output.get("sql") or prev_output.get("sql_query")
-                                    if sql:
-                                        break
-                
-                # 3. Last resort: try input, but only if it doesn't look like placeholder text
-                if not sql or (isinstance(sql, str) and (
-                    sql.lower().startswith(("the sql", "(the sql", "[the sql", "i will use")) or
-                    len(sql.strip()) < 20
-                )):
-                    if isinstance(tool_input, dict):
-                        input_sql = tool_input.get("sql_query") or tool_input.get("sql")
-                        # Only use input SQL if it doesn't look like placeholder text
-                        if input_sql and isinstance(input_sql, str) and len(input_sql.strip()) > 20:
-                            input_sql_lower = input_sql.lower().strip()
-                            if not input_sql_lower.startswith(("the sql", "(the sql", "[the sql", "i will use")):
-                                sql = input_sql
-                
-                # Only add if we have a valid SQL string (not placeholder text)
-                if sql and isinstance(sql, str) and sql.strip() and len(sql.strip()) > 20:
-                    sql_clean = sql.strip()
-                    sql_lower = sql_clean.lower()
-                    # Skip placeholder text patterns
-                    if not sql_lower.startswith(("the sql", "(the sql", "[the sql", "i will use")):
-                        # Additional check: must look like actual SQL (contains SELECT, FROM, etc.)
-                        if any(keyword in sql_lower for keyword in ["select", "from", "where", "insert", "update", "delete"]):
-                            sql_queries.append(sql_clean)
-            elif tool_name == "semantic_search":
-                # Extract semantic search query
-                query_text = tool_input.get("query_text") or tool_input.get("query") or tool_input.get("question", "")
-                if query_text:
-                    semantic_searches.append(query_text)
-        
+        # Agent-based processing - show progressive steps
         process_parts = []
         step_num = 1
         
-        if semantic_searches:
-            # Semantic search was used
-            process_parts.append(f"{step_num}. Semantic Search: Used pgvector to find semantically similar feedback records.")
-            process_parts.append("   -- SQL Query: --")
-            # Construct the SQL query template
-            base_sql = (
-                "SELECT id, brand, fridge_model, price, sales_date, store_name, "
-                "customer_feedback, feedback_rating, feedback_sentiment_category "
-                "FROM fru_sales_embeddings "
-                "ORDER BY embedding <-> $query_vector::vector "
-                "LIMIT 50;"
-            )
-            process_parts.append(f"   {base_sql}")
-            process_parts.append(f"   Search query: '{semantic_searches[0]}'")
-            step_num += 1
+        # Helper function to extract SQL from tool output/input
+        def extract_sql_from_tool(tool_call, current_idx):
+            """Extract SQL from a tool call, handling various sources.
+            
+            Args:
+                tool_call: The tool call dictionary
+                current_idx: Current index in tool_calls (for looking backwards)
+            """
+            tool_input = tool_call.get("input", {})
+            tool_output = tool_call.get("output", {})
+            
+            sql = None
+            
+            # 1. Try output["sql"] (most reliable - actual executed SQL)
+            if isinstance(tool_output, dict):
+                sql = tool_output.get("sql") or tool_output.get("sql_query")
+            
+            # 2. If output SQL not found or is placeholder, look backwards for generate_sql
+            if not sql or (isinstance(sql, str) and (
+                sql.lower().startswith(("the sql", "(the sql", "[the sql", "i will use")) or
+                len(sql.strip()) < 20
+            )):
+                if current_idx > 0:
+                    for prev_call in reversed(tool_calls[:current_idx]):
+                        if prev_call.get("tool") == "generate_sql":
+                            prev_output = prev_call.get("output", {})
+                            if isinstance(prev_output, dict):
+                                sql = prev_output.get("sql") or prev_output.get("sql_query")
+                                if sql:
+                                    break
+            
+            # 3. Last resort: try input, but only if it doesn't look like placeholder text
+            if not sql or (isinstance(sql, str) and (
+                sql.lower().startswith(("the sql", "(the sql", "[the sql", "i will use")) or
+                len(sql.strip()) < 20
+            )):
+                if isinstance(tool_input, dict):
+                    input_sql = tool_input.get("sql_query") or tool_input.get("sql")
+                    if input_sql and isinstance(input_sql, str) and len(input_sql.strip()) > 20:
+                        input_sql_lower = input_sql.lower().strip()
+                        if not input_sql_lower.startswith(("the sql", "(the sql", "[the sql", "i will use")):
+                            sql = input_sql
+            
+            # Validate SQL
+            if sql and isinstance(sql, str) and sql.strip() and len(sql.strip()) > 20:
+                sql_clean = sql.strip()
+                sql_lower = sql_clean.lower()
+                if not sql_lower.startswith(("the sql", "(the sql", "[the sql", "i will use")):
+                    if any(keyword in sql_lower for keyword in ["select", "from", "where", "insert", "update", "delete"]):
+                        return sql_clean
+            
+            return None
         
-        if sql_queries:
-            # SQL queries were executed
-            process_parts.append(f"{step_num}. SQL Analysis: Executed SQL queries to analyze data.")
-            for i, sql in enumerate(sql_queries, 1):
-                process_parts.append(f"   -- SQL Query {i}: --")
-                # Format SQL for readability (indent each line)
-                sql_lines = sql.split("\n")
-                for line in sql_lines:
-                    process_parts.append(f"   {line}")
-            step_num += 1
-        elif method == "agentic" and tool_calls:
-            # Agent was used but no SQL extracted - show a note
-            has_sql_tools = any(tc.get("tool") in ("generate_sql", "execute_sql") for tc in tool_calls)
-            if has_sql_tools:
-                process_parts.append(f"{step_num}. SQL Analysis: SQL queries were executed, but full SQL text is not available in the response.")
+        # Iterate through tool calls in order to show progressive steps
+        # Use enumerate to get index directly (avoids O(n) search per tool call)
+        for current_idx, tool_call in enumerate(tool_calls):
+            tool_name = tool_call.get("tool", "")
+            tool_input = tool_call.get("input", {})
+            tool_output = tool_call.get("output", {})
+            success = tool_output.get("success", False) if isinstance(tool_output, dict) else False
+            
+            if tool_name == "generate_sql":
+                # Step: Generate SQL
+                sql = extract_sql_from_tool(tool_call, current_idx)
+                if sql:
+                    process_parts.append(f"{step_num}. Generate SQL (using tool \"generate_sql\"):")
+                    process_parts.append("   -- SQL: --")
+                    # Format SQL for readability (indent each line)
+                    sql_lines = sql.split("\n")
+                    for line in sql_lines:
+                        process_parts.append(f"   {line}")
+                    step_num += 1
+                elif success:
+                    # SQL generation succeeded but SQL not extractable
+                    process_parts.append(f"{step_num}. Generate SQL (using tool \"generate_sql\"): SQL generated successfully")
+                    step_num += 1
+                else:
+                    # SQL generation failed
+                    error = tool_output.get("error", "Unknown error") if isinstance(tool_output, dict) else "Unknown error"
+                    process_parts.append(f"{step_num}. Generate SQL (using tool \"generate_sql\"): Failed - {error}")
+                    step_num += 1
+                    
+            elif tool_name == "execute_sql":
+                # Step: Execute SQL
+                sql = extract_sql_from_tool(tool_call, current_idx)
+                if sql:
+                    process_parts.append(f"{step_num}. Execute SQL (using tool \"execute_sql\"):")
+                    process_parts.append("   -- SQL: --")
+                    # Format SQL for readability (indent each line)
+                    sql_lines = sql.split("\n")
+                    for line in sql_lines:
+                        process_parts.append(f"   {line}")
+                    
+                    # Show execution results if available
+                    if isinstance(tool_output, dict):
+                        row_count = tool_output.get("row_count", 0)
+                        if success and row_count is not None:
+                            process_parts.append(f"   -- Result: Retrieved {row_count} row{'s' if row_count != 1 else ''}")
+                        elif not success:
+                            error = tool_output.get("error", "Unknown error")
+                            process_parts.append(f"   -- Result: Failed - {error}")
+                    step_num += 1
+                elif success:
+                    # SQL execution succeeded but SQL not extractable
+                    row_count = tool_output.get("row_count", 0) if isinstance(tool_output, dict) else 0
+                    process_parts.append(f"{step_num}. Execute SQL (using tool \"execute_sql\"): Executed successfully, retrieved {row_count} row{'s' if row_count != 1 else ''}")
+                    step_num += 1
+                else:
+                    # SQL execution failed
+                    error = tool_output.get("error", "Unknown error") if isinstance(tool_output, dict) else "Unknown error"
+                    process_parts.append(f"{step_num}. Execute SQL (using tool \"execute_sql\"): Failed - {error}")
+                    step_num += 1
+                    
+            elif tool_name == "semantic_search":
+                # Step: Semantic Search
+                query_text = tool_input.get("query_text") or tool_input.get("query") or tool_input.get("question", "")
+                process_parts.append(f"{step_num}. Semantic Search (using tool \"semantic_search\"):")
+                process_parts.append("   -- SQL Query: --")
+                # Construct the SQL query template
+                base_sql = (
+                    "SELECT id, brand, fridge_model, price, sales_date, store_name, "
+                    "customer_feedback, feedback_rating, feedback_sentiment_category "
+                    "FROM fru_sales_embeddings "
+                    "ORDER BY embedding <-> $query_vector::vector "
+                    "LIMIT 50;"
+                )
+                process_parts.append(f"   {base_sql}")
+                if query_text:
+                    process_parts.append(f"   Search query: '{query_text}'")
+                
+                # Show search results if available
+                if isinstance(tool_output, dict):
+                    row_count = tool_output.get("row_count", 0)
+                    if success and row_count is not None:
+                        process_parts.append(f"   -- Result: Retrieved {row_count} row{'s' if row_count != 1 else ''}")
+                    elif not success:
+                        error = tool_output.get("error", "Unknown error")
+                        process_parts.append(f"   -- Result: Failed - {error}")
                 step_num += 1
         
-        if not process_parts:
-            # Fallback if no specific tools detected
+        # Always end with LLM Analysis
+        if step_num > 1:  # Only add if there were tool calls
+            process_parts.append(f"{step_num}. LLM Analysis: Analyzed retrieved data using Claude to synthesize the final answer.")
+        else:
+            # No tool calls but agent was used
             process_parts.append(f"{step_num}. Agent-based processing: Used multiple tools to gather information.")
             step_num += 1
-        
-        # Add LLM analysis step
-        process_parts.append(f"{step_num}. LLM Analysis: Analyzed retrieved data using Claude to synthesize the final answer.")
+            process_parts.append(f"{step_num}. LLM Analysis: Analyzed retrieved data using Claude to synthesize the final answer.")
         
         return "\n".join(process_parts)
     
@@ -360,16 +405,27 @@ def run_single_test(
             old_handler = signal.signal(signal.SIGALRM, timeout_handler)
             signal.alarm(timeout)
             try:
+                import time
+                api_start = time.time()
                 resp = run_query(test_case.query, base_url=base_url, timeout=timeout)
+                api_time = time.time() - api_start
                 actual_response = resp.get("answer", "")
                 test_case.validator(resp)
             finally:
                 signal.alarm(0)  # Cancel alarm
                 signal.signal(signal.SIGALRM, old_handler)  # Restore handler
         else:
+            import time
+            api_start = time.time()
             resp = run_query(test_case.query, base_url=base_url)
+            api_time = time.time() - api_start
             actual_response = resp.get("answer", "")
             test_case.validator(resp)
+        
+        # Time the extraction process
+        extraction_start = time.time()
+        deriving_process = _extract_deriving_process(resp, test_case.query)
+        extraction_time = time.time() - extraction_start
         
         _print("Result: OK")
         # Format with separator lines instead of bold
@@ -378,8 +434,14 @@ def run_single_test(
         _print("----- Actual Answer: -------")
         _print(actual_response)
         
-        # Extract and log deriving process
-        deriving_process = _extract_deriving_process(resp, test_case.query)
+        # Log timing breakdown (if available)
+        if 'api_time' in locals() and 'extraction_time' in locals():
+            _print("----- Timing Breakdown: -----")
+            _print(f"API Call Time: {api_time:.3f}s")
+            _print(f"Result Extraction Time: {extraction_time:.3f}s")
+            _print(f"Total Processing Time: {api_time + extraction_time:.3f}s")
+        
+        # Log deriving process
         if deriving_process:
             _print("----- Deriving Process: -----")
             _print(deriving_process)
