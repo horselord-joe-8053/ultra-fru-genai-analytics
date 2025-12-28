@@ -14,6 +14,7 @@ Configuration:
 from __future__ import annotations
 
 import argparse
+import re
 from typing import Callable, Dict, List, Optional
 
 from .common_utils import (
@@ -64,19 +65,16 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
     if debug_info and "tool_calls" in debug_info:
         tool_calls = debug_info.get("tool_calls", tool_calls)
     
+    # Extract agent thoughts from debug_info
+    agent_thoughts = debug_info.get("agent_thoughts", []) if debug_info else []
+    
     if method == "agentic" or tool_calls:
-        # Agent-based processing - show progressive steps
+        # Agent-based processing - group by iteration and show progressive steps
         process_parts = []
-        step_num = 1
         
         # Helper function to extract SQL from tool output/input
         def extract_sql_from_tool(tool_call, current_idx):
-            """Extract SQL from a tool call, handling various sources.
-            
-            Args:
-                tool_call: The tool call dictionary
-                current_idx: Current index in tool_calls (for looking backwards)
-            """
+            """Extract SQL from a tool call, handling various sources."""
             tool_input = tool_call.get("input", {})
             tool_output = tool_call.get("output", {})
             
@@ -122,101 +120,384 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
             
             return None
         
-        # Iterate through tool calls in order to show progressive steps
-        # Use enumerate to get index directly (avoids O(n) search per tool call)
-        for current_idx, tool_call in enumerate(tool_calls):
-            tool_name = tool_call.get("tool", "")
-            tool_input = tool_call.get("input", {})
-            tool_output = tool_call.get("output", {})
-            success = tool_output.get("success", False) if isinstance(tool_output, dict) else False
+        # Helper function to parse THOUGHT sections from agent response
+        def parse_thoughts_from_response(response_text: str) -> List[Dict[str, str]]:
+            """Parse THOUGHT: and TOOL: sections from agent response.
+            Returns list of dicts with 'thought' and 'tool' keys, in order of appearance.
+            """
+            thoughts = []
+            # Pattern to match THOUGHT: ... TOOL: ... sections
+            # The agent response format is:
+            # THOUGHT: [reasoning]
+            # TOOL: [tool_name]
+            # INPUT: [json]
+            pattern = r'THOUGHT:\s*(.*?)(?=TOOL:|$)'
+            tool_pattern = r'TOOL:\s*(\w+)'
             
-            if tool_name == "generate_sql":
-                # Step: Generate SQL
-                sql = extract_sql_from_tool(tool_call, current_idx)
-                if sql:
-                    process_parts.append(f"{step_num}. Generate SQL (using tool \"generate_sql\"):")
-                    process_parts.append("   -- SQL: --")
-                    # Format SQL for readability (indent each line)
-                    sql_lines = sql.split("\n")
-                    for line in sql_lines:
-                        process_parts.append(f"   {line}")
-                    step_num += 1
-                elif success:
-                    # SQL generation succeeded but SQL not extractable
-                    process_parts.append(f"{step_num}. Generate SQL (using tool \"generate_sql\"): SQL generated successfully")
-                    step_num += 1
-                else:
-                    # SQL generation failed
-                    error = tool_output.get("error", "Unknown error") if isinstance(tool_output, dict) else "Unknown error"
-                    process_parts.append(f"{step_num}. Generate SQL (using tool \"generate_sql\"): Failed - {error}")
-                    step_num += 1
-                    
-            elif tool_name == "execute_sql":
-                # Step: Execute SQL
-                sql = extract_sql_from_tool(tool_call, current_idx)
-                if sql:
-                    process_parts.append(f"{step_num}. Execute SQL (using tool \"execute_sql\"):")
-                    process_parts.append("   -- SQL: --")
-                    # Format SQL for readability (indent each line)
-                    sql_lines = sql.split("\n")
-                    for line in sql_lines:
-                        process_parts.append(f"   {line}")
-                    
-                    # Show execution results if available
-                    if isinstance(tool_output, dict):
-                        row_count = tool_output.get("row_count", 0)
-                        if success and row_count is not None:
-                            process_parts.append(f"   -- Result: Retrieved {row_count} row{'s' if row_count != 1 else ''}")
-                        elif not success:
-                            error = tool_output.get("error", "Unknown error")
-                            process_parts.append(f"   -- Result: Failed - {error}")
-                    step_num += 1
-                elif success:
-                    # SQL execution succeeded but SQL not extractable
-                    row_count = tool_output.get("row_count", 0) if isinstance(tool_output, dict) else 0
-                    process_parts.append(f"{step_num}. Execute SQL (using tool \"execute_sql\"): Executed successfully, retrieved {row_count} row{'s' if row_count != 1 else ''}")
-                    step_num += 1
-                else:
-                    # SQL execution failed
-                    error = tool_output.get("error", "Unknown error") if isinstance(tool_output, dict) else "Unknown error"
-                    process_parts.append(f"{step_num}. Execute SQL (using tool \"execute_sql\"): Failed - {error}")
-                    step_num += 1
-                    
-            elif tool_name == "semantic_search":
-                # Step: Semantic Search
-                query_text = tool_input.get("query_text") or tool_input.get("query") or tool_input.get("question", "")
-                process_parts.append(f"{step_num}. Semantic Search (using tool \"semantic_search\"):")
-                process_parts.append("   -- SQL Query: --")
-                # Construct the SQL query template
-                base_sql = (
-                    "SELECT id, brand, fridge_model, price, sales_date, store_name, "
-                    "customer_feedback, feedback_rating, feedback_sentiment_category "
-                    "FROM fru_sales_embeddings "
-                    "ORDER BY embedding <-> $query_vector::vector "
-                    "LIMIT 50;"
-                )
-                process_parts.append(f"   {base_sql}")
-                if query_text:
-                    process_parts.append(f"   Search query: '{query_text}'")
+            # Find all THOUGHT sections
+            thought_matches = re.finditer(pattern, response_text, re.IGNORECASE | re.DOTALL)
+            tool_matches = list(re.finditer(tool_pattern, response_text, re.IGNORECASE))
+            
+            # Pair thoughts with tools
+            thought_list = list(thought_matches)
+            for i, thought_match in enumerate(thought_list):
+                thought_text = thought_match.group(1).strip()
+                # Find the corresponding tool (next TOOL: after this THOUGHT:)
+                tool_name = None
+                for tool_match in tool_matches:
+                    if tool_match.start() > thought_match.end():
+                        tool_name = tool_match.group(1).lower()
+                        break
+                thoughts.append({
+                    "thought": thought_text,
+                    "tool": tool_name
+                })
+            
+            return thoughts
+        
+        # Map agent thoughts to iterations
+        # Each iteration has one agent_thought entry (the full planning response)
+        iteration_thoughts = {}
+        for iter_idx, thought_text in enumerate(agent_thoughts):
+            if thought_text:
+                # Parse thoughts from this iteration's response
+                parsed_thoughts = parse_thoughts_from_response(thought_text)
+                iteration_thoughts[iter_idx] = parsed_thoughts
+        
+        # Group tool calls by iteration
+        # Heuristic: New iteration starts when:
+        # 1. generate_sql appears after execute_sql or semantic_search
+        # 2. First tool call
+        iterations = []
+        current_iteration = []
+        current_iteration_idx = 0
+        
+        for idx, tool_call in enumerate(tool_calls):
+            tool_name = tool_call.get("tool", "")
+            
+            # Detect iteration boundary: new generate_sql after execute_sql or semantic_search
+            if tool_name == "generate_sql" and current_iteration:
+                # Check if previous iteration had execute_sql or semantic_search
+                prev_has_execute = any(tc[1].get("tool") == "execute_sql" for tc in current_iteration)
+                prev_has_semantic = any(tc[1].get("tool") == "semantic_search" for tc in current_iteration)
                 
-                # Show search results if available
-                if isinstance(tool_output, dict):
-                    row_count = tool_output.get("row_count", 0)
-                    if success and row_count is not None:
-                        process_parts.append(f"   -- Result: Retrieved {row_count} row{'s' if row_count != 1 else ''}")
-                    elif not success:
-                        error = tool_output.get("error", "Unknown error")
-                        process_parts.append(f"   -- Result: Failed - {error}")
-                step_num += 1
+                if prev_has_execute or prev_has_semantic:
+                    # Start new iteration
+                    iterations.append((current_iteration_idx, current_iteration))
+                    current_iteration = []
+                    current_iteration_idx += 1
+            
+            current_iteration.append((idx, tool_call))
+        
+        # Add the last iteration
+        if current_iteration:
+            iterations.append((current_iteration_idx, current_iteration))
+        
+        # Track which generate_sql calls get executed and their step numbers
+        executed_sql_map = {}  # Maps generate_sql global_idx to execute_sql global_idx
+        generate_sql_sql_map = {}  # Maps generate_sql global_idx to its SQL
+        generate_sql_step_map = {}  # Maps generate_sql global_idx to its step number
+        
+        # First pass: assign step numbers and track generate_sql
+        temp_step_num = 1
+        for iter_idx, (iteration_idx, iteration_tools) in enumerate(iterations):
+            for tool_idx_in_iter, (global_idx, tool_call) in enumerate(iteration_tools):
+                tool_name = tool_call.get("tool", "")
+                
+                if tool_name == "generate_sql":
+                    sql = extract_sql_from_tool(tool_call, global_idx)
+                    if sql:
+                        generate_sql_sql_map[global_idx] = sql
+                        generate_sql_step_map[global_idx] = temp_step_num
+                    temp_step_num += 1
+                elif tool_name == "execute_sql":
+                    sql = extract_sql_from_tool(tool_call, global_idx)
+                    if sql:
+                        # Find which generate_sql this executes (look backwards)
+                        for prev_global_idx in reversed(range(global_idx)):
+                            if prev_global_idx in generate_sql_sql_map:
+                                prev_sql = generate_sql_sql_map[prev_global_idx]
+                                # Check if SQL matches (normalize whitespace)
+                                if prev_sql.replace(" ", "").replace("\n", "") == sql.replace(" ", "").replace("\n", ""):
+                                    executed_sql_map[prev_global_idx] = global_idx
+                                    break
+                    temp_step_num += 1
+                elif tool_name == "semantic_search":
+                    temp_step_num += 1
+        
+        # Now format the output grouped by iteration
+        step_num = 1
+        
+        # Safety check: ensure iterations is a list
+        if not isinstance(iterations, list):
+            iterations = []
+        
+        try:
+            for iter_idx, iteration_data in enumerate(iterations):
+                # Handle both old format (list) and new format (tuple)
+                if isinstance(iteration_data, tuple) and len(iteration_data) == 2:
+                    iteration_idx, iteration_tools = iteration_data
+                    # Ensure iteration_idx is an int
+                    if not isinstance(iteration_idx, int):
+                        iteration_idx = iter_idx
+                else:
+                    # Old format: just a list of tools
+                    iteration_idx = iter_idx
+                    iteration_tools = iteration_data
+                iteration_num = iter_idx + 1
+                
+                # Get iteration-level plan from agent thoughts
+                iteration_plan = ""
+                if agent_thoughts and isinstance(iteration_idx, int) and iteration_idx < len(agent_thoughts) and agent_thoughts[iteration_idx]:
+                    # Extract a summary from the first THOUGHT or the full response
+                    thought_text = agent_thoughts[iteration_idx]
+                    # Try to extract first THOUGHT section
+                    thought_match = re.search(r'THOUGHT:\s*(.*?)(?=TOOL:|$)', thought_text, re.IGNORECASE | re.DOTALL)
+                    if thought_match:
+                        iteration_plan = thought_match.group(1).strip()
+                        # Truncate if too long
+                        if len(iteration_plan) > 150:
+                            iteration_plan = iteration_plan[:147] + "..."
+                    else:
+                        # Fallback: use first line or first 100 chars
+                        first_line = thought_text.split('\n')[0].strip()
+                        iteration_plan = first_line[:100] if len(first_line) > 100 else first_line
+                
+                # Get per-tool thoughts for this iteration
+                tool_thoughts_map = {}
+                if iteration_idx in iteration_thoughts:
+                    for thought_entry in iteration_thoughts[iteration_idx]:
+                        tool_name = thought_entry.get("tool")
+                        if tool_name:
+                            tool_thoughts_map[tool_name] = thought_entry.get("thought", "").strip()
+                
+                # Format iteration header
+                if iteration_plan:
+                    process_parts.append(f"Iteration {iteration_num}: {iteration_plan}")
+                else:
+                    # Fallback: infer from tools
+                    tool_names = [tc[1].get("tool", "") for tc in iteration_tools]
+                    if "generate_sql" in tool_names and "execute_sql" in tool_names:
+                        iteration_plan = "Agent decided to use SQL approach"
+                    elif "semantic_search" in tool_names:
+                        iteration_plan = "Agent decided to use semantic search"
+                    else:
+                        iteration_plan = "Agent continued processing"
+                    process_parts.append(f"Iteration {iteration_num}: {iteration_plan}")
+                
+                for tool_idx_in_iter, (global_idx, tool_call) in enumerate(iteration_tools):
+                    tool_name = tool_call.get("tool", "")
+                    tool_input = tool_call.get("input", {})
+                    tool_output = tool_call.get("output", {})
+                    success = tool_output.get("success", False) if isinstance(tool_output, dict) else False
+                    
+                    if tool_name == "generate_sql":
+                        # Step: Generate SQL
+                        sql = extract_sql_from_tool(tool_call, global_idx)
+                        if sql:
+                            # Check if this SQL gets executed
+                            is_executed = global_idx in executed_sql_map
+                            status_marker = "" if is_executed else " (ABANDONED - never executed)"
+                            
+                            # Get actual agent thought for this tool
+                            agent_thought = tool_thoughts_map.get("generate_sql", "")
+                            if not agent_thought:
+                                # Fallback: infer from context
+                                agent_thought = "generate SQL query to retrieve quantitative data"
+                                if not is_executed:
+                                    agent_thought = "generate SQL query (but later decided not to execute it)"
+                            
+                            process_parts.append(f"   Step {step_num}. [Agent Thought]: {agent_thought}")
+                            process_parts.append(f"      ## Generate SQL (using tool \"generate_sql\"){status_marker} ##:")
+                            process_parts.append("      -- SQL: --")
+                            sql_lines = sql.split("\n")
+                            for line in sql_lines:
+                                process_parts.append(f"      {line}")
+                            step_num += 1
+                        elif success:
+                            agent_thought = tool_thoughts_map.get("generate_sql", "generate SQL query to retrieve quantitative data")
+                            process_parts.append(f"   Step {step_num}. [Agent Thought]: {agent_thought}")
+                            process_parts.append(f"      ## Generate SQL (using tool \"generate_sql\") ##: SQL generated successfully")
+                            step_num += 1
+                        else:
+                            error = tool_output.get("error", "Unknown error") if isinstance(tool_output, dict) else "Unknown error"
+                            agent_thought = tool_thoughts_map.get("generate_sql", "generate SQL query (but failed)")
+                            process_parts.append(f"   Step {step_num}. [Agent Thought]: {agent_thought}")
+                            process_parts.append(f"      ## Generate SQL (using tool \"generate_sql\") ##: Failed - {error}")
+                            step_num += 1
+                            
+                    elif tool_name == "execute_sql":
+                        # Step: Execute SQL
+                        sql = extract_sql_from_tool(tool_call, global_idx)
+                        if sql:
+                            # Find which generate_sql this executes
+                            source_step = None
+                            for gen_idx, exec_idx in executed_sql_map.items():
+                                if exec_idx == global_idx:
+                                    source_step = generate_sql_step_map.get(gen_idx)
+                                    break
+                            
+                            source_note = f" (from step {source_step})" if source_step else ""
+                            agent_thought = tool_thoughts_map.get("execute_sql", f"execute SQL query{source_note} to retrieve data from database")
+                            process_parts.append(f"   Step {step_num}. [Agent Thought]: {agent_thought}")
+                            process_parts.append(f"      ## Execute SQL (using tool \"execute_sql\"){source_note} ##:")
+                            process_parts.append("      -- SQL: --")
+                            sql_lines = sql.split("\n")
+                            for line in sql_lines:
+                                process_parts.append(f"      {line}")
+                            
+                            # Show execution results
+                            if isinstance(tool_output, dict):
+                                row_count = tool_output.get("row_count", 0)
+                                if success and row_count is not None:
+                                    process_parts.append(f"      -- Result: Retrieved {row_count} row{'s' if row_count != 1 else ''}")
+                                elif not success:
+                                    error = tool_output.get("error", "Unknown error")
+                                    process_parts.append(f"      -- Result: Failed - {error}")
+                            step_num += 1
+                        elif success:
+                            row_count = tool_output.get("row_count", 0) if isinstance(tool_output, dict) else 0
+                            agent_thought = tool_thoughts_map.get("execute_sql", "execute SQL query to retrieve data from database")
+                            process_parts.append(f"   Step {step_num}. [Agent Thought]: {agent_thought}")
+                            process_parts.append(f"      ## Execute SQL (using tool \"execute_sql\") ##: Executed successfully, retrieved {row_count} row{'s' if row_count != 1 else ''}")
+                            step_num += 1
+                        else:
+                            error = tool_output.get("error", "Unknown error") if isinstance(tool_output, dict) else "Unknown error"
+                            agent_thought = tool_thoughts_map.get("execute_sql", "execute SQL query (but failed)")
+                            process_parts.append(f"   Step {step_num}. [Agent Thought]: {agent_thought}")
+                            process_parts.append(f"      ## Execute SQL (using tool \"execute_sql\") ##: Failed - {error}")
+                            step_num += 1
+                            
+                    elif tool_name == "semantic_search":
+                        # Step: Semantic Search
+                        # Get query_text from normalized input (after normalization, it should always exist)
+                        query_text = tool_input.get("query_text") or tool_input.get("query") or tool_input.get("question", "")
+                        # If still empty, it will be filled by normalization with the original question
+                        # We'll show it as the original question if it's empty here
+                        if not query_text:
+                            query_text = question  # Fallback to original question
+                        
+                        # Extract filter parameters (separate from limit)
+                        filters = []
+                        if tool_input.get("feedback_rating_min") is not None:
+                            filters.append(f"rating_min={tool_input.get('feedback_rating_min')}")
+                        if tool_input.get("feedback_rating_max") is not None:
+                            filters.append(f"rating_max={tool_input.get('feedback_rating_max')}")
+                        if tool_input.get("feedback_sentiment_category"):
+                            filters.append(f"sentiment={tool_input.get('feedback_sentiment_category')}")
+                        
+                        # Extract limit separately (not a filter)
+                        limit = tool_input.get("limit", 50)  # Default is 50
+                        
+                        # Get actual agent thought for this tool
+                        agent_thought = tool_thoughts_map.get("semantic_search", "")
+                        if not agent_thought:
+                            # Fallback: infer from filters and context
+                            agent_thought_parts = []
+                            if filters:
+                                filter_desc = ", ".join([f.split("=")[0] for f in filters])
+                                agent_thought_parts.append(f"search with {filter_desc} filters")
+                            else:
+                                agent_thought_parts.append("search for semantically similar feedback")
+                            if limit != 50:
+                                agent_thought_parts.append(f"with limit {limit}")
+                            agent_thought = " ".join(agent_thought_parts) if agent_thought_parts else "search for semantically similar feedback"
+                        
+                        process_parts.append(f"   Step {step_num}. [Agent Thought]: {agent_thought}")
+                        process_parts.append(f"      ## Semantic Search (using tool \"semantic_search\") ##:")
+                        if query_text:
+                            process_parts.append(f"      -->> Query: \"{query_text}\" <<--")
+                        if filters:
+                            filters_str = ", ".join(filters)
+                            process_parts.append(f"      -->> Filters: [{filters_str}] <<--")
+                        if limit != 50:
+                            process_parts.append(f"      Limit: {limit}")
+                        process_parts.append("      -- SQL Query: --")
+                        base_sql = (
+                            "SELECT id, brand, fridge_model, price, sales_date, store_name, "
+                            "customer_feedback, feedback_rating, feedback_sentiment_category "
+                            "FROM fru_sales_embeddings "
+                            "ORDER BY embedding <-> $query_vector::vector "
+                            f"LIMIT {limit};"
+                        )
+                        process_parts.append(f"      {base_sql}")
+                        
+                        # Show search results
+                        if isinstance(tool_output, dict):
+                            row_count = tool_output.get("row_count", 0)
+                            if success and row_count is not None:
+                                process_parts.append(f"      -- Result: Retrieved {row_count} row{'s' if row_count != 1 else ''}")
+                            elif not success:
+                                error = tool_output.get("error", "Unknown error")
+                                process_parts.append(f"      -- Result: Failed - {error}")
+                        step_num += 1
+            
+                # Add blank line between iterations (except after last)
+                try:
+                    if isinstance(iter_idx, int) and isinstance(iterations, list) and iter_idx < len(iterations) - 1:
+                        process_parts.append("")
+                except (TypeError, AttributeError):
+                    # Skip blank line if comparison fails
+                    pass
+        except Exception as e:
+            # If there's an error processing iterations, add error message
+            import traceback
+            error_msg = f"Error processing iterations: {e}\nTraceback: {traceback.format_exc()}"
+            process_parts.append(error_msg)
+            # Re-raise to see full error in test output
+            raise
         
         # Always end with LLM Analysis
-        if step_num > 1:  # Only add if there were tool calls
-            process_parts.append(f"{step_num}. LLM Analysis: Analyzed retrieved data using Claude to synthesize the final answer.")
+        # Track primary step (last successful execute_sql or semantic_search with rows)
+        primary_step = None
+        temp_step_counter = 1
+        for iter_idx, iteration_data in enumerate(iterations):
+            # Handle both old format (list) and new format (tuple)
+            if isinstance(iteration_data, tuple) and len(iteration_data) == 2:
+                iteration_idx, iteration_tools = iteration_data
+            else:
+                # Old format: just a list of tools
+                iteration_tools = iteration_data
+            for tool_idx_in_iter, (global_idx, tool_call) in enumerate(iteration_tools):
+                tool_name = tool_call.get("tool", "")
+                tool_output = tool_call.get("output", {})
+                row_count = tool_output.get("row_count") if isinstance(tool_output, dict) else None
+                if isinstance(tool_output, dict) and tool_output.get("success") and row_count is not None and row_count > 0:
+                    if tool_name == "execute_sql":
+                        primary_step = temp_step_counter
+                    elif tool_name == "semantic_search" and primary_step is None:
+                        primary_step = temp_step_counter
+                if tool_name in ["generate_sql", "execute_sql", "semantic_search"]:
+                    temp_step_counter += 1
+        
+        # Ensure step_num is an int (safety check)
+        if step_num is None or not isinstance(step_num, int):
+            step_num = 1
+        
+        # Ensure primary_step is an int or None (safety check)
+        if primary_step is not None and not isinstance(primary_step, int):
+            primary_step = None
+        
+        # Safety check for step_num comparison
+        try:
+            step_num_valid = isinstance(step_num, int) and step_num > 1
+        except (TypeError, AttributeError):
+            step_num = 1
+            step_num_valid = False
+        
+        if step_num_valid:
+            if primary_step:
+                process_parts.append(f"Step {step_num}. [Agent Thought]: synthesize final answer using Claude based on retrieved data")
+                process_parts.append(f"   ## LLM Analysis ##: Analyzed retrieved data from Step {primary_step} using Claude to synthesize the final answer.")
+            else:
+                process_parts.append(f"Step {step_num}. [Agent Thought]: synthesize final answer using Claude based on retrieved data")
+                process_parts.append(f"   ## LLM Analysis ##: Analyzed retrieved data using Claude to synthesize the final answer.")
         else:
-            # No tool calls but agent was used
-            process_parts.append(f"{step_num}. Agent-based processing: Used multiple tools to gather information.")
+            process_parts.append(f"Step {step_num}. [Agent Thought]: process query using agent-based approach")
+            process_parts.append(f"   ## Agent-based processing ##: Used multiple tools to gather information.")
             step_num += 1
-            process_parts.append(f"{step_num}. LLM Analysis: Analyzed retrieved data using Claude to synthesize the final answer.")
+            process_parts.append(f"Step {step_num}. [Agent Thought]: synthesize final answer using Claude based on retrieved data")
+            process_parts.append(f"   ## LLM Analysis ##: Analyzed retrieved data using Claude to synthesize the final answer.")
         
         return "\n".join(process_parts)
     
