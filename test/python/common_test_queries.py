@@ -247,43 +247,46 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
                 iteration_num = iter_idx + 1
                 
                 # Get iteration-level plan from agent thoughts
-                iteration_plan = ""
+                iteration_thought = ""
                 if agent_thoughts and isinstance(iteration_idx, int) and iteration_idx < len(agent_thoughts) and agent_thoughts[iteration_idx]:
-                    # Extract a summary from the first THOUGHT or the full response
+                    # Extract the first THOUGHT section from the agent's planning response
                     thought_text = agent_thoughts[iteration_idx]
                     # Try to extract first THOUGHT section
                     thought_match = re.search(r'THOUGHT:\s*(.*?)(?=TOOL:|$)', thought_text, re.IGNORECASE | re.DOTALL)
                     if thought_match:
-                        iteration_plan = thought_match.group(1).strip()
-                        # Truncate if too long
-                        if len(iteration_plan) > 150:
-                            iteration_plan = iteration_plan[:147] + "..."
+                        iteration_thought = thought_match.group(1).strip()
                     else:
-                        # Fallback: use first line or first 100 chars
+                        # Fallback: use first line or first 200 chars
                         first_line = thought_text.split('\n')[0].strip()
-                        iteration_plan = first_line[:100] if len(first_line) > 100 else first_line
+                        iteration_thought = first_line[:200] if len(first_line) > 200 else first_line
                 
-                # Get per-tool thoughts for this iteration
-                tool_thoughts_map = {}
-                if iteration_idx in iteration_thoughts:
-                    for thought_entry in iteration_thoughts[iteration_idx]:
-                        tool_name = thought_entry.get("tool")
-                        if tool_name:
-                            tool_thoughts_map[tool_name] = thought_entry.get("thought", "").strip()
-                
-                # Format iteration header
-                if iteration_plan:
-                    process_parts.append(f"Iteration {iteration_num}: {iteration_plan}")
-                else:
-                    # Fallback: infer from tools
-                    tool_names = [tc[1].get("tool", "") for tc in iteration_tools]
-                    if "generate_sql" in tool_names and "execute_sql" in tool_names:
-                        iteration_plan = "Agent decided to use SQL approach"
-                    elif "semantic_search" in tool_names:
-                        iteration_plan = "Agent decided to use semantic search"
-                    else:
-                        iteration_plan = "Agent continued processing"
-                    process_parts.append(f"Iteration {iteration_num}: {iteration_plan}")
+                # Format iteration header with agent thought
+                process_parts.append(f"Iteration {iteration_num}:")
+                if iteration_thought:
+                    # Format thought with # markers
+                    # Split into lines and format each line with ## prefix
+                    thought_lines = iteration_thought.split('\n')
+                    # Remove empty lines and clean up
+                    thought_lines = [line.strip() for line in thought_lines if line.strip()]
+                    
+                    # Format with # markers
+                    separator = "   " + "#" * 40
+                    process_parts.append(separator)
+                    
+                    # First line is the main thought
+                    if thought_lines:
+                        process_parts.append("   ## Agent's Thought: " + thought_lines[0])
+                    
+                    # Remaining lines: format numbered or bulleted items with ## - prefix
+                    for line in thought_lines[1:]:
+                        # Check if line starts with number or bullet
+                        if re.match(r'^\d+\.', line) or re.match(r'^[-*]', line):
+                            process_parts.append("   ## - " + line)
+                        elif line.strip():
+                            # Regular line - add ## prefix
+                            process_parts.append("   ## " + line)
+                    
+                    process_parts.append(separator)
                 
                 for tool_idx_in_iter, (global_idx, tool_call) in enumerate(iteration_tools):
                     tool_name = tool_call.get("tool", "")
@@ -299,31 +302,18 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
                             is_executed = global_idx in executed_sql_map
                             status_marker = "" if is_executed else " (ABANDONED - never executed)"
                             
-                            # Get actual agent thought for this tool
-                            agent_thought = tool_thoughts_map.get("generate_sql", "")
-                            if not agent_thought:
-                                # Fallback: infer from context
-                                agent_thought = "generate SQL query to retrieve quantitative data"
-                                if not is_executed:
-                                    agent_thought = "generate SQL query (but later decided not to execute it)"
-                            
-                            process_parts.append(f"   Step {step_num}. [Agent Thought]: {agent_thought}")
-                            process_parts.append(f"      ## Generate SQL (using tool \"generate_sql\"){status_marker} ##:")
+                            process_parts.append(f"   Step {step_num}. Generate SQL (using tool \"generate_sql\"){status_marker}:")
                             process_parts.append("      -- SQL: --")
                             sql_lines = sql.split("\n")
                             for line in sql_lines:
                                 process_parts.append(f"      {line}")
                             step_num += 1
                         elif success:
-                            agent_thought = tool_thoughts_map.get("generate_sql", "generate SQL query to retrieve quantitative data")
-                            process_parts.append(f"   Step {step_num}. [Agent Thought]: {agent_thought}")
-                            process_parts.append(f"      ## Generate SQL (using tool \"generate_sql\") ##: SQL generated successfully")
+                            process_parts.append(f"   Step {step_num}. Generate SQL (using tool \"generate_sql\"): SQL generated successfully")
                             step_num += 1
                         else:
                             error = tool_output.get("error", "Unknown error") if isinstance(tool_output, dict) else "Unknown error"
-                            agent_thought = tool_thoughts_map.get("generate_sql", "generate SQL query (but failed)")
-                            process_parts.append(f"   Step {step_num}. [Agent Thought]: {agent_thought}")
-                            process_parts.append(f"      ## Generate SQL (using tool \"generate_sql\") ##: Failed - {error}")
+                            process_parts.append(f"   Step {step_num}. Generate SQL (using tool \"generate_sql\"): Failed - {error}")
                             step_num += 1
                             
                     elif tool_name == "execute_sql":
@@ -338,9 +328,7 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
                                     break
                             
                             source_note = f" (from step {source_step})" if source_step else ""
-                            agent_thought = tool_thoughts_map.get("execute_sql", f"execute SQL query{source_note} to retrieve data from database")
-                            process_parts.append(f"   Step {step_num}. [Agent Thought]: {agent_thought}")
-                            process_parts.append(f"      ## Execute SQL (using tool \"execute_sql\"){source_note} ##:")
+                            process_parts.append(f"   Step {step_num}. Execute SQL (using tool \"execute_sql\"){source_note}:")
                             process_parts.append("      -- SQL: --")
                             sql_lines = sql.split("\n")
                             for line in sql_lines:
@@ -348,7 +336,9 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
                             
                             # Show execution results
                             if isinstance(tool_output, dict):
-                                row_count = tool_output.get("row_count", 0)
+                                row_count = tool_output.get("row_count")
+                                if row_count is None:
+                                    row_count = 0
                                 if success and row_count is not None:
                                     process_parts.append(f"      -- Result: Retrieved {row_count} row{'s' if row_count != 1 else ''}")
                                 elif not success:
@@ -356,16 +346,14 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
                                     process_parts.append(f"      -- Result: Failed - {error}")
                             step_num += 1
                         elif success:
-                            row_count = tool_output.get("row_count", 0) if isinstance(tool_output, dict) else 0
-                            agent_thought = tool_thoughts_map.get("execute_sql", "execute SQL query to retrieve data from database")
-                            process_parts.append(f"   Step {step_num}. [Agent Thought]: {agent_thought}")
-                            process_parts.append(f"      ## Execute SQL (using tool \"execute_sql\") ##: Executed successfully, retrieved {row_count} row{'s' if row_count != 1 else ''}")
+                            row_count = tool_output.get("row_count") if isinstance(tool_output, dict) else None
+                            if row_count is None:
+                                row_count = 0
+                            process_parts.append(f"   Step {step_num}. Execute SQL (using tool \"execute_sql\"): Executed successfully, retrieved {row_count} row{'s' if row_count != 1 else ''}")
                             step_num += 1
                         else:
                             error = tool_output.get("error", "Unknown error") if isinstance(tool_output, dict) else "Unknown error"
-                            agent_thought = tool_thoughts_map.get("execute_sql", "execute SQL query (but failed)")
-                            process_parts.append(f"   Step {step_num}. [Agent Thought]: {agent_thought}")
-                            process_parts.append(f"      ## Execute SQL (using tool \"execute_sql\") ##: Failed - {error}")
+                            process_parts.append(f"   Step {step_num}. Execute SQL (using tool \"execute_sql\"): Failed - {error}")
                             step_num += 1
                             
                     elif tool_name == "semantic_search":
@@ -387,24 +375,11 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
                             filters.append(f"sentiment={tool_input.get('feedback_sentiment_category')}")
                         
                         # Extract limit separately (not a filter)
-                        limit = tool_input.get("limit", 50)  # Default is 50
+                        limit = tool_input.get("limit")
+                        if limit is None:
+                            limit = 50  # Default is 50
                         
-                        # Get actual agent thought for this tool
-                        agent_thought = tool_thoughts_map.get("semantic_search", "")
-                        if not agent_thought:
-                            # Fallback: infer from filters and context
-                            agent_thought_parts = []
-                            if filters:
-                                filter_desc = ", ".join([f.split("=")[0] for f in filters])
-                                agent_thought_parts.append(f"search with {filter_desc} filters")
-                            else:
-                                agent_thought_parts.append("search for semantically similar feedback")
-                            if limit != 50:
-                                agent_thought_parts.append(f"with limit {limit}")
-                            agent_thought = " ".join(agent_thought_parts) if agent_thought_parts else "search for semantically similar feedback"
-                        
-                        process_parts.append(f"   Step {step_num}. [Agent Thought]: {agent_thought}")
-                        process_parts.append(f"      ## Semantic Search (using tool \"semantic_search\") ##:")
+                        process_parts.append(f"   Step {step_num}. Semantic Search (using tool \"semantic_search\"):")
                         if query_text:
                             process_parts.append(f"      -->> Query: \"{query_text}\" <<--")
                         if filters:
@@ -424,7 +399,9 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
                         
                         # Show search results
                         if isinstance(tool_output, dict):
-                            row_count = tool_output.get("row_count", 0)
+                            row_count = tool_output.get("row_count")
+                            if row_count is None:
+                                row_count = 0
                             if success and row_count is not None:
                                 process_parts.append(f"      -- Result: Retrieved {row_count} row{'s' if row_count != 1 else ''}")
                             elif not success:
@@ -487,17 +464,13 @@ def _extract_deriving_process(resp: Dict, question: str) -> str:
         
         if step_num_valid:
             if primary_step:
-                process_parts.append(f"Step {step_num}. [Agent Thought]: synthesize final answer using Claude based on retrieved data")
-                process_parts.append(f"   ## LLM Analysis ##: Analyzed retrieved data from Step {primary_step} using Claude to synthesize the final answer.")
+                process_parts.append(f"Step {step_num}. LLM Analysis: Analyzed retrieved data from Step {primary_step} using Claude to synthesize the final answer.")
             else:
-                process_parts.append(f"Step {step_num}. [Agent Thought]: synthesize final answer using Claude based on retrieved data")
-                process_parts.append(f"   ## LLM Analysis ##: Analyzed retrieved data using Claude to synthesize the final answer.")
+                process_parts.append(f"Step {step_num}. LLM Analysis: Analyzed retrieved data using Claude to synthesize the final answer.")
         else:
-            process_parts.append(f"Step {step_num}. [Agent Thought]: process query using agent-based approach")
-            process_parts.append(f"   ## Agent-based processing ##: Used multiple tools to gather information.")
+            process_parts.append(f"Step {step_num}. Agent-based processing: Used multiple tools to gather information.")
             step_num += 1
-            process_parts.append(f"Step {step_num}. [Agent Thought]: synthesize final answer using Claude based on retrieved data")
-            process_parts.append(f"   ## LLM Analysis ##: Analyzed retrieved data using Claude to synthesize the final answer.")
+            process_parts.append(f"Step {step_num}. LLM Analysis: Analyzed retrieved data using Claude to synthesize the final answer.")
         
         return "\n".join(process_parts)
     
