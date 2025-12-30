@@ -6,6 +6,7 @@
 #   From the repo root:
 #     ./test/test_query_1.sh --test-env aws
 #     ./test/test_query_1.sh --test-env local
+#     ./test/test_query_1.sh --test-env aws --use-cached-aws-val
 #
 set -euo pipefail
 

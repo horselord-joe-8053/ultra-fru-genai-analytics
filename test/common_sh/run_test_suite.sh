@@ -11,9 +11,10 @@ run_test_suite() {
     local run_prefix="$1"
     shift
     
-    # Parse --test-env argument from remaining arguments
+    # Parse arguments
     local test_env=""
     local test_codes=()
+    local use_cached_aws_val=false
     
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -28,6 +29,10 @@ run_test_suite() {
                     return 1
                 fi
                 shift 2
+                ;;
+            --use-cached-aws-val)
+                use_cached_aws_val=true
+                shift
                 ;;
             *)
                 # Everything else is a test code
@@ -47,8 +52,9 @@ run_test_suite() {
         return 1
     fi
     
-    # Export TEST_ENV for use in other functions
+    # Export TEST_ENV and USE_CACHED_AWS_VAL for use in other functions
     export TEST_ENV="$test_env"
+    export USE_CACHED_AWS_VAL="$use_cached_aws_val"
     
     local total_tests=${#test_codes[@]}
     

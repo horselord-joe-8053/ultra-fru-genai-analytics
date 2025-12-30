@@ -19,15 +19,50 @@ fetch_terraform_outputs() {
         return 0
     fi
     
-    # Initialize variables to empty (in case fetch fails)
-    ALB_DNS=""
-    CLOUDFRONT_DOMAIN=""
-    ECS_CLUSTER_ID=""
-    ECS_CLUSTER_NAME=""
-    ECS_SERVICE_NAME=""
-    EKS_CLUSTER_NAME=""
-    K8S_SERVICE_IP=""
-    K8S_INGRESS_HOST=""
+    # Debug: Verify variables are visible inside fetch_terraform_outputs()
+    if command -v log_info >/dev/null 2>&1; then
+        log_info "Inside fetch_terraform_outputs():"
+        log_info "  TF_STATE_BUCKET=[${TF_STATE_BUCKET:-NOT SET}]"
+        log_info "  AWS_PROFILE=[${AWS_PROFILE:-NOT SET}]"
+        log_info "  REPO_ROOT=[${REPO_ROOT:-NOT SET}]"
+        log_info "  ENVIRONMENT=[${ENVIRONMENT:-NOT SET}]"
+    fi
+    
+    # Check if critical variables are already set - if so, skip expensive terragrunt/AWS CLI calls
+    # This provides significant performance savings when function is called multiple times
+    # Optimization: Check if API_URL is set (most critical) OR if core ECS variables are set
+    # This is more lenient than requiring ALL variables, since some may be optional (e.g., CLOUDFRONT_DOMAIN)
+    if [ -n "${API_URL:-}" ] || 
+       ([ -n "${ALB_DNS:-}" ] && [ -n "${ECS_CLUSTER_ID:-}" ] && [ -n "${ECS_SERVICE_NAME:-}" ]); then
+        if command -v log_info >/dev/null 2>&1; then
+            log_info "Deployment variables already set, skipping expensive terragrunt/AWS CLI calls"
+            log_info "  API_URL=[${API_URL:-NOT SET}]"
+            log_info "  ALB_DNS=[${ALB_DNS:-NOT SET}]"
+            log_info "  CLOUDFRONT_DOMAIN=[${CLOUDFRONT_DOMAIN:-NOT SET}]"
+            log_info "  ECS_CLUSTER_ID=[${ECS_CLUSTER_ID:-NOT SET}]"
+        fi
+        # Ensure derived variables are set
+        if [ -n "$ECS_CLUSTER_ID" ] && [ -z "${ECS_CLUSTER_NAME:-}" ]; then
+            ECS_CLUSTER_NAME=$(echo "$ECS_CLUSTER_ID" | awk -F'/' '{print $NF}' || echo "")
+        fi
+        if [ -n "$ALB_DNS" ] && [ -z "${API_URL:-}" ]; then
+            API_URL="http://$ALB_DNS"
+        fi
+        if [ -n "$CLOUDFRONT_DOMAIN" ] && [ -z "${FRONTEND_URL:-}" ]; then
+            FRONTEND_URL="https://$CLOUDFRONT_DOMAIN"
+        fi
+        return 0
+    fi
+    
+    # Initialize variables to empty (only if not already set)
+    ALB_DNS="${ALB_DNS:-}"
+    CLOUDFRONT_DOMAIN="${CLOUDFRONT_DOMAIN:-}"
+    ECS_CLUSTER_ID="${ECS_CLUSTER_ID:-}"
+    ECS_CLUSTER_NAME="${ECS_CLUSTER_NAME:-}"
+    ECS_SERVICE_NAME="${ECS_SERVICE_NAME:-}"
+    EKS_CLUSTER_NAME="${EKS_CLUSTER_NAME:-}"
+    K8S_SERVICE_IP="${K8S_SERVICE_IP:-}"
+    K8S_INGRESS_HOST="${K8S_INGRESS_HOST:-}"
     
     TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT"
     
@@ -37,22 +72,48 @@ fetch_terraform_outputs() {
         if [ -d "$APP_DIR" ] && command_exists terragrunt; then
             ORIG_DIR=$(pwd)
             cd "$APP_DIR" 2>/dev/null || return 0
+            
+            # Debug: Verify variables are still set before calling terragrunt
+            if command -v log_info >/dev/null 2>&1; then
+                log_info "About to run terragrunt in $APP_DIR:"
+                log_info "  TF_STATE_BUCKET=[${TF_STATE_BUCKET:-NOT SET}]"
+                log_info "  AWS_PROFILE=[${AWS_PROFILE:-NOT SET}]"
+            fi
+            
             # Try to read outputs; on failure, log a warning instead of silently ignoring
-            if ! ALB_DNS=$(terragrunt output -raw alb_dns_name 2>/dev/null); then
+            # Note: Only fetch if not already set (skip expensive terragrunt calls if we already have the value)
+            local terragrunt_error
+            if [ -z "${ALB_DNS:-}" ] && ! ALB_DNS=$(terragrunt output -raw alb_dns_name 2>&1); then
+                terragrunt_error="$ALB_DNS"
                 ALB_DNS=""
                 log_warning "Could not read Terraform output 'alb_dns_name' via terragrunt; API URL may be unavailable"
+                if command -v log_info >/dev/null 2>&1 && [ -n "$terragrunt_error" ]; then
+                    log_info "Terragrunt error: ${terragrunt_error:0:200}"
+                fi
             fi
-            if ! CLOUDFRONT_DOMAIN=$(terragrunt output -raw cloudfront_domain_name 2>/dev/null); then
+            if [ -z "${CLOUDFRONT_DOMAIN:-}" ] && ! CLOUDFRONT_DOMAIN=$(terragrunt output -raw cloudfront_domain_name 2>&1); then
+                terragrunt_error="$CLOUDFRONT_DOMAIN"
                 CLOUDFRONT_DOMAIN=""
                 log_warning "Could not read Terraform output 'cloudfront_domain_name' via terragrunt; frontend URL may be unavailable"
+                if command -v log_info >/dev/null 2>&1 && [ -n "$terragrunt_error" ]; then
+                    log_info "Terragrunt error: ${terragrunt_error:0:200}"
+                fi
             fi
-            if ! ECS_CLUSTER_ID=$(terragrunt output -raw ecs_cluster_id 2>/dev/null); then
+            if [ -z "${ECS_CLUSTER_ID:-}" ] && ! ECS_CLUSTER_ID=$(terragrunt output -raw ecs_cluster_id 2>&1); then
+                terragrunt_error="$ECS_CLUSTER_ID"
                 ECS_CLUSTER_ID=""
                 log_warning "Could not read Terraform output 'ecs_cluster_id' via terragrunt; ECS hints may be limited"
+                if command -v log_info >/dev/null 2>&1 && [ -n "$terragrunt_error" ]; then
+                    log_info "Terragrunt error: ${terragrunt_error:0:200}"
+                fi
             fi
-            if ! ECS_SERVICE_NAME=$(terragrunt output -raw ecs_service_name 2>/dev/null); then
+            if [ -z "${ECS_SERVICE_NAME:-}" ] && ! ECS_SERVICE_NAME=$(terragrunt output -raw ecs_service_name 2>&1); then
+                terragrunt_error="$ECS_SERVICE_NAME"
                 ECS_SERVICE_NAME=""
                 log_warning "Could not read Terraform output 'ecs_service_name' via terragrunt; ECS hints may be limited"
+                if command -v log_info >/dev/null 2>&1 && [ -n "$terragrunt_error" ]; then
+                    log_info "Terragrunt error: ${terragrunt_error:0:200}"
+                fi
             fi
             cd "$ORIG_DIR" 2>/dev/null || true
             
@@ -166,6 +227,28 @@ fetch_terraform_outputs() {
     export K8S_INGRESS_HOST
     export API_URL
     export FRONTEND_URL
+    
+    # Write to cache if USE_CACHED_AWS_VAL is set (always update cache to keep it fresh)
+    # This is called from test scripts, so check if cache utilities are available
+    if [[ "${USE_CACHED_AWS_VAL:-false}" == "true" ]] && [ -n "${REPO_ROOT:-}" ]; then
+        local cache_script="${REPO_ROOT}/test/common_sh/test_cache.sh"
+        if [ -f "$cache_script" ]; then
+            # shellcheck source=/dev/null
+            source "$cache_script" 2>/dev/null || true
+            
+            if command -v write_cache_value >/dev/null 2>&1; then
+                local aws_region="${AWS_REGION:-us-east-1}"
+                local environment="${ENVIRONMENT:-dev}"
+                local deployment_type="${DEPLOYMENT_TYPE:-ecs-full}"
+                
+                # Write base variables to cache (non-fatal)
+                write_cache_value "ALB_DNS" "$environment" "$deployment_type" "$aws_region" "${ALB_DNS:-}" "" || true
+                write_cache_value "CLOUDFRONT_DOMAIN" "$environment" "$deployment_type" "$aws_region" "${CLOUDFRONT_DOMAIN:-}" "" || true
+                write_cache_value "ECS_CLUSTER_ID" "$environment" "$deployment_type" "$aws_region" "${ECS_CLUSTER_ID:-}" "" || true
+                write_cache_value "ECS_SERVICE_NAME" "$environment" "$deployment_type" "$aws_region" "${ECS_SERVICE_NAME:-}" "" || true
+            fi
+        fi
+    fi
 }
 
 # Main execution (if run standalone)

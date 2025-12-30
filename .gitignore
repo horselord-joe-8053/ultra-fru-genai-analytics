@@ -60,3 +60,6 @@ temp_terra_gen/
 pgdata/
 
 .env.bak
+
+# Test cache files (local, should not be committed)
+test/cache_files/
