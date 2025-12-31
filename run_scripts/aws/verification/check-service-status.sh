@@ -20,27 +20,71 @@ check_ecs_service_status() {
     fi
     
     log_info "Checking ECS service status..."
-    local cluster_name
-    cluster_name=$(aws ecs list-clusters --query "clusterArns[?contains(@, '$environment')]" --output text 2>/dev/null | head -1 | awk -F'/' '{print $NF}' || echo "")
+    
+    # Use cached values if available (from test cache or environment)
+    local cluster_id="${ECS_CLUSTER_ID:-}"
+    local service_name="${ECS_SERVICE_NAME:-}"
+    local cluster_name=""
+    
+    # Extract cluster name from cached cluster ID if available
+    if [ -n "$cluster_id" ]; then
+        cluster_name=$(echo "$cluster_id" | awk -F'/' '{print $NF}' || echo "")
+        log_info "Using cached ECS cluster: $cluster_name"
+    fi
+    
+    # Fallback: find cluster via AWS CLI if not cached
+    if [ -z "$cluster_name" ]; then
+        cluster_id=$(aws ecs list-clusters --query "clusterArns[?contains(@, '$environment')]" --output text 2>/dev/null | head -1 || echo "")
+        if [ -n "$cluster_id" ]; then
+            cluster_name=$(echo "$cluster_id" | awk -F'/' '{print $NF}' || echo "")
+        fi
+    fi
     
     if [ -z "$cluster_name" ]; then
         log_info "No ECS cluster found for environment: $environment"
         return 0
     fi
     
-    local service_name
-    service_name=$(aws ecs list-services --cluster "$cluster_name" --query "serviceArns[0]" --output text 2>/dev/null | awk -F'/' '{print $NF}' || echo "")
+    # Use cached service name if available
+    if [ -z "$service_name" ]; then
+        # Fallback: find service via AWS CLI if not cached
+        local service_arn
+        service_arn=$(aws ecs list-services --cluster "$cluster_name" --query "serviceArns[0]" --output text 2>/dev/null || echo "")
+        if [ -n "$service_arn" ] && [ "$service_arn" != "None" ]; then
+            service_name=$(echo "$service_arn" | awk -F'/' '{print $NF}' || echo "")
+        fi
+    else
+        log_info "Using cached ECS service: $service_name"
+    fi
     
     if [ -n "$service_name" ]; then
         log_info "ECS Service: $service_name in cluster: $cluster_name"
-        local running_count desired_count
-        running_count=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].runningCount" --output text 2>/dev/null || echo "0")
-        desired_count=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].desiredCount" --output text 2>/dev/null || echo "0")
         
-        # Check deployment status to verify new image is being deployed
-        local primary_deployment running_deployment
-        primary_deployment=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].deployments[?status=='PRIMARY'].runningCount | [0]" --output text 2>/dev/null || echo "0")
-        running_deployment=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].deployments[?status=='PRIMARY'].desiredCount | [0]" --output text 2>/dev/null || echo "0")
+        # Make a single describe-services call and extract all needed values
+        # This is more efficient than making 4 separate calls
+        local service_info
+        service_info=$(aws ecs describe-services \
+            --cluster "$cluster_name" \
+            --services "$service_name" \
+            --query "services[0]" \
+            --output json 2>/dev/null || echo "{}")
+        
+        # Extract values from the single response
+        local running_count desired_count primary_deployment running_deployment
+        
+        # Use jq if available for JSON parsing, otherwise fallback to multiple queries
+        if command_exists jq && [ "$service_info" != "{}" ]; then
+            running_count=$(echo "$service_info" | jq -r '.runningCount // 0' 2>/dev/null || echo "0")
+            desired_count=$(echo "$service_info" | jq -r '.desiredCount // 0' 2>/dev/null || echo "0")
+            primary_deployment=$(echo "$service_info" | jq -r '.deployments[] | select(.status=="PRIMARY") | .runningCount // 0' 2>/dev/null | head -1 || echo "0")
+            running_deployment=$(echo "$service_info" | jq -r '.deployments[] | select(.status=="PRIMARY") | .desiredCount // 0' 2>/dev/null | head -1 || echo "0")
+        else
+            # Fallback: make individual queries if jq is not available
+            running_count=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].runningCount" --output text 2>/dev/null || echo "0")
+            desired_count=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].desiredCount" --output text 2>/dev/null || echo "0")
+            primary_deployment=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].deployments[?status=='PRIMARY'].runningCount | [0]" --output text 2>/dev/null || echo "0")
+            running_deployment=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].deployments[?status=='PRIMARY'].desiredCount | [0]" --output text 2>/dev/null || echo "0")
+        fi
         
         if [ "$running_count" = "$desired_count" ] && [ "$running_count" -gt 0 ]; then
             log_success "ECS service is running ($running_count/$desired_count tasks)"
