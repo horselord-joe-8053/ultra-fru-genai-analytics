@@ -82,8 +82,8 @@ check_ecs_service_status() {
             # Fallback: make individual queries if jq is not available
             running_count=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].runningCount" --output text 2>/dev/null || echo "0")
             desired_count=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].desiredCount" --output text 2>/dev/null || echo "0")
-            primary_deployment=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].deployments[?status=='PRIMARY'].runningCount | [0]" --output text 2>/dev/null || echo "0")
-            running_deployment=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].deployments[?status=='PRIMARY'].desiredCount | [0]" --output text 2>/dev/null || echo "0")
+        primary_deployment=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].deployments[?status=='PRIMARY'].runningCount | [0]" --output text 2>/dev/null || echo "0")
+        running_deployment=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_name" --query "services[0].deployments[?status=='PRIMARY'].desiredCount | [0]" --output text 2>/dev/null || echo "0")
         fi
         
         if [ "$running_count" = "$desired_count" ] && [ "$running_count" -gt 0 ]; then
