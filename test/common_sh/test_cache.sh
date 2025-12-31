@@ -3,7 +3,53 @@
 # Uses pipe-delimited format for robustness
 
 # Cache file location
-CACHE_DIR="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}/test/cache_files"
+# Calculate REPO_ROOT if not set
+# Note: REPO_ROOT should be set by setup_test_environment() before this script is sourced
+# But if not, we calculate it from the script location
+if [ -z "${REPO_ROOT:-}" ]; then
+    # Find this script's actual location
+    # When sourced, BASH_SOURCE[0] in the sourcing context points to the sourcing script
+    # So we need to find test_cache.sh's actual location
+    # test_environment.sh sources this with: source "$(dirname "${BASH_SOURCE[0]}")/test_cache.sh"
+    # So the path passed to source is: test/common_sh/test_cache.sh (relative to test_environment.sh's dir)
+    # We can find it by looking for the cache file in common locations
+    local possible_repo_root
+    # Try to find repo root by looking for test/cache_files directory
+    # Start from current directory and go up
+    possible_repo_root="$(pwd)"
+    while [ "$possible_repo_root" != "/" ]; do
+        if [ -d "$possible_repo_root/test/cache_files" ]; then
+            REPO_ROOT="$possible_repo_root"
+            break
+        fi
+        possible_repo_root="$(dirname "$possible_repo_root")"
+    done
+    
+    # If still not found, try calculating from script location
+    # This script is at test/common_sh/test_cache.sh relative to repo root
+    if [ -z "${REPO_ROOT:-}" ]; then
+        # Get the directory where test_environment.sh is (which sources this)
+        # BASH_SOURCE array: [0] = sourcing script, [1] = this script (if we're in a function)
+        local sourcing_script="${BASH_SOURCE[0]}"
+        # If sourced with relative path, resolve it
+        if [[ "$sourcing_script" != /* ]]; then
+            sourcing_script="$(cd "$(dirname "$sourcing_script")" && pwd)/$(basename "$sourcing_script")"
+        fi
+        # test_environment.sh sources: "$(dirname "${BASH_SOURCE[0]}")/test_cache.sh"
+        # So the dirname gives us test/common_sh/, go up 2 levels
+        local script_dir
+        script_dir="$(cd "$(dirname "$sourcing_script")" && pwd)"
+        # If this script is test_cache.sh, go up 2 levels
+        if [[ "$(basename "$sourcing_script")" == "test_cache.sh" ]] || [[ "$script_dir" == *"/test/common_sh" ]]; then
+            REPO_ROOT="$(cd "$script_dir/../.." && pwd)"
+        else
+            # Otherwise, assume we're in test/common_sh/ and go up 2 levels
+            REPO_ROOT="$(cd "$script_dir/../.." && pwd)"
+        fi
+    fi
+    export REPO_ROOT
+fi
+CACHE_DIR="${REPO_ROOT}/test/cache_files"
 CACHE_FILE="${CACHE_DIR}/cached_aws_setups.txt"
 
 # Default TTL in seconds (1 hour)
@@ -61,23 +107,18 @@ read_cache_value() {
     fi
     
     # Parse cache line (pipe-delimited)
-    # Use IFS to split by pipe
-    local IFS='|'
-    local parts=($cache_line)
-    unset IFS
+    # Extract fields directly using awk (more reliable than array splitting)
+    CACHE_DATETIME=$(echo "$cache_line" | awk -F'|' '{print $5}')
+    CACHE_VALUE=$(echo "$cache_line" | awk -F'|' '{print $6}')
+    CACHE_PROBLEM=$(echo "$cache_line" | awk -F'|' '{print $7}')
     
-    # Validate we have enough parts (need at least 6: key + datetime + value)
-    if [ ${#parts[@]} -lt 6 ]; then
+    # Validate we got the required fields
+    if [ -z "$CACHE_DATETIME" ] || [ -z "$CACHE_VALUE" ]; then
         if command -v log_warning >/dev/null 2>&1; then
-            log_warning "Invalid cache line format: $cache_line (expected at least 6 parts, got ${#parts[@]})"
+            log_warning "Invalid cache line format: $cache_line (missing required fields)"
         fi
         return 1
     fi
-    
-    # Extract values (skip first 4 parts which are the key)
-    CACHE_DATETIME="${parts[4]}"
-    CACHE_VALUE="${parts[5]}"
-    CACHE_PROBLEM="${parts[6]:-}"  # Empty if not present
     
     # Check if value is NULL (failed fetch)
     if [ -z "$CACHE_VALUE" ] || [ "$CACHE_VALUE" = "NULL" ]; then
