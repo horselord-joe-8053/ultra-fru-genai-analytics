@@ -68,12 +68,69 @@ ensure_cache_dir() {
     return 0
 }
 
+# Migrate cache file to include test_env column
+# Adds test_env='aws' to existing entries (assumes they were created for AWS tests)
+migrate_cache_file() {
+    if [ ! -f "$CACHE_FILE" ]; then
+        return 0  # No cache file, nothing to migrate
+    fi
+    
+    # Check if already migrated (header has test_env)
+    if head -1 "$CACHE_FILE" | grep -q "test_env"; then
+        return 0  # Already migrated
+    fi
+    
+    local temp_file="${CACHE_FILE}.migrate.$$"
+    local header_line="env_var_name|environment|deployment_type|aws_region|test_env|datetime_value_obtained|value|problem"
+    
+    echo "$header_line" > "$temp_file"
+    
+    # Process each line (skip header)
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ "$line" == env_var_name* ]]; then
+            continue  # Skip old header
+        fi
+        
+        # Skip empty lines
+        if [ -z "$line" ]; then
+            continue
+        fi
+        
+        # Count fields (pipe-delimited)
+        local field_count
+        field_count=$(echo "$line" | awk -F'|' '{print NF}')
+        
+        if [ "$field_count" -eq 7 ]; then
+            # Old format: insert 'aws' as field 5
+            # Format: env_var_name|environment|deployment_type|aws_region|datetime|value|problem
+            # New:    env_var_name|environment|deployment_type|aws_region|test_env|datetime|value|problem
+            local part1
+            part1=$(echo "$line" | awk -F'|' '{print $1"|"$2"|"$3"|"$4}')
+            local part2
+            part2=$(echo "$line" | awk -F'|' '{print $5"|"$6"|"$7}')
+            echo "${part1}|aws|${part2}" >> "$temp_file"
+        elif [ "$field_count" -eq 8 ]; then
+            # Already migrated, keep as-is
+            echo "$line" >> "$temp_file"
+        fi
+    done < "$CACHE_FILE"
+    
+    # Atomic replace
+    if mv "$temp_file" "$CACHE_FILE" 2>/dev/null; then
+        return 0
+    else
+        rm -f "$temp_file" 2>/dev/null || true
+        return 1
+    fi
+}
+
 # Read cache value for a given key
 # Parameters:
 #   $1: env_var_name (e.g., "ALB_DNS")
 #   $2: environment (e.g., "dev")
 #   $3: deployment_type (e.g., "ecs-full")
 #   $4: aws_region (e.g., "us-east-1")
+#   $5: test_env (e.g., "aws" or "local")
 # Returns: value if found and valid, empty string otherwise
 # Sets: CACHE_VALUE, CACHE_DATETIME, CACHE_PROBLEM
 read_cache_value() {
@@ -81,6 +138,7 @@ read_cache_value() {
     local environment="$2"
     local deployment_type="$3"
     local aws_region="$4"
+    local test_env="${5:-aws}"  # Default to 'aws' for backward compatibility
     
     # Reset output variables
     CACHE_VALUE=""
@@ -92,15 +150,18 @@ read_cache_value() {
         return 1
     fi
     
+    # Migrate cache file if needed (one-time migration)
+    migrate_cache_file
+    
     # Check if cache file exists
     if [ ! -f "$CACHE_FILE" ]; then
         return 1  # Cache miss
     fi
     
     # Read cache file and find matching entry
-    # Format: env_var_name|environment|deployment_type|aws_region|datetime_value_obtained|value|problem
+    # Format: env_var_name|environment|deployment_type|aws_region|test_env|datetime_value_obtained|value|problem
     local cache_line
-    cache_line=$(grep "^${env_var_name}|${environment}|${deployment_type}|${aws_region}|" "$CACHE_FILE" 2>/dev/null | tail -1)
+    cache_line=$(grep "^${env_var_name}|${environment}|${deployment_type}|${aws_region}|${test_env}|" "$CACHE_FILE" 2>/dev/null | tail -1)
     
     if [ -z "$cache_line" ]; then
         return 1  # Cache miss
@@ -108,9 +169,9 @@ read_cache_value() {
     
     # Parse cache line (pipe-delimited)
     # Extract fields directly using awk (more reliable than array splitting)
-    CACHE_DATETIME=$(echo "$cache_line" | awk -F'|' '{print $5}')
-    CACHE_VALUE=$(echo "$cache_line" | awk -F'|' '{print $6}')
-    CACHE_PROBLEM=$(echo "$cache_line" | awk -F'|' '{print $7}')
+    CACHE_DATETIME=$(echo "$cache_line" | awk -F'|' '{print $6}')  # Was $5, now $6
+    CACHE_VALUE=$(echo "$cache_line" | awk -F'|' '{print $7}')    # Was $6, now $7
+    CACHE_PROBLEM=$(echo "$cache_line" | awk -F'|' '{print $8}')  # Was $7, now $8
     
     # Validate we got the required fields
     if [ -z "$CACHE_DATETIME" ] || [ -z "$CACHE_VALUE" ]; then
@@ -194,15 +255,17 @@ is_cache_valid() {
 #   $2: environment
 #   $3: deployment_type
 #   $4: aws_region
-#   $5: value (use "NULL" if failed to retrieve)
-#   $6: problem (reason for failure, empty if successful)
+#   $5: test_env (e.g., "aws" or "local")
+#   $6: value (use "NULL" if failed to retrieve)
+#   $7: problem (reason for failure, empty if successful)
 write_cache_value() {
     local env_var_name="$1"
     local environment="$2"
     local deployment_type="$3"
     local aws_region="$4"
-    local value="${5:-NULL}"
-    local problem="${6:-}"
+    local test_env="${5:-aws}"  # Default to 'aws' for backward compatibility
+    local value="${6:-NULL}"
+    local problem="${7:-}"
     
     # Ensure cache directory exists
     if ! ensure_cache_dir; then
@@ -211,6 +274,9 @@ write_cache_value() {
         fi
         return 1
     fi
+    
+    # Migrate cache file if needed (one-time migration)
+    migrate_cache_file
     
     # Get current datetime (YYYY-MM-DD_hhmmss)
     local datetime_string
@@ -224,18 +290,19 @@ write_cache_value() {
     fi
     
     # Create cache line
-    local cache_line="${env_var_name}|${environment}|${deployment_type}|${aws_region}|${datetime_string}|${value}|${problem}"
+    # Format: env_var_name|environment|deployment_type|aws_region|test_env|datetime_value_obtained|value|problem
+    local cache_line="${env_var_name}|${environment}|${deployment_type}|${aws_region}|${test_env}|${datetime_string}|${value}|${problem}"
     
     # Remove old entries for this key (keep only latest)
     local temp_file
     temp_file=$(mktemp 2>/dev/null || echo "${CACHE_FILE}.tmp")
     
     if [ -f "$CACHE_FILE" ]; then
-        # Remove old entries matching this key
-        grep -v "^${env_var_name}|${environment}|${deployment_type}|${aws_region}|" "$CACHE_FILE" > "$temp_file" 2>/dev/null || true
+        # Remove old entries matching this key (include test_env in pattern)
+        grep -v "^${env_var_name}|${environment}|${deployment_type}|${aws_region}|${test_env}|" "$CACHE_FILE" > "$temp_file" 2>/dev/null || true
     else
         # Create new file with header
-        echo "env_var_name|environment|deployment_type|aws_region|datetime_value_obtained|value|problem" > "$temp_file"
+        echo "env_var_name|environment|deployment_type|aws_region|test_env|datetime_value_obtained|value|problem" > "$temp_file"
     fi
     
     # Append new entry
@@ -253,22 +320,24 @@ write_cache_value() {
     fi
 }
 
-# Load all cached values for a given environment/deployment/region
+# Load all cached values for a given environment/deployment/region/test_env
 # Parameters:
 #   $1: environment
 #   $2: deployment_type
 #   $3: aws_region
+#   $4: test_env (e.g., "aws" or "local")
 # Sets: ALB_DNS, CLOUDFRONT_DOMAIN, ECS_CLUSTER_ID, ECS_SERVICE_NAME (if found in cache)
 load_cached_values() {
     local environment="$1"
     local deployment_type="$2"
     local aws_region="$3"
+    local test_env="${4:-aws}"  # Default to 'aws' for backward compatibility
     
     local vars=("ALB_DNS" "CLOUDFRONT_DOMAIN" "ECS_CLUSTER_ID" "ECS_SERVICE_NAME")
     local loaded_count=0
     
     for var in "${vars[@]}"; do
-        if read_cache_value "$var" "$environment" "$deployment_type" "$aws_region"; then
+        if read_cache_value "$var" "$environment" "$deployment_type" "$aws_region" "$test_env"; then
             # Export the variable
             export "$var=$CACHE_VALUE"
             loaded_count=$((loaded_count + 1))

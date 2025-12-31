@@ -12,7 +12,9 @@ source "$SCRIPT_DIR/../common/load-env.sh"
 # Load environment variables
 load_env_file 2>/dev/null || true
 
-API_URL="http://localhost:5000"
+# Use LOCAL_SERVER_PORT from .env, default 5000
+server_port="${LOCAL_SERVER_PORT:-5000}"
+API_URL="http://localhost:${server_port}"
 FRONTEND_URL="http://localhost:5173"
 
 verify_local_deployment() {

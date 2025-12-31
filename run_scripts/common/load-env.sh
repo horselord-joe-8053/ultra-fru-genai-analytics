@@ -79,6 +79,9 @@ load_env_file() {
     # IMAGE_PREFIX: Base image URI prefix (from .env or built dynamically)
     export IMAGE_PREFIX="${IMAGE_PREFIX:-}"
     
+    # Local development configuration
+    export LOCAL_SERVER_PORT="${LOCAL_SERVER_PORT:-5000}"  # Local API server port (default: 5000)
+    
     log_success "Loaded environment variables from $env_path"
     log_info "Note: AWS credential variables (AWS_ADMIN_*, AWS_BEDROCK_*) are loaded but not exported"
     log_info "      Use AWS profiles (admin/bedrock) instead via --profile flag or AWS_PROFILE env var"

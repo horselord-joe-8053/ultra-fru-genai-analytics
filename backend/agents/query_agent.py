@@ -369,6 +369,12 @@ class QueryAgent:
                 primary_semantic_result = synthesis_inputs.get("primary_semantic_result")
                 context_results = synthesis_inputs.get("context_results", [])
 
+                # Check if we have any successful data retrieval
+                has_successful_data = (
+                    (primary_sql_result and primary_sql_result.get("row_count", 0) > 0) or
+                    (primary_semantic_result and primary_semantic_result.get("row_count", 0) > 0)
+                )
+                
                 if primary_sql_result:
                     logger.info(
                         "[SYNTHESIS] Using primary SQL result with "
@@ -381,7 +387,8 @@ class QueryAgent:
                     )
                 else:
                     logger.warning(
-                        "[SYNTHESIS] No primary result found. Synthesis will proceed without authoritative rows."
+                        "[SYNTHESIS] ⚠️ NO DATA RETRIEVED - All tool executions failed. "
+                        "Cannot generate grounded answer. Synthesis will proceed with explicit no-data instructions."
                     )
 
                 if context_results:
@@ -424,6 +431,72 @@ class QueryAgent:
                     final_answer = synthesis_result
                     synthesis_tokens = {}
 
+                # Validate synthesis response for hallucination indicators
+                if not has_successful_data:
+                    # Check if answer claims to have data when it doesn't
+                    answer_lower = final_answer.lower()
+                    hallucination_indicators = [
+                        "based on query results",
+                        "according to the data",
+                        "the query results show",
+                        "from the database",
+                        "the data indicates",
+                        "based on the information",
+                        "the database shows",
+                        "query results indicate",
+                        "from the query",
+                        "the results show",
+                    ]
+                    
+                    # Check for tool-calling format (LLM outputting reasoning instead of answer)
+                    tool_calling_indicators = [
+                        "<call-tool",
+                        "</call-tool>",
+                        "call-tool name",
+                        "i'll use generate_sql",
+                        "i'll execute",
+                        "i'll start by",
+                        "now i'll",
+                    ]
+                    
+                    # Also check for numeric values (likely hallucinated if no data)
+                    import re
+                    has_numbers = bool(re.search(r'\d+\.?\d*', final_answer))
+                    
+                    # Check for specific numeric patterns that suggest calculations
+                    has_calculated_values = bool(re.search(r'\d+\.\d+', final_answer))  # Decimals suggest calculations
+                    
+                    # Check for numeric values that look like ratings/scores (1-10 range, percentages, etc.)
+                    has_rating_like_values = bool(re.search(r'\b([1-9]|10)(\.\d+)?\s*(out of 10|/10|%)', final_answer, re.IGNORECASE))
+                    
+                    # More aggressive: if no data and answer contains any numeric value that looks like a result, it's likely hallucinated
+                    has_result_like_numbers = bool(re.search(r'\b\d+\.\d+\b', final_answer))  # Any decimal number
+                    
+                    # Check if answer contains tool-calling format (LLM is outputting reasoning)
+                    has_tool_calling_format = any(indicator in answer_lower for indicator in tool_calling_indicators)
+                    
+                    # Trigger validation if:
+                    # 1. Contains data-implying phrases, OR
+                    # 2. Contains tool-calling format (LLM outputting reasoning), OR
+                    # 3. Contains calculated values (decimals) when no data exists, OR
+                    # 4. Contains rating-like values (e.g., "6.68 out of 10")
+                    if (any(indicator in answer_lower for indicator in hallucination_indicators) or 
+                        has_tool_calling_format or
+                        (has_numbers and has_calculated_values) or
+                        has_rating_like_values or
+                        (has_result_like_numbers and has_numbers)):
+                        logger.warning(
+                            "[SYNTHESIS] ⚠️ LLM generated answer claims to have data or contains numbers when none exists. "
+                            "This is a hallucination. Replacing with explicit no-data message."
+                        )
+                        logger.warning(
+                            f"[SYNTHESIS] Original (hallucinated) answer: {final_answer[:500]}"
+                        )
+                        final_answer = (
+                            "I cannot answer this question because I was unable to retrieve the required data from the database. "
+                            "All attempts to query the database failed. Please try rephrasing your question or check if the data is available."
+                        )
+
                 logger.info("[SYNTHESIS] ===== FINAL ANSWER GENERATED =====")
                 logger.info(f"[SYNTHESIS] Final answer length: {len(final_answer)} chars")
                 logger.info("[SYNTHESIS] Final answer (FULL TEXT):")
@@ -436,9 +509,15 @@ class QueryAgent:
                     logger.info(f"[SYNTHESIS] {final_answer}")
                 logger.info(f"[SYNTHESIS] {'='*80}")
             else:
+                # No tool results at all
+                has_successful_data = False
+                primary_sql_result = None
+                primary_semantic_result = None
+                primary_result_type = None
+                synthesis_tokens = {}
                 final_answer = (
-                    "I couldn't gather enough information to answer your question. "
-                    "Please try rephrasing it."
+                    "I cannot answer this question because I was unable to retrieve the required data from the database. "
+                    "All attempts to query the database failed. Please try rephrasing your question or check if the data is available."
                 )
             
             execution_time = (time.time() - start_time) * 1000
@@ -456,6 +535,13 @@ class QueryAgent:
             
             logger.end_query(success=True, answer=final_answer)
             
+            # Determine primary result type for metadata (if not already set)
+            if primary_result_type is None:
+                if primary_sql_result:
+                    primary_result_type = "sql"
+                elif primary_semantic_result:
+                    primary_result_type = "semantic"
+            
             return {
                 "answer": final_answer,
                 "method": "agentic",
@@ -467,7 +553,14 @@ class QueryAgent:
                     "input_tokens": synthesis_tokens.get("input", 0),
                     "output_tokens": synthesis_tokens.get("output", 0),
                     "total_tokens": synthesis_tokens.get("total", 0)
-                }
+                },
+                # Add metadata about data availability
+                "data_available": has_successful_data,
+                "primary_result_type": primary_result_type,  # "sql", "semantic", or None
+                "primary_result_row_count": (
+                    primary_sql_result.get("row_count", 0) if primary_sql_result
+                    else (primary_semantic_result.get("row_count", 0) if primary_semantic_result else 0)
+                )
             }
         
         except Exception as e:

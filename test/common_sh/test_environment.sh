@@ -53,8 +53,11 @@ setup_aws_environment() {
             log_warning "Could not source test_cache.sh, proceeding without cache"
         }
         
+        # Get test_env from environment (set by run_test_suite.sh)
+        local test_env="${TEST_ENV:-aws}"  # Default to 'aws' for backward compatibility
+        
         # Try to load cached values
-        if load_cached_values "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region"; then
+        if load_cached_values "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env"; then
             # Compute derived variables from cached base variables
             if [ -n "${ALB_DNS:-}" ]; then
                 API_URL="http://$ALB_DNS"
@@ -121,11 +124,14 @@ setup_aws_environment() {
             fi
             
             # Write cached values (non-fatal - log warning if fails)
+            # Get test_env from environment (set by run_test_suite.sh)
+            local test_env="${TEST_ENV:-aws}"  # Default to 'aws' for backward compatibility
+            
             if command -v write_cache_value >/dev/null 2>&1; then
-                write_cache_value "ALB_DNS" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "${ALB_DNS:-}" "" || true
-                write_cache_value "CLOUDFRONT_DOMAIN" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "${CLOUDFRONT_DOMAIN:-}" "" || true
-                write_cache_value "ECS_CLUSTER_ID" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "${ECS_CLUSTER_ID:-}" "" || true
-                write_cache_value "ECS_SERVICE_NAME" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "${ECS_SERVICE_NAME:-}" "" || true
+                write_cache_value "ALB_DNS" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${ALB_DNS:-}" "" || true
+                write_cache_value "CLOUDFRONT_DOMAIN" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${CLOUDFRONT_DOMAIN:-}" "" || true
+                write_cache_value "ECS_CLUSTER_ID" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${ECS_CLUSTER_ID:-}" "" || true
+                write_cache_value "ECS_SERVICE_NAME" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${ECS_SERVICE_NAME:-}" "" || true
                 if [[ "$use_cache" == "true" ]]; then
                     log_info "Updated cache with fetched AWS values"
                 fi
@@ -156,8 +162,26 @@ setup_aws_environment() {
 # Setup local test environment
 # Sets: API_BASE_URL
 setup_local_environment() {
-    # Default local API URL (matches docker-compose port; adjust if needed)
-    API_BASE_URL="http://localhost:5001"
+    # Load .env file to get LOCAL_SERVER_PORT if available
+    if [ -z "${REPO_ROOT:-}" ]; then
+        # Try to detect REPO_ROOT if not set
+        local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        export REPO_ROOT="$(cd "$script_dir/../.." && pwd)"
+    fi
+    
+    # Source load-env.sh to get LOCAL_SERVER_PORT
+    # shellcheck source=/dev/null
+    if [ -f "$REPO_ROOT/run_scripts/common/load-env.sh" ]; then
+        source "$REPO_ROOT/run_scripts/common/load-env.sh" 2>/dev/null || true
+        # Load .env file if it exists
+        if [ -f "$REPO_ROOT/.env" ]; then
+            load_env_file 2>/dev/null || true
+        fi
+    fi
+    
+    # Use LOCAL_SERVER_PORT from .env, defaulting to 5001 for local testing
+    local server_port="${LOCAL_SERVER_PORT:-5001}"
+    API_BASE_URL="http://localhost:${server_port}"
     
     # For local, we can do a simple health check
     if command -v curl >/dev/null 2>&1; then

@@ -67,12 +67,17 @@ main() {
         log_info "Skipping data load (--skip-data-load flag set)"
     fi
     
+    # Load .env to get LOCAL_SERVER_PORT
+    source "$SCRIPT_DIR/../common/load-env.sh"
+    load_env_file || true
+    
     # Summary
     log_success "Local development environment is ready!"
     echo ""
     log_info "Services running:"
     log_info "  - Database: localhost:5432"
-    log_info "  - API: http://localhost:5000"
+    local server_port="${LOCAL_SERVER_PORT:-5000}"
+    log_info "  - API: http://localhost:${server_port}"
     echo ""
     
     # Start frontend (optional)

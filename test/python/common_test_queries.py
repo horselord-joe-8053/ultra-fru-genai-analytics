@@ -7,7 +7,7 @@ allowing selective execution of specific queries by their three-character codes.
 Configuration:
 - Set `TEST_API_BASE_URL` (preferred) or `BACKEND_API_URL` to point at the API.
   Examples:
-    - Local docker-compose:   TEST_API_BASE_URL=http://localhost:5001
+    - Local docker-compose:   TEST_API_BASE_URL=http://localhost:5000
     - AWS ALB / CloudFront:   TEST_API_BASE_URL=https://<your-domain>
 """
 
@@ -664,7 +664,8 @@ def run_single_test(
                 resp = run_query(test_case.query, base_url=base_url, timeout=timeout)
                 api_time = time.time() - api_start
                 actual_response = resp.get("answer", "")
-                test_case.validator(resp)
+                # Pass test_code to validator for enhanced validation
+                test_case.validator(resp, test_code=test_code)
             finally:
                 signal.alarm(0)  # Cancel alarm
                 signal.signal(signal.SIGALRM, old_handler)  # Restore handler
@@ -674,7 +675,8 @@ def run_single_test(
             resp = run_query(test_case.query, base_url=base_url)
             api_time = time.time() - api_start
             actual_response = resp.get("answer", "")
-            test_case.validator(resp)
+            # Pass test_code to validator for enhanced validation
+            test_case.validator(resp, test_code=test_code)
         
         # Time the extraction process
         extraction_start = time.time()

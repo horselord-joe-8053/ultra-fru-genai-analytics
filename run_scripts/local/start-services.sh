@@ -58,16 +58,20 @@ start_services() {
     log_success "Docker services started"
     log_info "Waiting for services to be ready..."
     
-    # Wait for database to be ready
-    source "$SCRIPT_DIR/../common/wait-for-service.sh"
-    wait_for_port "localhost" "5432" 30 2
+    # Load .env to get LOCAL_SERVER_PORT
+    load_env_file || true
     
-    # Wait for API health check
-    wait_for_service "http://localhost:5000/health" 30 2
+    # Wait for database to be ready (database is exposed on port 55432 on host)
+    source "$SCRIPT_DIR/../common/wait-for-service.sh"
+    wait_for_port "localhost" "55432" 30 2
+    
+    # Wait for API health check (use LOCAL_SERVER_PORT from .env, default 5000)
+    local server_port="${LOCAL_SERVER_PORT:-5000}"
+    wait_for_service "http://localhost:${server_port}/health" 30 2
     
     log_success "All services are ready!"
-    log_info "  - Database: localhost:5432"
-    log_info "  - API: http://localhost:5000"
+    log_info "  - Database: localhost:55432"
+    log_info "  - API: http://localhost:${server_port}"
 }
 
 main() {

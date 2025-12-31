@@ -535,6 +535,13 @@ def query():
                 
                 # Always include tool_calls (needed for test result extraction)
                 response["tool_calls"] = result.get("tool_calls", [])
+                # Add metadata for validation (data availability, result type, row count)
+                if "data_available" in result:
+                    response["data_available"] = result.get("data_available")
+                if "primary_result_type" in result:
+                    response["primary_result_type"] = result.get("primary_result_type")
+                if "primary_result_row_count" in result:
+                    response["primary_result_row_count"] = result.get("primary_result_row_count")
                 # Add debug info if available
                 if app.debug or app.logger.level <= logging.DEBUG:
                     response["debug_info"] = result.get("debug_info")

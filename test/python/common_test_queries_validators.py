@@ -15,6 +15,7 @@ def _validate_has_answer_and_iterations(resp: Dict, label: str) -> str:
     Basic sanity checks shared by all tests:
     - `answer` exists and is non-empty
     - `iterations` is between 1 and 5 (3 × 5 setup on server side)
+    - `data_available` is True (if present) - ensures data was successfully retrieved
     """
     if "answer" not in resp:
         raise AssertionError(f"[{label}] Response missing 'answer' field: {resp}")
@@ -28,12 +29,75 @@ def _validate_has_answer_and_iterations(resp: Dict, label: str) -> str:
             f"[{label}] iterations should be integer in [1,5], "
             f"got: {iterations!r}"
         )
+    
+    # Check data availability (if metadata is present)
+    data_available = resp.get("data_available")
+    if data_available is not None:
+        if not data_available:
+            raise AssertionError(
+                f"[{label}] CRITICAL: No data was successfully retrieved from the database. "
+                f"The agent failed to execute any successful queries. "
+                f"Answer: {answer[:200]}"
+            )
+    
+    # Check for hallucination indicators when data_available is False
+    if data_available is False:
+        answer_lower = answer.lower()
+        hallucination_indicators = [
+            "based on query results",
+            "according to the data",
+            "the query results show",
+            "from the database",
+            "the data indicates",
+            "based on the information",
+            "the database shows",
+            "query results indicate",
+            "from the query",
+            "the results show",
+        ]
+        
+        # Check for numeric values (likely hallucinated if no data)
+        import re
+        has_numbers = bool(re.search(r'\d+\.?\d*', answer))
+        has_calculated_values = bool(re.search(r'\d+\.\d+', answer))  # Decimals suggest calculations
+        
+        if any(indicator in answer_lower for indicator in hallucination_indicators):
+            raise AssertionError(
+                f"[{label}] CRITICAL: Answer claims to have data when none was retrieved. "
+                f"This is a hallucination. Answer: {answer[:300]}"
+            )
+        
+        if has_numbers and has_calculated_values:
+            raise AssertionError(
+                f"[{label}] CRITICAL: Answer contains numeric values when no data was retrieved. "
+                f"This is likely a hallucination. Answer: {answer[:300]}"
+            )
+    
     return answer
 
 
-def _validate_avg_feedback_rating(resp: Dict) -> None:
+def _validate_avg_feedback_rating(resp: Dict, test_code: str = "AVG") -> None:
     label = "Average feedback rating"
     answer = _validate_has_answer_and_iterations(resp, label)
+    
+    # Additional check: verify that SQL execution succeeded for quantitative queries
+    # This query requires SQL execution to calculate AVG
+    primary_result_type = resp.get("primary_result_type")
+    primary_result_row_count = resp.get("primary_result_row_count", 0)
+    
+    if primary_result_type != "sql" or primary_result_row_count == 0:
+        # Check if answer claims to have data
+        answer_lower = answer.lower()
+        if any(phrase in answer_lower for phrase in [
+            "based on query results", "according to the data", "the query results show",
+            "from the database", "the data indicates", "based on the information"
+        ]):
+            raise AssertionError(
+                f"[{label}] CRITICAL: Answer claims to have data but SQL execution failed or returned 0 rows. "
+                f"primary_result_type={primary_result_type}, row_count={primary_result_row_count}. "
+                f"Answer: {answer[:300]}"
+            )
+    
     # Fuzzy check: should mention "average" and a numeric rating.
     assert_contains(answer, "average", label)
     has_digit = any(ch.isdigit() for ch in answer)
@@ -41,7 +105,7 @@ def _validate_avg_feedback_rating(resp: Dict) -> None:
         raise AssertionError(f"[{label}] Expected a numeric rating in the answer.")
 
 
-def _validate_brand_highest_avg(resp: Dict) -> None:
+def _validate_brand_highest_avg(resp: Dict, test_code: str = "BRD") -> None:
     label = "Brand with highest average rating"
     answer = _validate_has_answer_and_iterations(resp, label)
     # From our data and previous tests, Samsung with ~9.0 should be the winner.
@@ -54,7 +118,7 @@ def _validate_brand_highest_avg(resp: Dict) -> None:
         )
 
 
-def _validate_count_negative(resp: Dict) -> None:
+def _validate_count_negative(resp: Dict, test_code: str = "CNT") -> None:
     label = "Count negative feedbacks"
     answer = _validate_has_answer_and_iterations(resp, label)
     # Exact count from data: 50 negative feedbacks.
@@ -62,7 +126,7 @@ def _validate_count_negative(resp: Dict) -> None:
     assert_contains(answer, "negative", label)
 
 
-def _validate_percentage_positive(resp: Dict) -> None:
+def _validate_percentage_positive(resp: Dict, test_code: str = "PCT") -> None:
     label = "Percentage positive feedback"
     answer = _validate_has_answer_and_iterations(resp, label)
     # We expect roughly 50% positive feedback.
@@ -74,7 +138,7 @@ def _validate_percentage_positive(resp: Dict) -> None:
     assert_contains(answer, "positive", label)
 
 
-def _validate_noise_feedback(resp: Dict) -> None:
+def _validate_noise_feedback(resp: Dict, test_code: str = "NOI") -> None:
     label = "Negative feedback about noise"
     answer = _validate_has_answer_and_iterations(resp, label)
     # Fuzzy checks for known phrases and themes.
@@ -95,7 +159,7 @@ def _validate_noise_feedback(resp: Dict) -> None:
         )
 
 
-def _validate_count_above_seven(resp: Dict) -> None:
+def _validate_count_above_seven(resp: Dict, test_code: str = "R07") -> None:
     label = "Count feedbacks rating above 7"
     answer = _validate_has_answer_and_iterations(resp, label)
     # Exact count from data: 100 feedbacks with rating > 7.
@@ -104,7 +168,7 @@ def _validate_count_above_seven(resp: Dict) -> None:
     assert_contains(answer, "rating", label)
 
 
-def _validate_avg_positive(resp: Dict) -> None:
+def _validate_avg_positive(resp: Dict, test_code: str = "AVP") -> None:
     label = "Average rating for positive feedbacks"
     answer = _validate_has_answer_and_iterations(resp, label)
     assert_contains(answer, "positive", label)
@@ -116,7 +180,7 @@ def _validate_avg_positive(resp: Dict) -> None:
         )
 
 
-def _validate_temperature_feedback(resp: Dict) -> None:
+def _validate_temperature_feedback(resp: Dict, test_code: str = "TMP") -> None:
     label = "Negative feedback about temperature control"
     answer = _validate_has_answer_and_iterations(resp, label)
     assert_contains(answer, "temperature", label)
@@ -136,7 +200,7 @@ def _validate_temperature_feedback(resp: Dict) -> None:
         )
 
 
-def _validate_rating_distribution(resp: Dict) -> None:
+def _validate_rating_distribution(resp: Dict, test_code: str = "RDS") -> None:
     label = "Rating distribution summary"
     answer = _validate_has_answer_and_iterations(resp, label)
     # We don't insist on exact counts here, just that the agent
@@ -146,7 +210,7 @@ def _validate_rating_distribution(resp: Dict) -> None:
     assert_contains(answer, "positive", label)
 
 
-def _validate_top3_low_rating_problems(resp: Dict) -> None:
+def _validate_top3_low_rating_problems(resp: Dict, test_code: str = "TOP") -> None:
     label = "Top 3 problems for low-rating feedbacks"
     answer = _validate_has_answer_and_iterations(resp, label)
     # From manual runs, we expect themes like:

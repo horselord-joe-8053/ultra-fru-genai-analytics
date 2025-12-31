@@ -8,11 +8,17 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/../common/logger.sh"
+source "$SCRIPT_DIR/../common/load-env.sh"
+
+# Load environment variables
+load_env_file 2>/dev/null || true
 
 # Get parameters
 DRY_RUN="${1:-false}"
 
-API_URL="http://localhost:5000"
+# Use LOCAL_SERVER_PORT from .env, default 5000
+server_port="${LOCAL_SERVER_PORT:-5000}"
+API_URL="http://localhost:${server_port}"
 FRONTEND_URL="http://localhost:5173"
 
 print_manual_test_hints() {

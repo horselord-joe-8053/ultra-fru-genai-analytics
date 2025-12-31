@@ -60,7 +60,49 @@ Database Schema:
   - For "average rating" queries, use AVG(feedback_rating) on the numeric column.
   - For sentiment analysis, use feedback_sentiment_category for filtering and counting.
 
-When you have enough information, provide a clear, grounded answer based on the data you retrieved."""
+When you have enough information, provide a clear, grounded answer based on the data you retrieved.
+
+================================================================================
+🚫 CRITICAL ANTI-HALLUCINATION PRINCIPLES - ABSOLUTE PROHIBITIONS 🚫
+================================================================================
+
+These principles apply to EVERY phase of your operation (planning, tool execution, synthesis):
+
+PRINCIPLE 1: NEVER GUESS, ESTIMATE, APPROXIMATE, OR FABRICATE
+  - NEVER invent numbers, names, facts, or any information
+  - NEVER use phrases like "approximately", "around", "roughly", "about", "likely"
+  - NEVER provide a "best guess" or "educated estimate"
+  - NEVER synthesize an answer from general knowledge when you have no data
+  - NEVER try to be helpful by making up information
+
+PRINCIPLE 2: DATA GROUNDING IS MANDATORY
+  - Every number in your answer MUST come from actual database query results
+  - Every name (store, brand, model) MUST come from actual database query results
+  - Every fact or statistic MUST come from actual database query results
+  - If data is not in the query results, it CANNOT be in your answer
+
+PRINCIPLE 3: HONESTY OVER HELPFULNESS
+  - An honest "I cannot answer" is ALWAYS better than a fabricated answer
+  - Your credibility depends on accuracy, not on being helpful with made-up data
+  - Users trust you to be accurate - a wrong answer destroys that trust
+  - A wrong answer is WORSE than no answer
+
+PRINCIPLE 4: EXPLICIT FAILURE ACKNOWLEDGMENT
+  - If tools fail, explicitly state: "I cannot answer because data retrieval failed"
+  - If SQL fails, say: "I cannot calculate because the database query failed"
+  - If semantic_search fails, say: "I cannot find feedback because the search failed"
+  - Do NOT synthesize an answer from nothing when tools fail
+
+PRINCIPLE 5: NO DATA-IMPLYING PHRASES WITHOUT DATA
+  - NEVER use "Based on query results" unless you have actual rows
+  - NEVER use "According to the data" unless you have actual rows
+  - NEVER use "The query results show" unless you have actual rows
+  - NEVER use "From the database" unless you have actual rows
+  - If you have no data, use: "I cannot answer because I was unable to retrieve data"
+
+REMEMBER: Your job is to provide ACCURATE answers based on REAL data, not to be helpful with made-up information.
+================================================================================
+"""
 
 
 def get_planning_prompt(question: str, tools_info: list, previous_results: list = None) -> str:
@@ -180,9 +222,50 @@ def get_synthesis_prompt(
         else:
             sections.append("Rows: []  # No rows returned")
     else:
-        sections.append(
-            "Primary Result: NONE (no successful tool result with rows was found)."
-        )
+        sections.append("=" * 80)
+        sections.append("⚠️⚠️⚠️ CRITICAL: NO DATA AVAILABLE - ABSOLUTE PROHIBITION ON GUESSING ⚠️⚠️⚠️")
+        sections.append("=" * 80)
+        sections.append("")
+        sections.append("Primary Result: NONE")
+        sections.append("")
+        sections.append("ALL TOOL EXECUTIONS FAILED. No successful data retrieval occurred.")
+        sections.append("ZERO rows were retrieved from the database.")
+        sections.append("")
+        sections.append("=" * 80)
+        sections.append("MANDATORY RESPONSE (YOU MUST USE THIS EXACT OR EQUIVALENT LANGUAGE):")
+        sections.append("=" * 80)
+        sections.append('"I cannot answer this question because I was unable to retrieve the required data from the database.')
+        sections.append('All attempts to query the database failed. Please try rephrasing your question or check if the data is available."')
+        sections.append("")
+        sections.append("=" * 80)
+        sections.append("ABSOLUTE PROHIBITIONS - VIOLATING THESE IS A CRITICAL ERROR:")
+        sections.append("=" * 80)
+        sections.append("")
+        sections.append("❌ DO NOT make up, invent, guess, estimate, approximate, or fabricate ANY numbers")
+        sections.append("❌ DO NOT use phrases like:")
+        sections.append("   - 'Based on query results'")
+        sections.append("   - 'According to the data'")
+        sections.append("   - 'The query results show'")
+        sections.append("   - 'From the database'")
+        sections.append("   - 'The data indicates'")
+        sections.append("   - 'Based on the information'")
+        sections.append("   - Any phrase that implies you have data")
+        sections.append("")
+        sections.append("❌ DO NOT provide ANY numeric values (ratings, counts, percentages, averages)")
+        sections.append("❌ DO NOT provide ANY store names, brand names, or model names")
+        sections.append("❌ DO NOT provide ANY analysis, insights, or conclusions")
+        sections.append("❌ DO NOT use phrases like 'approximately', 'around', 'roughly', 'about'")
+        sections.append("❌ DO NOT try to be helpful by providing a 'best guess'")
+        sections.append("❌ DO NOT synthesize an answer from general knowledge")
+        sections.append("")
+        sections.append("✅ YOU MUST explicitly state that you cannot answer")
+        sections.append("✅ YOU MUST explain that data retrieval failed")
+        sections.append("✅ YOU MUST suggest rephrasing or checking data availability")
+        sections.append("")
+        sections.append("=" * 80)
+        sections.append("REMEMBER: An honest 'I cannot answer' is ALWAYS better than a fabricated answer.")
+        sections.append("Your credibility depends on NEVER guessing when you have no data.")
+        sections.append("=" * 80)
 
     # Optional context (how we got the data)
     if context_results:
@@ -205,10 +288,19 @@ def get_synthesis_prompt(
             "- State the numeric result or answer directly from the rows."
         )
         sections.append(
+            "- The rows above contain the EXACT data from the database query."
+        )
+        sections.append(
+            "- Extract the answer directly from the row values shown above."
+        )
+        sections.append(
             "- Do NOT invent new store names or numeric values that are not present in those rows."
         )
         sections.append(
             "- If row_count is 3, your answer should list exactly 3 stores with their sales values."
+        )
+        sections.append(
+            "- If the SQL query returned an aggregate (like AVG), use that exact value from the rows."
         )
     elif primary_semantic_result:
         sections.append(
@@ -227,9 +319,79 @@ def get_synthesis_prompt(
             "- If row_count is large (e.g., 50), mention the count but focus on the themes, not implications."
         )
     
-    sections.append(
-        "- If there are no rows, explicitly say you cannot answer from the available data and do NOT fabricate any information."
-    )
+    sections.append("")
+    sections.append("=" * 80)
+    sections.append("🚫 CRITICAL ANTI-HALLUCINATION RULES - ABSOLUTE PROHIBITIONS 🚫")
+    sections.append("=" * 80)
+    sections.append("")
+    sections.append("These rules apply REGARDLESS of whether data is available:")
+    sections.append("")
+    sections.append("RULE 1: NEVER invent, guess, estimate, approximate, or fabricate:")
+    sections.append("  - Numbers (ratings, counts, percentages, averages, sums)")
+    sections.append("  - Names (stores, brands, models, customers)")
+    sections.append("  - Facts, statistics, or any quantitative information")
+    sections.append("  - Dates, prices, or any other data points")
+    sections.append("")
+    sections.append("RULE 2: NEVER use data-implying phrases UNLESS you have actual rows:")
+    sections.append("  - 'Based on query results' → ONLY if rows exist above")
+    sections.append("  - 'According to the data' → ONLY if rows exist above")
+    sections.append("  - 'The query results show' → ONLY if rows exist above")
+    sections.append("  - 'From the database' → ONLY if rows exist above")
+    sections.append("  - 'The data indicates' → ONLY if rows exist above")
+    sections.append("  - 'Based on the information' → ONLY if rows exist above")
+    sections.append("")
+    sections.append("RULE 3: If Primary Result is NONE (no rows above):")
+    sections.append("  - You MUST explicitly state: 'I cannot answer...'")
+    sections.append("  - You MUST explain: '...because I was unable to retrieve data'")
+    sections.append("  - You MUST NOT provide any answer that implies you have data")
+    sections.append("  - You MUST NOT try to be helpful by guessing")
+    sections.append("")
+    sections.append("RULE 4: Data Grounding Requirements:")
+    sections.append("  - Every number in your answer MUST appear in the 'Rows' section above")
+    sections.append("  - Every name in your answer MUST appear in the 'Rows' section above")
+    sections.append("  - If calculating an average, the SQL result MUST show that average")
+    sections.append("  - If counting items, the SQL result MUST show that count")
+    sections.append("  - If no rows exist, you CANNOT provide any specific numbers or names")
+    sections.append("")
+    sections.append("RULE 5: Calculation Queries (AVG, SUM, COUNT, etc.):")
+    sections.append("  - If SQL query failed → Say 'I cannot calculate...'")
+    sections.append("  - If SQL returned 0 rows → Say 'No data available to calculate...'")
+    sections.append("  - If SQL succeeded → Use the EXACT value from the row(s)")
+    sections.append("  - NEVER calculate manually or estimate")
+    sections.append("")
+    sections.append("RULE 6: Qualitative Queries (feedback, complaints, themes):")
+    sections.append("  - If semantic_search failed → Say 'I cannot answer...'")
+    sections.append("  - If semantic_search returned 0 rows → Say 'No feedback found...'")
+    sections.append("  - If semantic_search succeeded → Quote/paraphrase ONLY from rows above")
+    sections.append("  - NEVER invent complaints or themes not in the rows")
+    sections.append("")
+    sections.append("RULE 7: Honesty Over Helpfulness:")
+    sections.append("  - An honest 'I cannot answer' is ALWAYS better than a fabricated answer")
+    sections.append("  - Your credibility depends on NEVER guessing when you have no data")
+    sections.append("  - Users trust you to be accurate, not to be helpful with made-up data")
+    sections.append("")
+    sections.append("=" * 80)
+    sections.append("VIOLATION CHECKLIST - Before submitting your answer, verify:")
+    sections.append("=" * 80)
+    sections.append("□ Did I check if Primary Result is NONE?")
+    sections.append("□ If NONE, did I use the mandatory 'I cannot answer' language?")
+    sections.append("□ Did I verify every number appears in the rows above?")
+    sections.append("□ Did I verify every name appears in the rows above?")
+    sections.append("□ Did I avoid ALL data-implying phrases if no rows exist?")
+    sections.append("□ Did I avoid guessing, estimating, or approximating?")
+    sections.append("□ Is my answer 100% grounded in the rows shown above?")
+    sections.append("=" * 80)
+    sections.append("")
+    sections.append("FINAL CHECK: If there are no rows above:")
+    sections.append("=" * 80)
+    sections.append("You MUST use this EXACT response format:")
+    sections.append('"I cannot answer this question because I was unable to retrieve the required data from the database.')
+    sections.append('All attempts to query the database failed. Please try rephrasing your question or check if the data is available."')
+    sections.append("")
+    sections.append("DO NOT fabricate, guess, estimate, or invent ANY information.")
+    sections.append("DO NOT provide any numbers, names, or facts.")
+    sections.append("DO NOT try to be helpful by making up an answer.")
+    sections.append("=" * 80)
     sections.append(
         "- Keep your answer focused and brief. Answer the question, nothing more."
     )

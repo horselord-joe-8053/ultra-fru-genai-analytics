@@ -14,8 +14,9 @@ source "$SCRIPT_DIR/../common/verify-endpoints.sh"
 # Load environment variables
 load_env_file 2>/dev/null || true
 
-# Local URLs
-API_URL="http://localhost:5000"
+# Local URLs (use LOCAL_SERVER_PORT from .env, default 5000)
+server_port="${LOCAL_SERVER_PORT:-5000}"
+API_URL="http://localhost:${server_port}"
 FRONTEND_URL="http://localhost:5173"
 DRY_RUN="${1:-false}"
 
