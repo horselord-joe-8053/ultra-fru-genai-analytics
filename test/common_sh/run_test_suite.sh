@@ -91,31 +91,7 @@ run_test_suite() {
         echo "Running ${total_tests}-Query Test Suite"
     fi
     echo "═══════════════════════════════════════════════════════════════════════════════"
-    echo "  Test Environment: $test_env"
-    
-    # AWS-specific fields
-    if [[ "$test_env" == "aws" ]]; then
-        echo "  Environment:     ${ENVIRONMENT:-dev}"
-        echo "  Deployment Type: ${DEPLOYMENT_TYPE:-ecs-full}"
-        echo "  AWS Region:       ${AWS_REGION:-us-east-1}"
-        
-        # Cache status (always show for AWS, with conditional cache file location)
-        if [[ "${USE_CACHED_AWS_VAL:-false}" == "true" ]]; then
-            local cache_file_rel="test/cache_files/cached_aws_setups.txt"
-            echo "  Use AWS Values From Cache File If It Exists: Yes | Cache File Location: $cache_file_rel"
-        else
-            echo "  Use AWS Values From Cache File If It Exists: No"
-        fi
-    fi
-    
-    # Always shown
-    echo "  Per-Test Timeout: ${PER_TEST_TIMEOUT_SECONDS}s"
-    
-    # Convert RUN_DIR to relative path
-    local results_dir_rel="${RUN_DIR#$REPO_ROOT/}"
-    echo "  Test Results Directory: $results_dir_rel"
-    
-    echo "  API Base URL:     $API_BASE_URL"
+    print_test_header "$test_env" "$API_BASE_URL" "$PER_TEST_TIMEOUT_SECONDS"
     echo "═══════════════════════════════════════════════════════════════════════════════"
     echo ""
     

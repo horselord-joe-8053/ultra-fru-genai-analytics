@@ -1,6 +1,44 @@
 #!/usr/bin/env bash
 # Result processing and summary generation functions
 
+# Print test header information
+# This function outputs the standardized test header format used in both console and log file
+# Parameters:
+#   $1: test_env (aws or local)
+#   $2: api_base_url
+#   $3: timeout_seconds
+# Output: Header lines (via stdout)
+print_test_header() {
+    local test_env="$1"
+    local api_base_url="$2"
+    local timeout_seconds="$3"
+    
+    # Calculate relative paths
+    local results_dir_rel="${RUN_DIR#$REPO_ROOT/}"
+    local cache_file_rel="test/cache_files/cached_aws_setups.txt"
+    
+    echo "  Test Environment: $test_env"
+    
+    # AWS-specific fields
+    if [[ "$test_env" == "aws" ]]; then
+        echo "  Environment:     ${ENVIRONMENT:-dev}"
+        echo "  Deployment Type: ${DEPLOYMENT_TYPE:-ecs-full}"
+        echo "  AWS Region:       ${AWS_REGION:-us-east-1}"
+        
+        # Cache status (always show for AWS, with conditional cache file location)
+        if [[ "${USE_CACHED_AWS_VAL:-false}" == "true" ]]; then
+            echo "  Use AWS Values From Cache File If It Exists: Yes | Cache File Location: $cache_file_rel"
+        else
+            echo "  Use AWS Values From Cache File If It Exists: No"
+        fi
+    fi
+    
+    # Always shown
+    echo "  Per-Test Timeout: ${timeout_seconds}s"
+    echo "  Test Results Directory: $results_dir_rel"
+    echo "  API Base URL:     $api_base_url"
+}
+
 # Initialize summary file
 # Parameters:
 #   $1: Run prefix (e.g., "query_1" or "query_10")
@@ -44,11 +82,7 @@ initialize_log_file() {
     local timeout_seconds="$4"
     
     {
-        echo "Test Run: ${run_prefix}_$TIMESTAMP"
-        echo "Date: $(date)"
-        echo "Environment: $test_env"
-        echo "API Base URL: $api_base_url"
-        echo "Per-Test Timeout: ${timeout_seconds}s"
+        print_test_header "$test_env" "$api_base_url" "$timeout_seconds"
         echo ""
         echo "═══════════════════════════════════════════════════════════════════════════════"
     } > "$LOG_FILE"
