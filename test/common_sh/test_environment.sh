@@ -79,18 +79,17 @@ setup_aws_environment() {
     
     # If cache miss or not using cache, fetch from AWS
     if [[ "$cache_hit" == "false" ]]; then
-        # Optimization: Skip expensive fetch operations if API_URL is already set
-        # Note: This optimization only helps if setup_aws_environment() is called multiple times
-        # in the same shell session. For normal usage (each test script runs in its own shell),
-        # this check will always be false on the first call. However, it's harmless and provides
-        # a safety net if someone manually sources test scripts or runs them in a loop.
-        if [[ -n "${API_URL:-}" ]]; then
-            log_info "API_URL already set: ${API_URL}, skipping deployment info fetch"
-            API_BASE_URL="$API_URL"
-        else
-            log_step "Fetching deployment information from Terraform..."
-            
-            # Debug: Verify variables are still set before sourcing fetch-deployment-info.sh
+        # If not using cache, clear any existing deployment variables to force fresh fetch
+        # This prevents stale values from previous test runs in the same shell session
+        # from being used, ensuring we always fetch fresh values when cache is not used
+        if [[ "$use_cache" == "false" ]]; then
+            unset API_URL ALB_DNS CLOUDFRONT_DOMAIN ECS_CLUSTER_ID ECS_CLUSTER_NAME ECS_SERVICE_NAME FRONTEND_URL
+            log_info "Not using cache: cleared existing deployment variables to force fresh fetch"
+        fi
+        
+        log_step "Fetching deployment information from Terraform..."
+        
+        # Debug: Verify variables are still set before sourcing fetch-deployment-info.sh
         log_info "Before sourcing fetch-deployment-info.sh:"
         log_info "  TF_STATE_BUCKET=[${TF_STATE_BUCKET:-NOT SET}]"
         log_info "  AWS_PROFILE=[${AWS_PROFILE:-NOT SET}]"
@@ -116,25 +115,24 @@ setup_aws_environment() {
         fi
         API_BASE_URL="$API_URL"
         
-            # Write to cache after successful fetch (always update cache to keep it fresh)
-            # Source cache utilities if not already sourced
-            if ! command -v write_cache_value >/dev/null 2>&1; then
-                # shellcheck source=/dev/null
-                source "$(dirname "${BASH_SOURCE[0]}")/test_cache.sh" 2>/dev/null || true
-            fi
-            
-            # Write cached values (non-fatal - log warning if fails)
-            # Get test_env from environment (set by run_test_suite.sh)
-            local test_env="${TEST_ENV:-aws}"  # Default to 'aws' for backward compatibility
-            
-            if command -v write_cache_value >/dev/null 2>&1; then
-                write_cache_value "ALB_DNS" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${ALB_DNS:-}" "" || true
-                write_cache_value "CLOUDFRONT_DOMAIN" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${CLOUDFRONT_DOMAIN:-}" "" || true
-                write_cache_value "ECS_CLUSTER_ID" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${ECS_CLUSTER_ID:-}" "" || true
-                write_cache_value "ECS_SERVICE_NAME" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${ECS_SERVICE_NAME:-}" "" || true
-                if [[ "$use_cache" == "true" ]]; then
-                    log_info "Updated cache with fetched AWS values"
-                fi
+        # Write to cache after successful fetch (always update cache to keep it fresh)
+        # Source cache utilities if not already sourced
+        if ! command -v write_cache_value >/dev/null 2>&1; then
+            # shellcheck source=/dev/null
+            source "$(dirname "${BASH_SOURCE[0]}")/test_cache.sh" 2>/dev/null || true
+        fi
+        
+        # Write cached values (non-fatal - log warning if fails)
+        # Get test_env from environment (set by run_test_suite.sh)
+        local test_env="${TEST_ENV:-aws}"  # Default to 'aws' for backward compatibility
+        
+        if command -v write_cache_value >/dev/null 2>&1; then
+            write_cache_value "ALB_DNS" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${ALB_DNS:-}" "" || true
+            write_cache_value "CLOUDFRONT_DOMAIN" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${CLOUDFRONT_DOMAIN:-}" "" || true
+            write_cache_value "ECS_CLUSTER_ID" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${ECS_CLUSTER_ID:-}" "" || true
+            write_cache_value "ECS_SERVICE_NAME" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${ECS_SERVICE_NAME:-}" "" || true
+            if [[ "$use_cache" == "true" ]]; then
+                log_info "Updated cache with fetched AWS values"
             fi
         fi
     fi
