@@ -15,15 +15,15 @@ setup_test_environment() {
     REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
     TEST_RESULTS_DIR="$REPO_ROOT/test/test_results"
     
-    # Create test results directory if it doesn't exist
-    mkdir -p "$TEST_RESULTS_DIR"
+    # Create test results directory and environment subdirectory if they don't exist
+    mkdir -p "$TEST_RESULTS_DIR/${test_env}"
     
     # Generate timestamped directory for this test run
     TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-    RUN_DIR="$TEST_RESULTS_DIR/${run_prefix}_$TIMESTAMP"
+    RUN_DIR="$TEST_RESULTS_DIR/${test_env}/${run_prefix}_$TIMESTAMP"
     mkdir -p "$RUN_DIR"
     
-    # Result files
+    # Result files (standard names)
     LOG_FILE="$RUN_DIR/test_results.log"
     SUMMARY_FILE="$RUN_DIR/test_summary.md"
     

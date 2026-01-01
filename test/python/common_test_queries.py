@@ -714,7 +714,6 @@ def run_single_test(
                 _print(f"Output tokens: {output_tokens}")
                 _print(f"Total tokens: {total_tokens}")
         
-        _print("----------------------------")
         return True
     except AssertionError as e:
         # Parse assertion error to extract Expected and Actual

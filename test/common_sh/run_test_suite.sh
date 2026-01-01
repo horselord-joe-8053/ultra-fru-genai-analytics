@@ -144,14 +144,18 @@ run_test_suite() {
         local test_code="${test_codes[$((test_num - 1))]}"
         local test_start=$(date +%s)
         
+        # Add separator before test (except first test, which already has separator from header)
+        if [ $test_num -gt 1 ]; then
+            echo "" >> "$LOG_FILE"
+            echo "═══════════════════════════════════════════════════════════════════════════════" >> "$LOG_FILE"
+        fi
+        
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting Test $test_num/$total_tests ($test_code)..." | tee -a "$LOG_FILE"
         echo "═══════════════════════════════════════════════════════════════════════════════" >> "$LOG_FILE"
         
         # Run test with timeout
         run_single_test_with_timeout "$test_code" "$API_BASE_URL" "$LOG_FILE" "$PER_TEST_TIMEOUT_SECONDS" "$TIMEOUT_CMD"
         local test_exit_code=$?
-        
-        echo "" >> "$LOG_FILE"
         
         # Calculate duration
         local test_duration=$(($(date +%s) - test_start))

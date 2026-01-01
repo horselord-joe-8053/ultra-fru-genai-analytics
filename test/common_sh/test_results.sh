@@ -15,7 +15,7 @@ print_test_header() {
     
     # Calculate relative paths
     local results_dir_rel="${RUN_DIR#$REPO_ROOT/}"
-    local cache_file_rel="test/cache_files/cached_aws_setups.txt"
+    local cache_file_rel="test/cache_files/test_cached_aws_setups.txt"
     
     echo "  Test Environment: $test_env"
     
@@ -292,6 +292,7 @@ finalize_summary_file() {
         echo ""
         echo "---"
         echo ""
+        # Standard filename
         echo "Full log: \`test_results.log\`"
     } >> "$SUMMARY_FILE"
 }

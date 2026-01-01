@@ -391,7 +391,7 @@ graph TD
     B -->|Yes| C[test_cache.sh]
     B -->|No| D[fetch-deployment-info.sh]
     
-    C --> E[Read cache file<br/>test/cache_files/cached_aws_setups.txt]
+    C --> E[Read cache file<br/>test/cache_files/test_cached_aws_setups.txt]
     E --> F{Cache Hit?}
     F -->|Yes| G[Load ALB_DNS, ECS_CLUSTER_ID, etc.<br/>~0.1s]
     F -->|No| D
@@ -414,7 +414,7 @@ graph TD
 
 ### 7.2 Cache File Format
 
-**Location**: `test/cache_files/cached_aws_setups.txt`
+**Location**: `test/cache_files/test_cached_aws_setups.txt`
 
 **Format**: Pipe-delimited
 ```
@@ -833,7 +833,7 @@ graph TD
 
 **Solutions**:
 1. Run test once without cache to populate cache
-2. Check cache file: `test/cache_files/cached_aws_setups.txt`
+2. Check cache file: `test/cache_files/test_cached_aws_setups.txt`
 3. Verify TTL: Check datetime in cache file
 4. Verify flag: Check test script output for "Using cached AWS values"
 

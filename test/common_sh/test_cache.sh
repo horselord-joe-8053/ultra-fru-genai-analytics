@@ -50,7 +50,7 @@ if [ -z "${REPO_ROOT:-}" ]; then
     export REPO_ROOT
 fi
 CACHE_DIR="${REPO_ROOT}/test/cache_files"
-CACHE_FILE="${CACHE_DIR}/cached_aws_setups.txt"
+CACHE_FILE="${CACHE_DIR}/test_cached_aws_setups.txt"
 
 # Default TTL in seconds (1 hour)
 CACHE_TTL_SECONDS="${CACHE_TTL_SECONDS:-3600}"
