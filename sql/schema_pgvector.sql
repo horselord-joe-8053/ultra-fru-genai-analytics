@@ -44,30 +44,7 @@ CREATE TABLE IF NOT EXISTS batch_analytics (
 CREATE INDEX IF NOT EXISTS batch_analytics_created_at_idx
 ON batch_analytics(created_at DESC);
 
--- Migration: Add missing columns to existing tables (idempotent)
--- These columns are now in CREATE TABLE above, but this ensures existing tables get them too
-ALTER TABLE fru_sales_embeddings 
-ADD COLUMN IF NOT EXISTS customer_id TEXT,
-ADD COLUMN IF NOT EXISTS capacity_liters NUMERIC,
-ADD COLUMN IF NOT EXISTS store_address TEXT,
-ADD COLUMN IF NOT EXISTS feedback_sentiment_category TEXT;
-
--- Migration: Change feedback_rating from TEXT to INTEGER (idempotent)
--- This will fail if column doesn't exist or is already INTEGER, so we check first
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'fru_sales_embeddings' 
-        AND column_name = 'feedback_rating' 
-        AND data_type = 'text'
-    ) THEN
-        ALTER TABLE fru_sales_embeddings 
-        ALTER COLUMN feedback_rating TYPE INTEGER USING feedback_rating::INTEGER;
-    END IF;
-END $$;
-
--- Create indexes for new columns (idempotent)
+-- Create indexes for columns (idempotent)
 CREATE INDEX IF NOT EXISTS fru_sales_embeddings_customer_id_idx 
 ON fru_sales_embeddings(customer_id);
 

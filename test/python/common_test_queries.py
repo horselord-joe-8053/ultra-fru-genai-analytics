@@ -561,7 +561,7 @@ def get_test_queries() -> Dict[str, QueryTestCase]:
             name="Percentage positive feedback",
             query="What percentage of feedback is positive?",
             validator=_validate_percentage_positive,
-            expected_answer="Answer should mention around 50% positive feedback",
+            expected_answer="Answer should mention 'positive' feedback and include percentage as '50%' or '50.00%' or '50.0%'",
         ),
         "NOI": QueryTestCase(
             name="Negative feedback about noise",
@@ -573,19 +573,19 @@ def get_test_queries() -> Dict[str, QueryTestCase]:
             name="Count feedbacks rating above 7",
             query="How many feedbacks have a rating above 7?",
             validator=_validate_count_above_seven,
-            expected_answer="Answer should mention a count of feedbacks with rating above 7",
+            expected_answer="Answer should mention '100' feedbacks with 'rating' above 7",
         ),
         "AVP": QueryTestCase(
             name="Average rating for positive feedbacks",
             query="What is the average rating for positive feedbacks?",
             validator=_validate_avg_positive,
-            expected_answer="Answer should mention the average rating for positive feedbacks (typically around 8-9 out of 10)",
+            expected_answer="Answer should mention 'positive' feedbacks and include average rating '9.0' or '9.00' or '9 out of 10'",
         ),
         "TMP": QueryTestCase(
             name="Negative feedback about temperature control",
             query="What do customers with negative feedback say about temperature control?",
             validator=_validate_temperature_feedback,
-            expected_answer="Answer should mention 'temperature' and include phrases related to temperature control issues",
+            expected_answer="Answer should mention 'temperature' and include at least one of: 'inconsistent', 'fluctuates', 'temperature control', or 'freezer'",
         ),
         "RDS": QueryTestCase(
             name="Rating distribution summary",
@@ -597,7 +597,7 @@ def get_test_queries() -> Dict[str, QueryTestCase]:
             name="Top 3 problems for low-rating feedbacks",
             query="For the low rating customer feedbacks, what are the top 3 problems?",
             validator=_validate_top3_low_rating_problems,
-            expected_answer="Answer should list the top 3 problems mentioned in low-rating customer feedbacks",
+            expected_answer="Answer should list the top 3 problems including 'door', 'temperature', and one of ['ice', 'water', 'freezer', 'component', 'functional']",
         ),
     }
 
@@ -729,15 +729,29 @@ def run_single_test(
             lines = error_str.split("\n")
             expected = ""
             actual_full = ""
-            for line in lines:
+            in_actual_full = False
+            for i, line in enumerate(lines):
                 if line.startswith("EXPECTED: "):
                     expected = line.replace("EXPECTED: ", "").strip()
                 elif line.startswith("ACTUAL_FULL: "):
-                    actual_full = line.replace("ACTUAL_FULL: ", "").strip()
+                    # Start capturing multi-line actual_full
+                    actual_full = line.replace("ACTUAL_FULL: ", "")
+                    in_actual_full = True
+                elif in_actual_full:
+                    if line.startswith("ACTUAL_FIRST_400: "):
+                        # Stop capturing when we hit ACTUAL_FIRST_400
+                        in_actual_full = False
+                        break
+                    else:
+                        # Continue appending lines to actual_full
+                        actual_full += "\n" + line
+            actual_full = actual_full.strip()
             
             if expected:
                 _print("----- Expected Answer: ----")
-                _print(expected)
+                # Show the full expected answer description, with the missing substring as context
+                _print(f"{test_case.expected_answer}")
+                _print(f"(Missing required substring: '{expected}')")
             if actual_full:
                 _print("----- Actual Answer: -------")
                 _print(actual_full)

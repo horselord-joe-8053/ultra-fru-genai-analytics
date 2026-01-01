@@ -433,64 +433,22 @@ class QueryAgent:
 
                 # Validate synthesis response for hallucination indicators
                 if not has_successful_data:
-                    # Check if answer claims to have data when it doesn't
-                    answer_lower = final_answer.lower()
-                    hallucination_indicators = [
-                        "based on query results",
-                        "according to the data",
-                        "the query results show",
-                        "from the database",
-                        "the data indicates",
-                        "based on the information",
-                        "the database shows",
-                        "query results indicate",
-                        "from the query",
-                        "the results show",
-                    ]
-                    
-                    # Check for tool-calling format (LLM outputting reasoning instead of answer)
-                    tool_calling_indicators = [
-                        "<call-tool",
-                        "</call-tool>",
-                        "call-tool name",
-                        "i'll use generate_sql",
-                        "i'll execute",
-                        "i'll start by",
-                        "now i'll",
-                    ]
-                    
-                    # Also check for numeric values (likely hallucinated if no data)
                     import re
-                    has_numbers = bool(re.search(r'\d+\.?\d*', final_answer))
+                    answer_lower = final_answer.lower()
                     
-                    # Check for specific numeric patterns that suggest calculations
-                    has_calculated_values = bool(re.search(r'\d+\.\d+', final_answer))  # Decimals suggest calculations
+                    # Quick validation checks
+                    has_numeric = bool(re.search(r'\d+\.?\d+', final_answer))  # Any number with optional decimal
+                    has_tool_format = bool(re.search(r'<generate_sql>|<execute_sql>|<semantic_search>', final_answer))
+                    has_data_phrases = any(phrase in answer_lower for phrase in [
+                        "based on query results", "according to the data", "the query results show",
+                        "from the database", "the data indicates", "based on the information"
+                    ])
                     
-                    # Check for numeric values that look like ratings/scores (1-10 range, percentages, etc.)
-                    has_rating_like_values = bool(re.search(r'\b([1-9]|10)(\.\d+)?\s*(out of 10|/10|%)', final_answer, re.IGNORECASE))
-                    
-                    # More aggressive: if no data and answer contains any numeric value that looks like a result, it's likely hallucinated
-                    has_result_like_numbers = bool(re.search(r'\b\d+\.\d+\b', final_answer))  # Any decimal number
-                    
-                    # Check if answer contains tool-calling format (LLM is outputting reasoning)
-                    has_tool_calling_format = any(indicator in answer_lower for indicator in tool_calling_indicators)
-                    
-                    # Trigger validation if:
-                    # 1. Contains data-implying phrases, OR
-                    # 2. Contains tool-calling format (LLM outputting reasoning), OR
-                    # 3. Contains calculated values (decimals) when no data exists, OR
-                    # 4. Contains rating-like values (e.g., "6.68 out of 10")
-                    if (any(indicator in answer_lower for indicator in hallucination_indicators) or 
-                        has_tool_calling_format or
-                        (has_numbers and has_calculated_values) or
-                        has_rating_like_values or
-                        (has_result_like_numbers and has_numbers)):
+                    # If any violation detected, replace with correct response
+                    if has_numeric or has_tool_format or has_data_phrases:
                         logger.warning(
-                            "[SYNTHESIS] ⚠️ LLM generated answer claims to have data or contains numbers when none exists. "
-                            "This is a hallucination. Replacing with explicit no-data message."
-                        )
-                        logger.warning(
-                            f"[SYNTHESIS] Original (hallucinated) answer: {final_answer[:500]}"
+                            f"[SYNTHESIS] ⚠️ Hallucination detected (numeric={has_numeric}, tool_format={has_tool_format}, data_phrases={has_data_phrases}). "
+                            f"Replacing answer. Original: {final_answer[:200]}"
                         )
                         final_answer = (
                             "I cannot answer this question because I was unable to retrieve the required data from the database. "

@@ -60,10 +60,28 @@ load_data() {
     # Run ETL script
     log_info "Running ETL script to load data..."
     log_info "  CSV: $FRU_CSV_PATH"
-    log_info "  Database: $PGHOST:$PGPORT/$PGDATABASE"
     
-    cd "$REPO_ROOT/backend"
-    python etl/load_openai_embeddings_to_pgvector.py
+    # For local Docker, database is exposed on port 55432
+    # Override PGHOST and PGPORT if using Docker
+    if docker ps | grep -q fru_db; then
+        # Force override for Docker
+        PGHOST="localhost"
+        PGPORT="55432"  # Docker exposes DB on 55432
+        export PGHOST PGPORT
+        log_info "  Database: $PGHOST:$PGPORT/$PGDATABASE (Docker)"
+    else
+        log_info "  Database: $PGHOST:$PGPORT/$PGDATABASE"
+    fi
+    
+    # Export all required environment variables for ETL script
+    # These are already loaded by load_env_file, but ensure they're exported
+    export PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE
+    export OPENAI_API_KEY OPENAI_EMBED_MODEL
+    
+    # Run from repo root with PYTHONPATH set so imports work
+    cd "$REPO_ROOT"
+    export PYTHONPATH="$REPO_ROOT:$PYTHONPATH"
+    python backend/etl/load_openai_embeddings_to_pgvector.py
     
     if [ $? -eq 0 ]; then
         log_success "Data loaded successfully"
