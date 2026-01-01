@@ -1,0 +1,9 @@
+env_var_name|environment|deployment_type|aws_region|test_env|datetime_value_obtained|value|problem
+ALB_DNS|dev|ecs-full|us-east-1|fru-dev-alb-750333102.us-east-1.elb.amazonaws.com|2026-01-01_191214|NULL|
+CLOUDFRONT_DOMAIN|dev|ecs-full|us-east-1|d1y3xoel2x4gmc.cloudfront.net|2026-01-01_191214|NULL|
+ECS_CLUSTER_ID|dev|ecs-full|us-east-1|arn:aws:ecs:us-east-1:744139897900:cluster/fru-dev-cluster|2026-01-01_191214|NULL|
+ECS_SERVICE_NAME|dev|ecs-full|us-east-1|fru-dev-api-service|2026-01-01_191214|NULL|
+ALB_DNS|dev|ecs-full|us-east-1|aws|2026-01-01_202936|fru-dev-alb-750333102.us-east-1.elb.amazonaws.com|
+CLOUDFRONT_DOMAIN|dev|ecs-full|us-east-1|aws|2026-01-01_202936|d1y3xoel2x4gmc.cloudfront.net|
+ECS_CLUSTER_ID|dev|ecs-full|us-east-1|aws|2026-01-01_202936|arn:aws:ecs:us-east-1:744139897900:cluster/fru-dev-cluster|
+ECS_SERVICE_NAME|dev|ecs-full|us-east-1|aws|2026-01-01_202936|fru-dev-api-service|
