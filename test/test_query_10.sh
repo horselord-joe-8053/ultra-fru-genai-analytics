@@ -7,8 +7,26 @@
 #
 # Usage:
 #   From the repo root:
+#
+#   AWS Environment:
 #     ./test/test_query_10.sh --test-env aws
+#     ./test/test_query_10.sh --test-env aws --use-cached-aws-val
+#
+#   Local Environment (automatically ensures services are running):
 #     ./test/test_query_10.sh --test-env local
+#     # Behavior:
+#     #   - If services are up: runs tests immediately (fast)
+#     #   - If services are down but images exist: starts services (no build)
+#     #   - If services are down and images missing: builds missing images, then starts
+#
+#   Local Environment (force rebuild all images):
+#     ./test/test_query_10.sh --test-env local --force-rebuild-local-img
+#
+# Notes:
+#   - For local testing, services are automatically ensured (implicit requirement)
+#   - --force-rebuild-local-img rebuilds all Docker images before starting services
+#   - Image existence is checked to avoid unnecessary builds
+#   - This test suite runs 10 queries: AVG, BRD, CNT, PCT, NOI, R07, AVP, TMP, RDS, TOP
 #
 set -euo pipefail
 

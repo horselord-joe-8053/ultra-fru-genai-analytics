@@ -159,8 +159,69 @@ setup_aws_environment() {
     export API_BASE_URL
 }
 
+# Check if Docker services are running
+# Returns 0 if both fru_db and fru_api are running, 1 otherwise
+check_services_running() {
+    if ! command -v docker >/dev/null 2>&1; then
+        return 1
+    fi
+    
+    local db_running=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -c "^fru_db$" || echo "0")
+    local api_running=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -c "^fru_api$" || echo "0")
+    
+    if [ "$db_running" -eq 1 ] && [ "$api_running" -eq 1 ]; then
+        return 0  # Both services running
+    fi
+    return 1  # Services not running
+}
+
+# Check if all required Docker images exist
+# Returns 0 if all images exist, 1 if any are missing
+check_images_exist() {
+    if ! command -v docker >/dev/null 2>&1; then
+        return 1
+    fi
+    
+    # Check db image (pulled from Docker Hub)
+    if ! docker image inspect ankane/pgvector:latest >/dev/null 2>&1; then
+        return 1  # Missing
+    fi
+    
+    # Check api image (built locally)
+    # Get project name from docker-compose (defaults to directory name)
+    local docker_dir="${REPO_ROOT}/infra/docker"
+    if [ ! -d "$docker_dir" ]; then
+        return 1
+    fi
+    
+    cd "$docker_dir"
+    # Get the actual image name that docker-compose would use
+    # Try to get it from docker compose config
+    local api_image_name
+    api_image_name=$(docker compose config --images api 2>/dev/null | head -1 || echo "")
+    
+    if [ -z "$api_image_name" ]; then
+        # Fallback: try common naming patterns
+        local project_name=$(basename "$(cd "$docker_dir/../.." && pwd)" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]-')
+        api_image_name="${project_name}_api"
+    fi
+    
+    # Check if the image exists
+    if ! docker image inspect "$api_image_name" >/dev/null 2>&1; then
+        return 1  # Missing
+    fi
+    
+    return 0  # All images exist
+}
+
 # Setup local test environment
 # Sets: API_BASE_URL
+# Automatically ensures Docker services are running (implicit requirement for local testing)
+# Behavior:
+#   1. If services are up → runs tests immediately (fast)
+#   2. If services are down but images exist → starts services (no build)
+#   3. If services are down and images missing → builds missing images, then starts
+#   4. If --force-rebuild-local-img → rebuilds all images, then starts
 setup_local_environment() {
     # Load .env file to get LOCAL_SERVER_PORT if available
     if [ -z "${REPO_ROOT:-}" ]; then
@@ -183,11 +244,116 @@ setup_local_environment() {
     local server_port="${LOCAL_SERVER_PORT:-5001}"
     API_BASE_URL="http://localhost:${server_port}"
     
-    # For local, we can do a simple health check
+    # Get force rebuild flag (from test runner)
+    local force_rebuild="${FORCE_REBUILD_LOCAL_IMG:-false}"
+    
+    # Ensure Docker is available
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "WARNING: docker command not found. Cannot ensure services are running." >&2
+        echo "WARNING: Continuing anyway, but tests may fail if services are not running." >&2
+        export API_BASE_URL
+        return 0
+    fi
+    
+    # Check if services are already running (fastest path)
+    if check_services_running; then
+        echo "INFO: Docker services are already running (fru_db, fru_api)" >&2
+        # Still do a quick health check
+        if command -v curl >/dev/null 2>&1; then
+            if ! curl -sf "$API_BASE_URL/health" >/dev/null 2>&1; then
+                echo "WARNING: Services are running but API health check failed at $API_BASE_URL" >&2
+            fi
+        fi
+        export API_BASE_URL
+        return 0
+    fi
+    
+    # Services are down - need to start them
+    echo "INFO: Docker services are not running. Ensuring services are up..." >&2
+    
+    local docker_dir="${REPO_ROOT}/infra/docker"
+    if [ ! -d "$docker_dir" ]; then
+        echo "ERROR: Docker directory not found at $docker_dir" >&2
+        exit 1
+    fi
+    
+    cd "$docker_dir"
+    
+    # Ensure Docker daemon is running
+    # shellcheck source=/dev/null
+    if [ -f "$REPO_ROOT/run_scripts/common/docker_run.sh" ]; then
+        source "$REPO_ROOT/run_scripts/common/docker_run.sh" 2>/dev/null || true
+        if command -v ensure_docker_running >/dev/null 2>&1; then
+            if ! ensure_docker_running; then
+                echo "ERROR: Docker daemon is not running. Please start Docker Desktop." >&2
+                exit 1
+            fi
+        fi
+    fi
+    
+    # Load .env for docker-compose
+    if [ -f "$REPO_ROOT/.env" ]; then
+        load_env_file 2>/dev/null || true
+    fi
+    
+    if [[ "$force_rebuild" == "true" ]]; then
+        # Force rebuild all images
+        echo "INFO: Force rebuilding all Docker images..." >&2
+        docker compose --env-file "$REPO_ROOT/.env" build
+        
+        # Clean up dangling images after build
+        docker image prune -f >/dev/null 2>&1 || true
+    else
+        # Check if images exist
+        if check_images_exist; then
+            # Images exist - just start services
+            echo "INFO: All required images exist. Starting services..." >&2
+        else
+            # Images missing - build missing images, then start
+            echo "INFO: Some images are missing. Building images..." >&2
+            docker compose --env-file "$REPO_ROOT/.env" build
+            
+            # Clean up dangling images after build
+            docker image prune -f >/dev/null 2>&1 || true
+        fi
+    fi
+    
+    # Start services
+    echo "INFO: Starting Docker Compose services..." >&2
+    docker compose --env-file "$REPO_ROOT/.env" up -d
+    
+    # Wait for services to be ready
+    echo "INFO: Waiting for services to be ready..." >&2
+    
+    # Wait for database
+    # shellcheck source=/dev/null
+    if [ -f "$REPO_ROOT/run_scripts/common/wait-for-service.sh" ]; then
+        source "$REPO_ROOT/run_scripts/common/wait-for-service.sh" 2>/dev/null || true
+        if command -v wait_for_port >/dev/null 2>&1; then
+            wait_for_port "localhost" "55432" 30 2 || true
+        fi
+    fi
+    
+    # Wait for API health check
     if command -v curl >/dev/null 2>&1; then
-        if ! curl -sf "$API_BASE_URL/health" >/dev/null 2>&1; then
-            echo "WARNING: Local API health check failed. Is the API running at $API_BASE_URL?" >&2
-            echo "Continuing anyway..." >&2
+        local max_retries=10
+        local retry_count=0
+        local health_ok=false
+        
+        while [ $retry_count -lt $max_retries ]; do
+            if curl -sf "$API_BASE_URL/health" >/dev/null 2>&1; then
+                health_ok=true
+                break
+            fi
+            sleep 2
+            retry_count=$((retry_count + 1))
+        done
+        
+        if [ "$health_ok" = false ]; then
+            echo "WARNING: API health check failed after ${max_retries} attempts at $API_BASE_URL" >&2
+            echo "WARNING: Services may still be starting. Continuing anyway..." >&2
+        else
+            echo "INFO: Services are ready!" >&2
         fi
     fi
     

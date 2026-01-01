@@ -4,9 +4,35 @@
 # Run a test suite with the given test codes
 # Parameters:
 #   $1: Run prefix (e.g., "query_1" or "query_10")
-#   $2+: Arguments (--test-env <aws|local> followed by test codes)
-#       Example: run_test_suite "query_1" --test-env aws TOP
-#       Example: run_test_suite "query_10" --test-env local AVG BRD CNT
+#   $2+: Arguments and test codes
+#       Required:
+#         --test-env <aws|local>  : Test environment (aws or local)
+#       Optional:
+#         --use-cached-aws-val        : Use cached AWS deployment values (AWS only)
+#         --force-rebuild-local-img    : Force rebuild all local Docker images (local only)
+#       Test codes:
+#         One or more test codes (e.g., AVG, TOP, BRD, CNT, etc.)
+#
+# Examples:
+#   # AWS environment
+#   run_test_suite "query_1" --test-env aws TOP
+#   run_test_suite "query_1" --test-env aws --use-cached-aws-val AVG
+#   run_test_suite "query_10" --test-env aws AVG BRD CNT
+#
+#   # Local environment (automatically ensures services are running)
+#   run_test_suite "query_1" --test-env local AVG
+#   # Behavior:
+#   #   - If services are up: runs tests immediately (fast)
+#   #   - If services are down but images exist: starts services (no build)
+#   #   - If services are down and images missing: builds missing images, then starts
+#
+#   # Local environment (force rebuild all images)
+#   run_test_suite "query_1" --test-env local --force-rebuild-local-img AVG
+#
+# Notes:
+#   - For local testing, services are automatically ensured (implicit requirement)
+#   - --force-rebuild-local-img rebuilds all images before starting services
+#   - Image existence is checked to avoid unnecessary builds
 run_test_suite() {
     local run_prefix="$1"
     shift
@@ -15,6 +41,7 @@ run_test_suite() {
     local test_env=""
     local test_codes=()
     local use_cached_aws_val=false
+    local force_rebuild_local_img=false
     
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -32,6 +59,10 @@ run_test_suite() {
                 ;;
             --use-cached-aws-val)
                 use_cached_aws_val=true
+                shift
+                ;;
+            --force-rebuild-local-img)
+                force_rebuild_local_img=true
                 shift
                 ;;
             *)
@@ -52,9 +83,10 @@ run_test_suite() {
         return 1
     fi
     
-    # Export TEST_ENV and USE_CACHED_AWS_VAL for use in other functions
+    # Export TEST_ENV and flags for use in other functions
     export TEST_ENV="$test_env"
     export USE_CACHED_AWS_VAL="$use_cached_aws_val"
+    export FORCE_REBUILD_LOCAL_IMG="$force_rebuild_local_img"
     
     local total_tests=${#test_codes[@]}
     
