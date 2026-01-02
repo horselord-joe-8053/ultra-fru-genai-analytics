@@ -48,6 +48,46 @@ const BatchAnalyticsPanel: React.FC = () => {
       setLoading(true);
       setError(null);
       const resp = await fetch("/analytics");
+      
+      // Check content type to detect HTML responses (CloudFront routing issue)
+      const contentType = resp.headers.get("content-type") || "";
+      if (contentType.includes("text/html")) {
+        // Received HTML instead of JSON - likely CloudFront routing issue
+        const isProduction = window.location.hostname.includes("cloudfront.net");
+        setError(
+          isProduction
+            ? "Backend API not reachable. CloudFront may not be routing /analytics to the backend. Check CloudFront cache behaviors configuration."
+            : "Backend API not reachable. Check that the backend is running and Vite proxy is configured correctly."
+        );
+        setData(null);
+        setLoading(false);
+        return;
+      }
+      
+      // Try to parse as JSON, but check for HTML content first
+      const text = await resp.text();
+      if (text.trim().startsWith("<!") || text.trim().startsWith("<html")) {
+        // Received HTML content even though content-type might be wrong
+        const isProduction = window.location.hostname.includes("cloudfront.net");
+        setError(
+          isProduction
+            ? "Backend API not reachable. CloudFront may not be routing /analytics to the backend. Check CloudFront cache behaviors configuration."
+            : "Backend API not reachable. Check that the backend is running and Vite proxy is configured correctly."
+        );
+        setData(null);
+        setLoading(false);
+        return;
+      }
+      
+      const result = JSON.parse(text);
+      
+      // Check if response contains an error message (backend returns 200 with error field when no data)
+      if (result.error && (resp.status === 200 || resp.status === 404)) {
+        setError(result.error || "Analytics data not available yet. Waiting for first batch run...");
+        setData(null);
+        return;
+      }
+      
       if (!resp.ok) {
         if (resp.status === 404) {
           setError("Analytics data not available yet. Waiting for first batch run...");
@@ -56,11 +96,21 @@ const BatchAnalyticsPanel: React.FC = () => {
         }
         throw new Error(`HTTP ${resp.status}`);
       }
-      const result = await resp.json();
+      
       setData(result);
     } catch (e: any) {
       console.error("Failed to fetch analytics:", e);
-      setError(e.message || "Failed to load analytics");
+      // Check if error is due to HTML response
+      if (e.message && (e.message.includes("Unexpected token '<'") || e.message.includes("<!doctype"))) {
+        const isProduction = window.location.hostname.includes("cloudfront.net");
+        setError(
+          isProduction
+            ? "Backend API not reachable. CloudFront may not be routing /analytics to the backend. Check CloudFront cache behaviors configuration."
+            : "Backend API not reachable. Check that the backend is running and Vite proxy is configured correctly."
+        );
+      } else {
+        setError(e.message || "Failed to load analytics");
+      }
       setData(null);
     } finally {
       setLoading(false);

@@ -17,6 +17,7 @@ from openai import APIError as OpenAIError
 from backend.llm.bedrock_client import claude_complete, get_bedrock_client
 from backend.services.analytics_scheduler import start_analytics_scheduler
 from backend.utils.env_helpers import get_required_env, get_optional_env, get_optional_bool_env, get_optional_int_env
+from backend.utils.stats_helpers import compute_simple_stats
 
 # Feature flag for agent-based query processing
 # Single source of truth: .env file (USE_AGENT_QUERY=true/false)
@@ -255,33 +256,6 @@ def pgvector_search_feedback(query_text: str, limit: int = 30) -> List[Dict[str,
             return_db_conn(conn)
 
 
-def compute_simple_stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    total = len(rows)
-    by_brand: Dict[str, int] = {}
-    by_store: Dict[str, int] = {}
-    by_rating: Dict[str, int] = {}
-
-    for r in rows:
-        brand = (r.get("brand") or "").strip()
-        store = (r.get("store_name") or "").strip()
-        # feedback_rating is now INTEGER, feedback_sentiment_category is TEXT
-        rating = r.get("feedback_rating")
-        sentiment = (r.get("feedback_sentiment_category") or "").strip()
-
-        if brand:
-            by_brand[brand] = by_brand.get(brand, 0) + 1
-        if store:
-            by_store[store] = by_store.get(store, 0) + 1
-        # Use sentiment_category for categorical stats (more meaningful than numeric rating)
-        if sentiment:
-            by_rating[sentiment] = by_rating.get(sentiment, 0) + 1
-
-    return {
-        "total_matches": total,
-        "by_brand": by_brand,
-        "by_store": by_store,
-        "by_rating": by_rating,
-    }
 
 
 def build_claude_system_prompt() -> str:
@@ -362,10 +336,12 @@ def get_analytics():
                 
                 if not row:
                     app.logger.warning(f"[{request_id}] No analytics data available")
+                    # Return 200 (not 404) to avoid CloudFront custom error responses
+                    # that would serve frontend HTML instead of JSON
                     return jsonify({
                         "error": "No analytics data available yet. Analytics will be available after the first batch run.",
                         "request_id": request_id
-                    }), 404
+                    }), 200
                 
                 # Convert to dict and format
                 result = dict(row)
@@ -525,8 +501,8 @@ def query():
                     "answer": result.get("answer", ""),
                     "method": "agentic",
                     "mode": "agentic",  # For compatibility
-                    "stats": {},  # Agent doesn't return stats in same format
-                    "sample_records": [],  # Agent doesn't return sample records
+                    "stats": result.get("stats", {}),  # Extract stats from agent result
+                    "sample_records": result.get("sample_records", []),  # Extract sample records from agent result
                     "iterations": result.get("iterations", 0),
                     "execution_time_ms": result.get("execution_time_ms", 0),
                     "request_id": request_id,
@@ -589,8 +565,8 @@ def query():
                         "answer": result.get("answer", ""),
                         "method": "agentic",
                         "mode": "agentic",
-                        "stats": {},
-                        "sample_records": [],
+                        "stats": result.get("stats", {}),  # Extract stats from agent result
+                        "sample_records": result.get("sample_records", []),  # Extract sample records from agent result
                         "iterations": result.get("iterations", 0),
                         "execution_time_ms": result.get("execution_time_ms", 0),
                         "request_id": request_id
