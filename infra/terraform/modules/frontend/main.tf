@@ -102,6 +102,7 @@ resource "aws_cloudfront_distribution" "frontend" {
         https_port             = 443
         origin_protocol_policy = "http-only" # ALB uses HTTP internally
         origin_ssl_protocols   = ["TLSv1.2"]
+        origin_read_timeout    = 60  # Maximum CloudFront timeout (60s) for agent-based queries that may take 30-60s
       }
     }
   }

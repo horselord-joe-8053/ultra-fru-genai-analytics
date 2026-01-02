@@ -554,6 +554,21 @@ def query():
                     for i, tool_call in enumerate(response.get('tool_calls', []), 1):
                         app.logger.info(f"[{request_id}]   Tool {i}: {tool_call.get('tool')} - Success: {tool_call.get('output', {}).get('success', False)}")
                 app.logger.info(f"[{request_id}] Agent processing completed successfully")
+                
+                # Future Improvement: Implement async query pattern using Redis job status store for queries exceeding 45s.
+                # This handles queries >60s (CloudFront max timeout) while maintaining CloudFront benefits (HTTPS, single domain, security).
+                # 
+                # Implementation pattern:
+                # 1. POST /query → Check if query estimated >45s → If yes: create job_id, store status="pending" in Redis, return {job_id, status="processing"}, start async processing
+                # 2. Async worker: Update Redis status="processing" → Process query → Store status="completed" with full result in Redis (key="job:{job_id}", TTL=3600s)
+                # 3. GET /query/status/{job_id} → Return current status from Redis (pending/processing/completed/failed)
+                # 4. GET /query/result/{job_id} → Return full result when status="completed" (or error when status="failed")
+                # 5. Frontend: Poll /query/status/{job_id} every 3s until completed, then fetch /query/result/{job_id}
+                #
+                # Redis structure: key="job:{job_id}", value=JSON({status, query, result, created_at, started_at, completed_at, error}), TTL=3600s
+                # Use Redis SETEX for atomic set-with-TTL. Use threading.Thread or Celery for async processing.
+                # For queries <45s, keep current synchronous pattern for simplicity.
+                
                 return jsonify(response)
                 
             except Exception as e:
