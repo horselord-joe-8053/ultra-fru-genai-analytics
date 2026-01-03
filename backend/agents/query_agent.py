@@ -10,7 +10,6 @@ from decimal import Decimal
 from datetime import datetime, date
 
 from backend.llm.bedrock_client import claude_complete
-from backend.utils.stats_helpers import compute_simple_stats
 from .tools import SQLTool, SemanticSearchTool, SQLGeneratorTool
 from .logger import AgentLogger
 from .metrics import agent_metrics
@@ -258,7 +257,7 @@ class QueryAgent:
                         logger.warning(f"  Error: {tool_output.get('error', 'Unknown error')}")
                     
                     # Log tool call
-                    logger.log_tool_call(tool_name, tool_input, tool_output, tool_time)
+                    logger.log_tool_call(tool_name, tool_input, tool_output, tool_time, iteration)
                     
                     # Record metrics
                     agent_metrics.record_tool_call(tool_name, tool_time, tool_output.get("success", False))
@@ -340,6 +339,7 @@ class QueryAgent:
                                 {"sql_query": last_sql},
                                 auto_output,
                                 auto_time,
+                                iteration
                             )
                             agent_metrics.record_tool_call(
                                 "execute_sql",
@@ -371,7 +371,7 @@ class QueryAgent:
                 primary_sql_result = synthesis_inputs.get("primary_sql_result")
                 primary_semantic_result = synthesis_inputs.get("primary_semantic_result")
                 context_results = synthesis_inputs.get("context_results", [])
-                primary_result_type = None  # Initialize for stats extraction
+                primary_result_type = None
 
                 # Check if we have any successful data retrieval
                 has_successful_data = (
@@ -504,38 +504,6 @@ class QueryAgent:
                 elif primary_semantic_result:
                     primary_result_type = "semantic"
             
-            # Extract stats and sample records from primary result
-            stats = {}
-            sample_records = []
-            
-            if has_successful_data:
-                # Get rows from primary result (SQL or semantic search)
-                primary_rows = []
-                if primary_sql_result and primary_sql_result.get("rows"):
-                    primary_rows = primary_sql_result.get("rows", [])
-                elif primary_semantic_result and primary_semantic_result.get("rows"):
-                    primary_rows = primary_semantic_result.get("rows", [])
-                
-                if primary_rows:
-                    # Compute stats using shared utility function
-                    try:
-                        stats = compute_simple_stats(primary_rows)
-                        logger.info(f"[STATS] Computed stats: total_matches={stats.get('total_matches', 0)}, "
-                                  f"brands={len(stats.get('by_brand', {}))}, "
-                                  f"stores={len(stats.get('by_store', {}))}, "
-                                  f"ratings={len(stats.get('by_rating', {}))}")
-                    except Exception as e:
-                        logger.warning(f"[STATS] Failed to compute stats: {e}")
-                        stats = {}
-                    
-                    # Extract sample records (first 5 rows, JSON-serializable)
-                    try:
-                        sample_records = self._json_safe_rows(primary_rows[:5])
-                        logger.info(f"[STATS] Extracted {len(sample_records)} sample records")
-                    except Exception as e:
-                        logger.warning(f"[STATS] Failed to extract sample records: {e}")
-                        sample_records = []
-            
             return {
                 "answer": final_answer,
                 "method": "agentic",
@@ -555,9 +523,6 @@ class QueryAgent:
                     primary_sql_result.get("row_count", 0) if primary_sql_result
                     else (primary_semantic_result.get("row_count", 0) if primary_semantic_result else 0)
                 ),
-                # Add stats and sample records for frontend Stats Panel
-                "stats": stats,
-                "sample_records": sample_records
             }
         
         except Exception as e:

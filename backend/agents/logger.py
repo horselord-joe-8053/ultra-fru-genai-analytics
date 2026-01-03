@@ -33,8 +33,17 @@ class AgentLogger:
         logger.debug(f"[{self.query_id}] Agent thought: {thought}")
     
     def log_tool_call(self, tool_name: str, input_data: Dict[str, Any], 
-                     output_data: Dict[str, Any], execution_time_ms: float):
-        """Log tool execution."""
+                     output_data: Dict[str, Any], execution_time_ms: float,
+                     iteration: int):
+        """Log tool execution.
+        
+        Args:
+            tool_name: Name of the tool being executed
+            input_data: Input parameters for the tool
+            output_data: Output from the tool execution
+            execution_time_ms: Execution time in milliseconds
+            iteration: Iteration number this tool call belongs to
+        """
         # Preserve SQL in output for SQL-related tools
         output_dict = {
             "success": output_data.get("success", False),
@@ -51,10 +60,11 @@ class AgentLogger:
             "tool": tool_name,
             "input": input_data,
             "output": output_dict,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "iteration": iteration
         }
         self.tool_calls.append(tool_call)
-        logger.info(f"[{self.query_id}] Tool: {tool_name}, Success: {tool_call['output']['success']}, Time: {execution_time_ms:.2f}ms")
+        logger.info(f"[{self.query_id}] Tool: {tool_name}, Success: {tool_call['output']['success']}, Time: {execution_time_ms:.2f}ms, Iteration: {iteration}")
     
     def log_iteration(self, iteration_num: int):
         """Log iteration number."""
