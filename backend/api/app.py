@@ -17,7 +17,6 @@ from openai import APIError as OpenAIError
 from backend.llm.bedrock_client import claude_complete, get_bedrock_client
 from backend.services.analytics_scheduler import start_analytics_scheduler
 from backend.utils.env_helpers import get_required_env, get_optional_env, get_optional_bool_env, get_optional_int_env, get_required_int_env
-from backend.utils.stats_helpers import compute_simple_stats
 
 # Feature flag for agent-based query processing
 # Single source of truth: .env file (USE_AGENT_QUERY=true/false)
@@ -286,11 +285,9 @@ def _json_safe(value: Any) -> Any:
 def build_claude_user_payload(
     question: str,
     rows: List[Dict[str, Any]],
-    stats: Dict[str, Any],
 ) -> str:
     payload = {
         "question": question,
-        "stats": stats,
         "sample_records": [_json_safe(r) for r in rows[:10]],
     }
     return json.dumps(payload, ensure_ascii=False)
@@ -513,8 +510,6 @@ def query():
                     "answer": result.get("answer", ""),
                     "method": "agentic",
                     "mode": "agentic",  # For compatibility
-                    "stats": result.get("stats", {}),  # Extract stats from agent result
-                    "sample_records": result.get("sample_records", []),  # Extract sample records from agent result
                     "iterations": result.get("iterations", 0),
                     "execution_time_ms": result.get("execution_time_ms", 0),
                     "request_id": request_id,
@@ -607,12 +602,9 @@ def query():
         
         app.logger.info(f"[{request_id}] Found {len(rows)} matching records")
         
-        stats = compute_simple_stats(rows)
-        app.logger.info(f"[{request_id}] Stats computed: {stats}")
-        
         # 2) Build payload for Claude
         system_prompt = build_claude_system_prompt()
-        user_payload = build_claude_user_payload(question, rows, stats)
+        user_payload = build_claude_user_payload(question, rows)
         
         app.logger.debug(f"[{request_id}] Sending to Claude: {user_payload[:200]}...")
         
@@ -641,8 +633,6 @@ def query():
         response = {
             "question": question,
             "mode": "qualitative" if qualitative else "mixed",
-            "stats": stats,
-            "sample_records": rows[:5],
             "answer": answer_text,
             "request_id": request_id,
             "token_usage": {
