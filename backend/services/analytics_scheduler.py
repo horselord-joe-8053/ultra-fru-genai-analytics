@@ -36,7 +36,7 @@ def run_spark_analytics():
         # Run spark-submit
         cmd = [
             spark_submit,
-            "--packages", "io.delta:delta-spark_2.12:3.2.0",
+            "--packages", "io.delta:delta-spark_2.13:4.0.0",
             script_path,
             delta_path,
             output_dir
@@ -62,22 +62,22 @@ def run_spark_analytics():
         logger.error(f"Error running Spark analytics: {e}", exc_info=True)
 
 
-def start_analytics_scheduler(interval_minutes: int = 5):
+def start_analytics_scheduler(interval_seconds: int):
     """
     Start the analytics scheduler.
     
     Args:
-        interval_minutes: How often to run analytics (default: 5 minutes)
+        interval_seconds: How often to run analytics in seconds (required, no default)
     """
     scheduler = BackgroundScheduler()
     scheduler.add_job(
         run_spark_analytics,
-        trigger=IntervalTrigger(minutes=interval_minutes),
+        trigger=IntervalTrigger(seconds=interval_seconds),
         id='batch_analytics',
         name='Run batch analytics',
         replace_existing=True
     )
     scheduler.start()
-    logger.info(f"Analytics scheduler started (runs every {interval_minutes} minutes)")
+    logger.info(f"Analytics scheduler started (runs every {interval_seconds} seconds)")
     return scheduler
 

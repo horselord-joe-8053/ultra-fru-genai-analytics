@@ -77,6 +77,40 @@ def get_optional_bool_env(var_name: str, default: bool = False) -> bool:
         return default
 
 
+def get_required_int_env(var_name: str, description: str = "") -> int:
+    """
+    Get a required integer environment variable with fail-fast validation.
+    
+    Args:
+        var_name: Name of the environment variable
+        description: Optional description for error message
+    
+    Returns:
+        int: The integer value (guaranteed to be valid)
+    
+    Raises:
+        ValueError: If the environment variable is not set, is empty, or is not a valid integer
+    
+    Example:
+        >>> interval = get_required_int_env("ANALYTICS_SCHEDULER_INTERVAL_SECONDS", "Analytics scheduler interval in seconds")
+    """
+    value = os.environ.get(var_name, "")
+    if not value:
+        error_msg = f"Required environment variable '{var_name}' is not set or is empty."
+        if description:
+            error_msg += f" ({description})"
+        error_msg += f" Please set it in your .env file."
+        raise ValueError(error_msg)
+    
+    try:
+        return int(value)
+    except ValueError:
+        error_msg = f"Environment variable '{var_name}' must be a valid integer, got: '{value}'"
+        if description:
+            error_msg += f" ({description})"
+        raise ValueError(error_msg)
+
+
 def get_optional_int_env(var_name: str, default: int = 0) -> int:
     """
     Get an optional integer environment variable.

@@ -16,7 +16,7 @@ from openai import APIError as OpenAIError
 
 from backend.llm.bedrock_client import claude_complete, get_bedrock_client
 from backend.services.analytics_scheduler import start_analytics_scheduler
-from backend.utils.env_helpers import get_required_env, get_optional_env, get_optional_bool_env, get_optional_int_env
+from backend.utils.env_helpers import get_required_env, get_optional_env, get_optional_bool_env, get_optional_int_env, get_required_int_env
 from backend.utils.stats_helpers import compute_simple_stats
 
 # Feature flag for agent-based query processing
@@ -656,12 +656,15 @@ if __name__ == "__main__":
     
     # Start analytics scheduler (if enabled)
     enable_scheduler = get_optional_bool_env("ENABLE_ANALYTICS_SCHEDULER", False)
-    scheduler_interval = get_optional_int_env("ANALYTICS_SCHEDULER_INTERVAL_MINUTES", 5)
     
     if enable_scheduler:
         try:
-            scheduler = start_analytics_scheduler(interval_minutes=scheduler_interval)
-            app.logger.info(f"Analytics scheduler enabled (runs every {scheduler_interval} minutes)")
+            scheduler_interval_seconds = get_required_int_env(
+                "ANALYTICS_SCHEDULER_INTERVAL_SECONDS",
+                "Analytics scheduler interval in seconds (required when ENABLE_ANALYTICS_SCHEDULER=true)"
+            )
+            scheduler = start_analytics_scheduler(interval_seconds=scheduler_interval_seconds)
+            app.logger.info(f"Analytics scheduler enabled (runs every {scheduler_interval_seconds} seconds)")
         except Exception as e:
             app.logger.warning(f"Failed to start analytics scheduler: {e}. Analytics will not run automatically.")
     else:
