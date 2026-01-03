@@ -154,6 +154,8 @@ class QueryAgent:
         tool_results: List[Dict[str, Any]] = []
         iteration = 0
         should_break_early = False
+        max_iterations_exceeded = False
+        all_data_retrieval_tools_successful = True  # Track if all data retrieval tools executed successfully (no errors)
 
         # Store current question for fallback parameter mapping
         self._current_question = question
@@ -163,6 +165,10 @@ class QueryAgent:
             while iteration < self.MAX_ITERATIONS:
                 iteration += 1
                 logger.log_iteration(iteration)
+                
+                # Check if this is the last iteration
+                if iteration >= self.MAX_ITERATIONS:
+                    max_iterations_exceeded = True
                 
                 # Emit iteration start event
                 if progress_callback:
@@ -311,6 +317,9 @@ class QueryAgent:
                     
                     # If tool failed, agent might want to try alternative
                     if not tool_output.get("success"):
+                        # Only track data retrieval tools (execute_sql, semantic_search)
+                        if tool_name in ["execute_sql", "semantic_search"]:
+                            all_data_retrieval_tools_successful = False
                         logger.log_thought(f"Tool {tool_name} failed: {tool_output.get('error')}")
                     else:
                         # If SQL execution succeeded with results, we can break early
@@ -334,6 +343,10 @@ class QueryAgent:
                 if has_successful_sql:
                     logger.info(f"✅ Found successful SQL execution in tool results. Stopping iterations to proceed to synthesis.")
                     break
+            
+            # Check if we hit max iterations
+            if iteration >= self.MAX_ITERATIONS:
+                max_iterations_exceeded = True
             
             # After planning loop, ensure we have executed SQL if SQL was generated
             has_successful_sql = any(
@@ -442,6 +455,20 @@ class QueryAgent:
                     (primary_semantic_result and primary_semantic_result.get("row_count", 0) > 0)
                 )
                 
+                # Verify all_data_retrieval_tools_successful by checking actual tool results
+                # This ensures we have the correct state even if tools were called in auto-execution
+                if not has_successful_data and tool_results:
+                    data_retrieval_tools = [r for r in tool_results if r.get("tool") in ["execute_sql", "semantic_search"]]
+                    if data_retrieval_tools:
+                        # Re-check: all data retrieval tools must have succeeded
+                        all_data_retrieval_tools_successful = all(
+                            r.get("output", {}).get("success", False) 
+                            for r in data_retrieval_tools
+                        )
+                    else:
+                        # No data retrieval tools were called, so we can't say "all successful"
+                        all_data_retrieval_tools_successful = False
+                
                 if primary_sql_result:
                     logger.info(
                         "[SYNTHESIS] Using primary SQL result with "
@@ -498,12 +525,13 @@ class QueryAgent:
                     final_answer = synthesis_result
                     synthesis_tokens = {}
 
-                # Validate synthesis response for hallucination indicators
+                # Determine failure reason and generate appropriate message
+                # ALWAYS replace answer when no successful data, regardless of LLM output
                 if not has_successful_data:
                     import re
                     answer_lower = final_answer.lower()
                     
-                    # Quick validation checks
+                    # Quick validation checks for logging
                     has_numeric = bool(re.search(r'\d+\.?\d+', final_answer))  # Any number with optional decimal
                     has_tool_format = bool(re.search(r'<generate_sql>|<execute_sql>|<semantic_search>', final_answer))
                     has_data_phrases = any(phrase in answer_lower for phrase in [
@@ -511,12 +539,30 @@ class QueryAgent:
                         "from the database", "the data indicates", "based on the information"
                     ])
                     
-                    # If any violation detected, replace with correct response
+                    # Log if hallucination detected
                     if has_numeric or has_tool_format or has_data_phrases:
                         logger.warning(
                             f"[SYNTHESIS] ⚠️ Hallucination detected (numeric={has_numeric}, tool_format={has_tool_format}, data_phrases={has_data_phrases}). "
                             f"Replacing answer. Original: {final_answer[:200]}"
                         )
+                    else:
+                        logger.info(
+                            f"[SYNTHESIS] No data found. Replacing LLM answer with appropriate message. "
+                            f"Original: {final_answer[:200]}"
+                        )
+                    
+                    # ALWAYS replace with appropriate message based on failure reason
+                    # Priority: 1) No data found (if all tools successful), 2) Resource limits, 3) Tool failures
+                    if all_data_retrieval_tools_successful:
+                        # All data retrieval tools executed successfully but returned no data
+                        # This takes priority over max_iterations_exceeded
+                        final_answer = "No relevant data found for this query."
+                    elif max_iterations_exceeded:
+                        final_answer = (
+                            "Search exceeded time and resource limit. Try again or contact your system admin to increase the limit."
+                        )
+                    else:
+                        # Some tools failed
                         final_answer = (
                             "I cannot answer this question because I was unable to retrieve the required data from the database. "
                             "All attempts to query the database failed. Please try rephrasing your question or check if the data is available."
@@ -540,10 +586,23 @@ class QueryAgent:
                 primary_semantic_result = None
                 primary_result_type = None
                 synthesis_tokens = {}
-                final_answer = (
-                    "I cannot answer this question because I was unable to retrieve the required data from the database. "
-                    "All attempts to query the database failed. Please try rephrasing your question or check if the data is available."
-                )
+                
+                # Determine appropriate message based on failure reason
+                # Priority: 1) No data found (if all tools successful), 2) Resource limits, 3) Tool failures
+                if all_data_retrieval_tools_successful:
+                    # All data retrieval tools executed successfully but returned no data
+                    # This takes priority over max_iterations_exceeded
+                    final_answer = "No relevant data found for this query."
+                elif max_iterations_exceeded:
+                    final_answer = (
+                        "Search exceeded time and resource limit. Try again or contact your system admin to increase the limit."
+                    )
+                else:
+                    # Some tools failed or no tools were executed
+                    final_answer = (
+                        "I cannot answer this question because I was unable to retrieve the required data from the database. "
+                        "All attempts to query the database failed. Please try rephrasing your question or check if the data is available."
+                    )
             
             execution_time = (time.time() - start_time) * 1000
             
@@ -602,7 +661,7 @@ class QueryAgent:
         except Exception as e:
             execution_time = (time.time() - start_time) * 1000
             error_msg = f"Agent processing failed: {str(e)}"
-            logger.error(f"Agent error: {error_msg}")
+            logger.error(f"Agent error: {error_msg}", exc_info=True)
             
             agent_metrics.record_query(
                 query_type="error",
@@ -613,8 +672,12 @@ class QueryAgent:
             
             logger.end_query(success=False)
             
+            # Emit error event if callback is available
+            if progress_callback:
+                progress_callback("error", {"message": error_msg})
+            
             return {
-                "answer": "I encountered an error while processing your query. Please try again.",
+                "answer": "An error has occurred while processing your query. Please contact your system admin.",
                 "method": "agentic",
                 "error": error_msg,
                 "iterations": iteration,
