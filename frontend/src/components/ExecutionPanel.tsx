@@ -4,7 +4,7 @@ export interface ExecutionState {
   question: string | null;
   method: string | null;
   toolCalls: Array<{
-    iteration: number;
+    iteration: number | null;
     tool: string;
     input: any;
     output: any;
@@ -112,18 +112,35 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ state }) => {
               <div key={index} className="mb-3 border-l-2 border-gray-300 pl-2">
                 <div className="text-gray-500 mb-1">----------------------------------------</div>
                 <div className="text-gray-800 mb-1">
-                  <span className="text-gray-500">iteration:</span> {toolCall.iteration}
+                  <span className="text-gray-500">iteration:</span> {toolCall.iteration !== null && toolCall.iteration !== undefined ? toolCall.iteration : "final"}
                 </div>
                 <div className="text-gray-800 mb-1">
                   <span className="text-gray-500">tool:</span> {toolCall.tool}
                 </div>
-                <div className="text-gray-800 mb-1">
-                  <span className="text-gray-500">input.{toolCall.tool === "generate_sql" ? "query" : toolCall.tool === "execute_sql" ? "sql_query" : "params"}:</span>{" "}
-                  {getInputField(toolCall.input, toolCall.tool)}
-                </div>
+                {toolCall.tool !== "pseudo_tool#llm_synthesize_answer" && (
+                  <div className="text-gray-800 mb-1">
+                    <span className="text-gray-500">input.{toolCall.tool === "generate_sql" ? "query" : toolCall.tool === "execute_sql" ? "sql_query" : "params"}:</span>{" "}
+                    {getInputField(toolCall.input, toolCall.tool)}
+                  </div>
+                )}
+                {toolCall.tool === "pseudo_tool#llm_synthesize_answer" && (
+                  <div className="text-gray-800 mb-1">
+                    <span className="text-gray-500">input.question:</span> {toolCall.input?.question || "N/A"}
+                  </div>
+                )}
                 {toolCall.output?.summary && (
                   <div className="text-gray-800 mb-1">
                     <span className="text-gray-500">output.summary:</span> {toolCall.output.summary}
+                  </div>
+                )}
+                {toolCall.tool === "pseudo_tool#llm_synthesize_answer" && toolCall.output?.answer && (
+                  <div className="text-gray-800 mb-1">
+                    <span className="text-gray-500">output.answer:</span> {toolCall.output.answer.substring(0, 200)}{toolCall.output.answer.length > 200 ? "..." : ""}
+                  </div>
+                )}
+                {toolCall.tool === "pseudo_tool#llm_synthesize_answer" && toolCall.output?.token_usage && (
+                  <div className="text-gray-800 mb-1">
+                    <span className="text-gray-500">output.token_usage:</span> {toolCall.output.token_usage.input_tokens || 0} input, {toolCall.output.token_usage.output_tokens || 0} output, {toolCall.output.token_usage.total_tokens || 0} total
                   </div>
                 )}
                 {toolCall.output?.error && (

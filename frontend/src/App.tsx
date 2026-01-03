@@ -129,7 +129,7 @@ const App: React.FC = () => {
         toolCalls: [
           ...prev.toolCalls,
           {
-            iteration: data.iteration,
+            iteration: data.iteration !== null && data.iteration !== undefined ? data.iteration : null,
             tool: data.tool,
             input: data.input,
             output: data.output,

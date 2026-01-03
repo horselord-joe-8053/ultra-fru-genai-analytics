@@ -66,6 +66,41 @@ class AgentLogger:
         self.tool_calls.append(tool_call)
         logger.info(f"[{self.query_id}] Tool: {tool_name}, Success: {tool_call['output']['success']}, Time: {execution_time_ms:.2f}ms, Iteration: {iteration}")
     
+    def log_synthesis(self, question: str, primary_result_type: Optional[str],
+                     primary_result_row_count: int, context_results: List[Dict],
+                     final_answer: str, execution_time_ms: float,
+                     token_usage: Dict[str, int]):
+        """Log synthesis step as a pseudo-tool call.
+        
+        Args:
+            question: The original question
+            primary_result_type: Type of primary result ("sql", "semantic", or None)
+            primary_result_row_count: Number of rows in primary result
+            context_results: List of context results from other tools
+            final_answer: The synthesized final answer
+            execution_time_ms: Time taken for synthesis in milliseconds
+            token_usage: Token usage dictionary with input_tokens, output_tokens, total_tokens
+        """
+        synthesis_call = {
+            "tool": "pseudo_tool#llm_synthesize_answer",
+            "input": {
+                "question": question,
+                "primary_result_type": primary_result_type,
+                "primary_result_row_count": primary_result_row_count,
+                "context_results_count": len(context_results)
+            },
+            "output": {
+                "success": True,
+                "answer": final_answer,
+                "execution_time_ms": execution_time_ms,
+                "token_usage": token_usage
+            },
+            "timestamp": datetime.now().isoformat(),
+            "iteration": None
+        }
+        self.tool_calls.append(synthesis_call)
+        logger.info(f"[{self.query_id}] Synthesis: Success=True, Time: {execution_time_ms:.2f}ms, Tokens: {token_usage.get('total_tokens', 0)}")
+    
     def log_iteration(self, iteration_num: int):
         """Log iteration number."""
         self.iterations = iteration_num

@@ -437,6 +437,9 @@ class QueryAgent:
             logger.info("===== SYNTHESIS PHASE =====")
             logger.info(f"Tool results collected: {len(tool_results)} result(s)")
             
+            # Track synthesis start time
+            synthesis_start_time = time.time()
+            
             # Emit synthesis_start event
             if progress_callback:
                 progress_callback("synthesis_start", {})
@@ -579,6 +582,44 @@ class QueryAgent:
                     # If no newlines, log the whole thing
                     logger.info(f"[SYNTHESIS] {final_answer}")
                 logger.info(f"[SYNTHESIS] {'='*80}")
+                
+                # Log synthesis step as pseudo-tool call
+                synthesis_time = (time.time() - synthesis_start_time) * 1000
+                logger.log_synthesis(
+                    question=question,
+                    primary_result_type=primary_result_type,
+                    primary_result_row_count=(
+                        primary_sql_result.get("row_count", 0) if primary_sql_result
+                        else (primary_semantic_result.get("row_count", 0) if primary_semantic_result else 0)
+                    ),
+                    context_results=context_results,
+                    final_answer=final_answer,
+                    execution_time_ms=synthesis_time,
+                    token_usage=synthesis_tokens
+                )
+                
+                # Emit synthesis step as tool_call_complete event for frontend
+                if progress_callback:
+                    progress_callback("tool_call_complete", {
+                        "iteration": None,  # Synthesis doesn't belong to an iteration
+                        "tool": "pseudo_tool#llm_synthesize_answer",
+                        "input": {
+                            "question": question,
+                            "primary_result_type": primary_result_type,
+                            "primary_result_row_count": (
+                                primary_sql_result.get("row_count", 0) if primary_sql_result
+                                else (primary_semantic_result.get("row_count", 0) if primary_semantic_result else 0)
+                            ),
+                            "context_results_count": len(context_results)
+                        },
+                        "output": {
+                            "success": True,
+                            "answer": final_answer,
+                            "execution_time_ms": synthesis_time,
+                            "token_usage": synthesis_tokens
+                        },
+                        "execution_time_ms": synthesis_time
+                    })
             else:
                 # No tool results at all
                 has_successful_data = False
@@ -586,6 +627,7 @@ class QueryAgent:
                 primary_semantic_result = None
                 primary_result_type = None
                 synthesis_tokens = {}
+                synthesis_start_time = time.time()
                 
                 # Determine appropriate message based on failure reason
                 # Priority: 1) No data found (if all tools successful), 2) Resource limits, 3) Tool failures
@@ -603,6 +645,38 @@ class QueryAgent:
                         "I cannot answer this question because I was unable to retrieve the required data from the database. "
                         "All attempts to query the database failed. Please try rephrasing your question or check if the data is available."
                     )
+                
+                # Log synthesis step even when no tool results
+                synthesis_time = (time.time() - synthesis_start_time) * 1000
+                logger.log_synthesis(
+                    question=question,
+                    primary_result_type=None,
+                    primary_result_row_count=0,
+                    context_results=[],
+                    final_answer=final_answer,
+                    execution_time_ms=synthesis_time,
+                    token_usage={}
+                )
+                
+                # Emit synthesis step as tool_call_complete event for frontend
+                if progress_callback:
+                    progress_callback("tool_call_complete", {
+                        "iteration": None,
+                        "tool": "pseudo_tool#llm_synthesize_answer",
+                        "input": {
+                            "question": question,
+                            "primary_result_type": None,
+                            "primary_result_row_count": 0,
+                            "context_results_count": 0
+                        },
+                        "output": {
+                            "success": True,
+                            "answer": final_answer,
+                            "execution_time_ms": synthesis_time,
+                            "token_usage": {}
+                        },
+                        "execution_time_ms": synthesis_time
+                    })
             
             execution_time = (time.time() - start_time) * 1000
             
