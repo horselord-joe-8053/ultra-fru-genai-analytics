@@ -24,6 +24,7 @@ const App: React.FC = () => {
     iterations: null,
     execution_time_ms: null,
     token_usage: null,
+    answer: null,
     isStreaming: false,
     error: null,
   });
@@ -38,6 +39,38 @@ const App: React.FC = () => {
       }
     };
   }, []);
+
+  // Sync Chat panel with Execution Log - update when answer arrives
+  useEffect(() => {
+    if (executionState.answer && executionState.question) {
+      // Find the last user message that matches this question
+      const userMessages = messages.filter(m => m.role === "user");
+      const lastUserMessage = userMessages[userMessages.length - 1];
+      
+      // Find the last assistant message
+      const assistantMessages = messages.filter(m => m.role === "assistant");
+      const lastAssistantMessage = assistantMessages[assistantMessages.length - 1];
+      
+      // Only add answer if:
+      // 1. Last user message matches the question
+      // 2. We haven't added this answer yet
+      if (lastUserMessage?.text === executionState.question &&
+          lastAssistantMessage?.text !== executionState.answer) {
+        setMessages((prev) => [
+          ...prev,
+          { 
+            role: "assistant", 
+            text: executionState.answer || "[No answer returned]" 
+          },
+        ]);
+      }
+    }
+  }, [executionState.answer, executionState.question, messages]);
+
+  // Sync loading state with streaming status
+  useEffect(() => {
+    setLoading(executionState.isStreaming);
+  }, [executionState.isStreaming]);
 
   // Use relative URL - CloudFront will proxy /query requests to ALB
   // In development, Vite proxy handles /query -> localhost:5000
@@ -55,6 +88,7 @@ const App: React.FC = () => {
       iterations: null,
       execution_time_ms: null,
       token_usage: null,
+      answer: null,
       isStreaming: true,
       error: null,
     });
@@ -112,6 +146,7 @@ const App: React.FC = () => {
         iterations: data.iterations,
         execution_time_ms: data.execution_time_ms,
         token_usage: data.token_usage,
+        answer: data.answer || null,
         isStreaming: false,
       }));
       eventSource.close();
@@ -127,13 +162,32 @@ const App: React.FC = () => {
           error: data.message || "Unknown error",
           isStreaming: false,
         }));
+        
+        // Also update Chat panel with error
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            text: `Sorry, an error occurred: ${data.message || "Unknown error"}`,
+          },
+        ]);
       } catch (e) {
         setExecutionState((prev) => ({
           ...prev,
           error: "Error processing query",
           isStreaming: false,
         }));
+        
+        // Update Chat panel with generic error
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            text: "Sorry, something went wrong while processing your query.",
+          },
+        ]);
       }
+      setLoading(false);
       eventSource.close();
       eventSourceRef.current = null;
     });
@@ -152,40 +206,23 @@ const App: React.FC = () => {
         }
         return prev;
       });
-      eventSource.close();
-      eventSourceRef.current = null;
-    };
-
-    // Also make regular query request for the answer
-    try {
-      const resp = await fetch("/query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: text }),
-      });
-
-      if (!resp.ok) {
-        const errText = await resp.text();
-        throw new Error(errText || `HTTP ${resp.status}`);
-      }
-
-      const data: QueryResponse = await resp.json();
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: data.answer || "[No answer returned]" },
-      ]);
-    } catch (e: any) {
-      console.error(e);
+      // Update Chat panel with error
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          text: "Sorry, something went wrong while answering that question.",
+          text: "Sorry, the connection was interrupted. Please try again.",
         },
       ]);
-    } finally {
+      
       setLoading(false);
-    }
+      eventSource.close();
+      eventSourceRef.current = null;
+    };
+
+    // ❌ REMOVED: Duplicate /query fetch call
+    // Chat panel now gets answer from Execution Log's complete event
+    // (handled in useEffect that watches executionState.answer)
   }
 
   return (

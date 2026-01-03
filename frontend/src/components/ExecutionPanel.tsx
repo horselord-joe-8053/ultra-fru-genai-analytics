@@ -17,6 +17,7 @@ export interface ExecutionState {
     output_tokens: number;
     total_tokens: number;
   } | null;
+  answer: string | null;
   isStreaming: boolean;
   error: string | null;
 }
