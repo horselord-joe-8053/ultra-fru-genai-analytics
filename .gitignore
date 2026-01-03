@@ -40,6 +40,7 @@ build/
 cursor_gen/
 study/
 tmp/
+data/analytics/backup_analytics_summary.json
 
 # Logs
 *.log

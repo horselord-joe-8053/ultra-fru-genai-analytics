@@ -215,10 +215,10 @@ def main(delta_path: str, output_dir: str):
             "avg_price": price_stats_dict.get("mean_price", 0.0),
             "last_updated": datetime.now().isoformat(),
         }
-        output_path = os.path.join(output_dir, "analytics_summary.json")
+        output_path = os.path.join(output_dir, "backup_analytics_summary.json")
         with open(output_path, "w") as f:
             json.dump(summary, f, indent=2)
-        print(f"✓ Analytics summary saved to: {output_path}")
+        print(f"✓ Analytics summary backup saved to: {output_path}")
     
     print("\n" + "=" * 80)
     print("Analytics Complete!")

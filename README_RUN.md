@@ -515,7 +515,7 @@ spark-submit \
   5. **Top Models by Sales Volume** - Best-selling fridge models
   6. **Price Distribution Statistics** - Overall price statistics
 - Displays results in the console
-- Optionally saves summary to `data/analytics/analytics_summary.json`
+- Optionally saves summary to `data/analytics/backup_analytics_summary.json`
 
 **Expected output:**
 ```
@@ -546,7 +546,7 @@ Total records in Delta table: 500
 
 [Additional analytics sections...]
 
-✓ Analytics summary saved to: data/analytics/analytics_summary.json
+✓ Analytics summary backup saved to: data/analytics/backup_analytics_summary.json
 ================================================================================
 Analytics Complete!
 ================================================================================
