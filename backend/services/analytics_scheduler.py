@@ -14,15 +14,13 @@ logger = logging.getLogger(__name__)
 def run_spark_analytics():
     """Execute Spark analytics job and save to PostgreSQL."""
     try:
-        # Get paths from environment or use defaults (these are optional - used only for Spark analytics)
+        # Get paths from environment or use defaults
         repo_root = get_optional_env("REPO_ROOT", os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
         delta_path = get_optional_env("DELTA_TABLE_PATH", "data/delta/fru_sales")
-        spark_home = get_optional_env("SPARK_HOME", "")
         
-        # Construct spark-submit command
-        spark_submit = "spark-submit"
-        if spark_home:
-            spark_submit = os.path.join(spark_home, "bin", "spark-submit")
+        # Spark is installed in the same container (no docker exec needed)
+        spark_home = get_optional_env("SPARK_HOME", "/opt/spark")
+        spark_submit = os.path.join(spark_home, "bin", "spark-submit")
         
         script_path = os.path.join(repo_root, "spark_jobs", "run_analytics.py")
         output_dir = os.path.join(repo_root, "data", "analytics")
@@ -33,7 +31,31 @@ def run_spark_analytics():
             logger.warning(f"Delta table not found at {delta_full_path}, skipping analytics run")
             return
         
-        # Run spark-submit
+        # Configure Spark to use the API's Python (which has psycopg2)
+        import sys
+        api_python = sys.executable
+        env = os.environ.copy()
+        env["PYSPARK_PYTHON"] = api_python
+        env["PYSPARK_DRIVER_PYTHON"] = api_python
+        
+        # Set JAVA_HOME dynamically (works for both arm64 and amd64)
+        if "JAVA_HOME" not in env:
+            import glob
+            java_dirs = glob.glob("/usr/lib/jvm/java-21-openjdk-*")
+            if java_dirs:
+                env["JAVA_HOME"] = java_dirs[0]
+                logger.info(f"Set JAVA_HOME to {env['JAVA_HOME']}")
+        
+        # Ensure database environment variables are available
+        db_env_vars = ["PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGDATABASE"]
+        for var in db_env_vars:
+            if var not in env:
+                value = get_optional_env(var, None)
+                if value:
+                    env[var] = value
+        
+        logger.info(f"Using Python: {api_python} (for psycopg2 support)")
+        
         cmd = [
             spark_submit,
             "--packages", "io.delta:delta-spark_2.13:4.0.0",
@@ -46,6 +68,7 @@ def run_spark_analytics():
         result = subprocess.run(
             cmd,
             cwd=repo_root,
+            env=env,
             capture_output=True,
             text=True,
             timeout=300  # 5 minute timeout
@@ -58,6 +81,8 @@ def run_spark_analytics():
             
     except subprocess.TimeoutExpired:
         logger.error("Spark analytics job timed out after 5 minutes")
+    except FileNotFoundError:
+        logger.error("spark-submit command not found. Is Spark installed and SPARK_HOME set correctly?")
     except Exception as e:
         logger.error(f"Error running Spark analytics: {e}", exc_info=True)
 

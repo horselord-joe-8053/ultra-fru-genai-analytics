@@ -95,7 +95,7 @@ main() {
     
     # Run verification and show manual test hints (combined)
     echo ""
-    "$SCRIPT_DIR/auto_verify_and_manual_hint.sh" "false"
+    "$SCRIPT_DIR/verification/auto_verify_and_manual_hint.sh" "false"
 }
 
 # Run main function

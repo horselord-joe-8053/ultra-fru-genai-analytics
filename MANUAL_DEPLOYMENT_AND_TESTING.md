@@ -155,7 +155,7 @@ aws ecr get-login-password --region us-east-1 --profile admin | \
 
 | Command | Purpose |
 |---------|---------|
-| `./run_scripts/aws/auto_verify_and_manual_hint.sh ecs-full dev` | Manual verification (auto-run in Step 6/6) |
+| `./run_scripts/aws/verification/auto_verify_and_manual_hint.sh ecs-full dev` | Manual verification (auto-run in Step 6/6) |
 | `aws ecs describe-services --cluster fru-ecs-cluster --services fru-api-service --profile admin` | Check ECS service |
 | `aws elbv2 describe-load-balancers --profile admin` | Check ALB status |
 

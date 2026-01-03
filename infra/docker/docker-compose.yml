@@ -54,16 +54,23 @@ services:
       USE_AGENT_QUERY: ${USE_AGENT_QUERY}
       USE_AGENT_QUERY_PERCENTAGE: ${USE_AGENT_QUERY_PERCENTAGE:-0}
       USE_AGENT_QUERY_WHITELIST: ${USE_AGENT_QUERY_WHITELIST:-}
+      
+      # Analytics scheduler configuration
+      ENABLE_ANALYTICS_SCHEDULER: ${ENABLE_ANALYTICS_SCHEDULER:-false}
+      ANALYTICS_SCHEDULER_INTERVAL_SECONDS: ${ANALYTICS_SCHEDULER_INTERVAL_SECONDS:-}
+      SPARK_HOME: ${SPARK_HOME:-/opt/spark}
 
     depends_on:
       db:
         condition: service_healthy
 
     ports:
-      - "${LOCAL_SERVER_PORT:-5000}:5000"
+      - "${LOCAL_SERVER_PORT}:5000"
     
     volumes:
       # Mount AWS credentials so container can access AWS_PROFILE
       - ~/.aws:/root/.aws:ro
       # Mount backend code for development (changes picked up on restart)
       - ../../backend:/app/backend:ro
+      # Mount data directory for Spark jobs (Delta tables)
+      - ../../data:/app/data:rw

@@ -39,6 +39,7 @@ build/
 # Generated files
 cursor_gen/
 study/
+tmp/
 
 # Logs
 *.log

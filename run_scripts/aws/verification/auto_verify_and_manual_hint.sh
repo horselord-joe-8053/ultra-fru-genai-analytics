@@ -7,7 +7,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-VERIFICATION_DIR="$SCRIPT_DIR/verification"
+VERIFICATION_DIR="$SCRIPT_DIR"
 
 # Source common utilities
 source "$SCRIPT_DIR/../common/logger.sh"
