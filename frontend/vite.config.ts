@@ -14,6 +14,10 @@ export default defineConfig({
         target: "http://localhost:5001",
         changeOrigin: true,
       },
+      "/query/stream": {
+        target: "http://localhost:5001",
+        changeOrigin: true,
+      },
     },
   },
 });

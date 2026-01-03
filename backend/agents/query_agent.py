@@ -5,7 +5,7 @@ import json
 import re
 import time
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable
 from decimal import Decimal
 from datetime import datetime, date
 
@@ -131,12 +131,13 @@ class QueryAgent:
             "context_results": context_results,
         }
     
-    def process_query(self, question: str) -> Dict[str, Any]:
+    def process_query(self, question: str, progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None) -> Dict[str, Any]:
         """
         Process a query using the agent.
         
         Args:
             question: User's natural language question
+            progress_callback: Optional callback function(event_type: str, data: dict) called at key execution points
         
         Returns:
             Dict with answer, method, iterations, tool_calls, execution_time_ms, debug_info
@@ -144,6 +145,11 @@ class QueryAgent:
         start_time = time.time()
         logger = AgentLogger()
         logger.start_query(question)
+        
+        # Emit question event
+        if progress_callback:
+            progress_callback("question", {"question": question})
+            progress_callback("method", {"method": "agentic"})
         
         tool_results: List[Dict[str, Any]] = []
         iteration = 0
@@ -157,6 +163,10 @@ class QueryAgent:
             while iteration < self.MAX_ITERATIONS:
                 iteration += 1
                 logger.log_iteration(iteration)
+                
+                # Emit iteration start event
+                if progress_callback:
+                    progress_callback("iteration_start", {"iteration": iteration})
                 
                 # Planning phase: Agent decides what to do
                 logger.info(f"===== ITERATION {iteration} =====")
@@ -202,6 +212,14 @@ class QueryAgent:
                     
                     logger.info(f"--- Executing tool: {tool_name} ---")
                     logger.info(f"Tool input (raw): {tool_input}")
+                    
+                    # Emit tool_call_start event
+                    if progress_callback:
+                        progress_callback("tool_call_start", {
+                            "iteration": iteration,
+                            "tool": tool_name,
+                            "input": tool_input
+                        })
                     
                     if tool_name not in self.tools:
                         logger.warning(f"Unknown tool: {tool_name}")
@@ -258,6 +276,27 @@ class QueryAgent:
                     
                     # Log tool call
                     logger.log_tool_call(tool_name, tool_input, tool_output, tool_time, iteration)
+                    
+                    # Emit tool_call_complete event (THIS IS KEY - streams immediately after each tool)
+                    if progress_callback:
+                        # Create summary for output
+                        output_summary = {
+                            "success": tool_output.get("success", False),
+                            "summary": self._summarize_tool_result(tool_output),
+                            "error": tool_output.get("error"),
+                            "row_count": tool_output.get("row_count"),
+                        }
+                        # Preserve SQL if present
+                        if "sql" in tool_output:
+                            output_summary["sql"] = tool_output["sql"]
+                        
+                        progress_callback("tool_call_complete", {
+                            "iteration": iteration,
+                            "tool": tool_name,
+                            "input": tool_input,
+                            "output": output_summary,
+                            "execution_time_ms": tool_time
+                        })
                     
                     # Record metrics
                     agent_metrics.record_tool_call(tool_name, tool_time, tool_output.get("success", False))
@@ -341,6 +380,26 @@ class QueryAgent:
                                 auto_time,
                                 iteration
                             )
+                            
+                            # Emit tool_call_complete event for auto-executed SQL
+                            if progress_callback:
+                                output_summary = {
+                                    "success": auto_output.get("success", False),
+                                    "summary": self._summarize_tool_result(auto_output),
+                                    "error": auto_output.get("error"),
+                                    "row_count": auto_output.get("row_count"),
+                                }
+                                if "sql" in auto_output:
+                                    output_summary["sql"] = auto_output["sql"]
+                                
+                                progress_callback("tool_call_complete", {
+                                    "iteration": iteration,
+                                    "tool": "execute_sql",
+                                    "input": {"sql_query": last_sql},
+                                    "output": output_summary,
+                                    "execution_time_ms": auto_time
+                                })
+                            
                             agent_metrics.record_tool_call(
                                 "execute_sql",
                                 auto_time,
@@ -364,6 +423,10 @@ class QueryAgent:
             # Synthesis phase: Generate final answer
             logger.info("===== SYNTHESIS PHASE =====")
             logger.info(f"Tool results collected: {len(tool_results)} result(s)")
+            
+            # Emit synthesis_start event
+            if progress_callback:
+                progress_callback("synthesis_start", {})
 
             if tool_results:
                 # Choose which tool outputs to feed into the synthesizer
@@ -504,7 +567,7 @@ class QueryAgent:
                 elif primary_semantic_result:
                     primary_result_type = "semantic"
             
-            return {
+            result = {
                 "answer": final_answer,
                 "method": "agentic",
                 "iterations": iteration,
@@ -524,6 +587,17 @@ class QueryAgent:
                     else (primary_semantic_result.get("row_count", 0) if primary_semantic_result else 0)
                 ),
             }
+            
+            # Emit complete event
+            if progress_callback:
+                progress_callback("complete", {
+                    "iterations": iteration,
+                    "execution_time_ms": execution_time,
+                    "token_usage": result["token_usage"],
+                    "answer": final_answer
+                })
+            
+            return result
         
         except Exception as e:
             execution_time = (time.time() - start_time) * 1000

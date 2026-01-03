@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from decimal import Decimal
 from datetime import datetime, date, timezone
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 import psycopg2
 from psycopg2 import pool
@@ -648,6 +648,112 @@ def query():
     except Exception as e:
         app.logger.error(f"[{request_id}] Unexpected error in /query endpoint: {e}", exc_info=True)
         return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route("/query/stream", methods=["GET"])
+def query_stream():
+    """Stream query execution progress via Server-Sent Events.
+    
+    Events are streamed one-by-one as each tool_call completes.
+    """
+    import uuid
+    import threading
+    import queue
+    import json as json_module
+    
+    request_id = str(uuid.uuid4())[:8]
+    question = request.args.get("query", "")
+    
+    if not question:
+        return jsonify({"error": "Missing query parameter"}), 400
+    
+    app.logger.info(f"[{request_id}] Streaming query: '{question}'")
+    
+    def generate():
+        """Generator that yields SSE events as they happen."""
+        event_queue = queue.Queue()
+        agent_complete = threading.Event()
+        
+        def progress_callback(event_type: str, data: dict):
+            """Called by agent when events happen."""
+            try:
+                event_queue.put((event_type, data))
+            except Exception as e:
+                app.logger.error(f"[{request_id}] Error in progress callback: {e}")
+        
+        def run_agent():
+            """Run agent in background thread."""
+            try:
+                if not USE_AGENT_QUERY or query_agent is None:
+                    event_queue.put(("error", {
+                        "message": "Agent-based query processing is disabled"
+                    }))
+                    return
+                
+                result = query_agent.process_query(
+                    question, 
+                    progress_callback=progress_callback
+                )
+                
+                # Final completion event is already sent by agent's progress_callback
+                # But we ensure it's sent here too as a fallback
+                if not agent_complete.is_set():
+                    event_queue.put(("complete", {
+                        "iterations": result.get("iterations", 0),
+                        "execution_time_ms": result.get("execution_time_ms", 0),
+                        "token_usage": result.get("token_usage", {}),
+                        "answer": result.get("answer", "")
+                    }))
+                    
+            except Exception as e:
+                app.logger.error(f"[{request_id}] Agent execution error: {e}", exc_info=True)
+                event_queue.put(("error", {"message": str(e)}))
+            finally:
+                agent_complete.set()
+                event_queue.put(None)  # Sentinel to signal completion
+        
+        # Start agent in background thread
+        agent_thread = threading.Thread(target=run_agent, daemon=True)
+        agent_thread.start()
+        
+        # Yield events as they arrive (THIS IS THE STREAMING PART)
+        try:
+            while True:
+                try:
+                    # Block until event is available (or timeout)
+                    item = event_queue.get(timeout=1.0)
+                    
+                    if item is None:  # Sentinel - agent finished
+                        break
+                    
+                    event_type, data = item
+                    
+                    # YIELD IMMEDIATELY - Flask sends this to client right away
+                    yield f"event: {event_type}\ndata: {json_module.dumps(data)}\n\n"
+                    
+                except queue.Empty:
+                    # Timeout - check if agent is done
+                    if agent_complete.is_set():
+                        break
+                    continue
+                    
+        except GeneratorExit:
+            # Client disconnected
+            app.logger.info(f"[{request_id}] Client disconnected from stream")
+        finally:
+            # Cleanup
+            pass
+    
+    # Return streaming response with proper headers
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',  # Disable nginx/proxy buffering
+            'Connection': 'keep-alive',
+        }
+    )
 
 
 if __name__ == "__main__":
