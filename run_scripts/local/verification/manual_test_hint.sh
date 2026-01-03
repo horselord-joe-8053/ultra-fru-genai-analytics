@@ -6,9 +6,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-source "$SCRIPT_DIR/../common/logger.sh"
-source "$SCRIPT_DIR/../common/load-env.sh"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+source "$SCRIPT_DIR/../../common/logger.sh"
+source "$SCRIPT_DIR/../../common/load-env.sh"
 
 # Load environment variables
 load_env_file 2>/dev/null || true

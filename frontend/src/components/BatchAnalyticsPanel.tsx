@@ -119,8 +119,13 @@ const BatchAnalyticsPanel: React.FC = () => {
 
   useEffect(() => {
     fetchAnalytics();
-    // Auto-refresh every 60 seconds
-    const interval = setInterval(fetchAnalytics, 60000);
+    // Auto-refresh at configurable interval (default 60 seconds)
+    const pollIntervalSeconds = parseInt(
+      import.meta.env.VITE_FRONTEND_POLL_FREQUENCY_IN_SEC || "60",
+      10
+    );
+    const pollIntervalMs = pollIntervalSeconds * 1000;
+    const interval = setInterval(fetchAnalytics, pollIntervalMs);
     return () => clearInterval(interval);
   }, []);
 

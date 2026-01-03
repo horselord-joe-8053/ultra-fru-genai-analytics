@@ -73,10 +73,14 @@ start_services() {
     fi
     
     # Idempotency check: Skip if services are already running (unless --force)
+    # Note: If containers are already running, they may have stale environment variables.
+    # Use --force to recreate containers with updated .env variables.
     if [ "$SKIP_CHECK" = false ] && [ "$FORCE_START" = false ]; then
         if check_services_running; then
             log_info "Docker services are already running (fru_db, fru_api)"
-            log_info "Skipping startup. Use --force to restart anyway."
+            log_info "Skipping startup. Use --force to recreate containers with updated .env variables."
+            log_warning "Note: If you changed .env variables, containers may have stale values."
+            log_info "To apply .env changes, run: ./run_scripts/local/start-services.sh --force"
             
             # Still wait for health checks to ensure they're ready
             load_env_file || true

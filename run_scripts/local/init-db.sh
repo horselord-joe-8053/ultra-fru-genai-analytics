@@ -23,6 +23,17 @@ init_database() {
         exit 1
     fi
     
+    # For local Docker, database is exposed on port 55432
+    # Override PGHOST and PGPORT if using Docker
+    if docker ps | grep -q fru_db; then
+        PGHOST="localhost"
+        PGPORT="55432"  # Docker exposes DB on 55432
+        export PGHOST PGPORT
+        log_info "  Database: $PGHOST:$PGPORT/$PGDATABASE (Docker)"
+    else
+        log_info "  Database: $PGHOST:$PGPORT/$PGDATABASE"
+    fi
+    
     # Check if psql is available
     if command_exists psql; then
         log_info "Using local psql to initialize schema..."

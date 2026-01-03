@@ -3,7 +3,7 @@ import json
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from decimal import Decimal
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -345,7 +345,19 @@ def get_analytics():
                 
                 # Convert to dict and format
                 result = dict(row)
-                result["last_updated_at"] = result["created_at"].isoformat() if result["created_at"] else None
+                # Ensure timestamp is UTC and includes 'Z' suffix for JavaScript to parse correctly
+                if result["created_at"]:
+                    # PostgreSQL returns timezone-aware datetime, ensure it's UTC
+                    if result["created_at"].tzinfo is None:
+                        # If naive datetime, assume it's UTC
+                        result["created_at"] = result["created_at"].replace(tzinfo=timezone.utc)
+                    else:
+                        # Convert to UTC if it has timezone info
+                        result["created_at"] = result["created_at"].astimezone(timezone.utc)
+                    # Format with 'Z' suffix to indicate UTC
+                    result["last_updated_at"] = result["created_at"].isoformat().replace('+00:00', 'Z')
+                else:
+                    result["last_updated_at"] = None
                 
                 # Parse JSONB fields (they come as strings or dicts depending on psycopg2 version)
                 for field in ["sales_by_brand", "store_performance", "feedback_analysis", "top_models", "price_stats"]:

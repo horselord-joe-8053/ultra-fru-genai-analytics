@@ -27,6 +27,7 @@ This will:
 - ✅ Check prerequisites (Python, Node.js, Docker)
 - ✅ Create `.env` file from template
 - ✅ Set up Python virtual environment
+- ✅ Set up Spark environment (optional, auto-detected)
 - ✅ Install all dependencies
 - ✅ Start Docker services (Postgres + API)
 - ✅ Initialize database schema
@@ -127,6 +128,9 @@ run_scripts/
 # 3. Setup Python environment
 ./run_scripts/local/setup-python.sh
 
+# 3.5. Setup Spark environment (optional)
+./run_scripts/local/setup-spark-4.0.sh
+
 # 4. Setup frontend dependencies
 ./run_scripts/local/setup-frontend.sh
 
@@ -151,7 +155,21 @@ run_scripts/
 
 # Skip data loading (if data already loaded)
 ./run_scripts/local/run.sh --skip-data-load
+
+# Force Spark setup (even if not auto-detected)
+./run_scripts/local/run.sh --setup-spark
+
+# Skip Spark setup (Spark runs in Docker, so local setup is optional)
+./run_scripts/local/run.sh --skip-spark
 ```
+
+**Note on Spark Setup:**
+- Spark setup is **optional** because Spark is already installed in the Docker container
+- The `fru_api` container includes Spark 4.0.1 (see `Dockerfile.api`)
+- The analytics scheduler runs Spark jobs inside the container automatically
+- Local Spark is only needed if you want to run Spark jobs manually from your host machine
+- Auto-detected if `ENABLE_ANALYTICS_SCHEDULER=true` and Delta table exists
+- Use `--setup-spark` to force setup, or `--skip-spark` to skip it
 
 ### Stopping Services
 
