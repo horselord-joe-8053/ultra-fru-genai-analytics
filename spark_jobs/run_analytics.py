@@ -21,6 +21,10 @@ def main(delta_path: str, output_dir: str):
     Run batch analytics on Delta table.
     Demonstrates offline batch analytics capabilities of Spark + Delta.
     """
+    # Get limit from environment (default to 20)
+    spark_compute_limit = int(os.getenv("NUM_FOR_BATCH_ANALYTICS_TOP_SPARK_COMPUTE", "20"))
+    print(f"Using Spark compute limit: {spark_compute_limit} items per aggregation")
+    
     spark = (
         SparkSession.builder.appName("fru-batch-analytics")
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
@@ -50,6 +54,7 @@ def main(delta_path: str, output_dir: str):
             max("PRICE").alias("max_price")
         )
         .orderBy(col("total_sales").desc())
+        .limit(spark_compute_limit)
     )
     sales_by_brand.show(truncate=False)
     
@@ -69,6 +74,7 @@ def main(delta_path: str, output_dir: str):
         .withColumn("negative_feedback_rate", 
                    (col("negative_feedback_count") / col("total_sales") * 100).cast("decimal(5,2)"))
         .orderBy(col("total_revenue").desc())
+        .limit(spark_compute_limit)
     )
     store_performance.show(truncate=False)
     
@@ -112,7 +118,7 @@ def main(delta_path: str, output_dir: str):
             avg("PRICE").alias("avg_price")
         )
         .orderBy(col("sales_count").desc())
-        .limit(10)
+        .limit(spark_compute_limit)
     )
     top_models.show(truncate=False)
     

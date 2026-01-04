@@ -305,8 +305,21 @@ def ensure_agent():
 def get_analytics():
     """Get latest batch analytics results from PostgreSQL."""
     import uuid
+    
     request_id = str(uuid.uuid4())[:8]
     app.logger.info(f"[{request_id}] Analytics request received")
+    
+    # Get query limit from environment (default to 8)
+    query_limit = get_optional_int_env("NUM_FOR_BATCH_ANALYTICS_TOP_QUERY", 8)
+    
+    # Optional: Validate that query limit doesn't exceed Spark compute limit
+    spark_compute_limit = get_optional_int_env("NUM_FOR_BATCH_ANALYTICS_TOP_SPARK_COMPUTE", 20)
+    if query_limit > spark_compute_limit:
+        app.logger.warning(
+            f"[{request_id}] NUM_FOR_BATCH_ANALYTICS_TOP_QUERY ({query_limit}) > "
+            f"NUM_FOR_BATCH_ANALYTICS_TOP_SPARK_COMPUTE ({spark_compute_limit}). "
+            f"API may not be able to return requested amount."
+        )
     
     try:
         conn = get_db_conn()
@@ -364,7 +377,17 @@ def get_analytics():
                         except:
                             pass
                 
-                app.logger.info(f"[{request_id}] Analytics data returned successfully")
+                # Limit arrays to query_limit before returning
+                # This ensures API returns only what frontend needs, even if DB has more
+                if result.get("sales_by_brand") and isinstance(result["sales_by_brand"], list):
+                    result["sales_by_brand"] = result["sales_by_brand"][:query_limit]
+                if result.get("store_performance") and isinstance(result["store_performance"], list):
+                    result["store_performance"] = result["store_performance"][:query_limit]
+                if result.get("top_models") and isinstance(result["top_models"], list):
+                    result["top_models"] = result["top_models"][:query_limit]
+                # feedback_analysis remains unlimited (not displayed in frontend, may be used elsewhere)
+                
+                app.logger.info(f"[{request_id}] Analytics data returned successfully (limited to {query_limit} items per category)")
                 return jsonify(result)
         finally:
             return_db_conn(conn)

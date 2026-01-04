@@ -88,7 +88,7 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ state }) => {
       <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto p-3 font-mono text-xs"
-        style={{ fontSize: "11px", lineHeight: "1.5" }}
+        style={{ fontSize: "8.8px", lineHeight: "1.5" }}
       >
         {/* Part 1: Query Info */}
         {(state.question || state.method) && (

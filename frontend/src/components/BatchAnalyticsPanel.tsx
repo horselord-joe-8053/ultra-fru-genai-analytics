@@ -231,15 +231,15 @@ const BatchAnalyticsPanel: React.FC = () => {
 
         {/* Top Brands */}
         {data.sales_by_brand && data.sales_by_brand.length > 0 && (
-          <div>
-            <div className="text-xs font-semibold text-gray-700 mb-1">
+          <div className="mt-8">
+            <div className="text-[0.5625rem] font-semibold text-gray-700 mb-1">
               Top Brands by Sales
             </div>
-            <div className="space-y-1 max-h-32 overflow-auto">
-              {data.sales_by_brand.slice(0, 5).map((item, idx) => (
+            <div className="space-y-1 max-h-48 overflow-auto">
+              {data.sales_by_brand.slice(0, 8).map((item, idx) => (
                 <div
                   key={idx}
-                  className="flex justify-between text-xs bg-gray-50 p-1 rounded"
+                  className="flex justify-between text-[0.45rem] bg-gray-50 p-1 rounded"
                 >
                   <span className="truncate max-w-[50%]" title={item.brand}>
                     {item.brand}
@@ -255,15 +255,15 @@ const BatchAnalyticsPanel: React.FC = () => {
 
         {/* Store Performance */}
         {data.store_performance && data.store_performance.length > 0 && (
-          <div>
-            <div className="text-xs font-semibold text-gray-700 mb-1">
+          <div className="mt-8">
+            <div className="text-[0.5625rem] font-semibold text-gray-700 mb-1">
               Store Performance
             </div>
-            <div className="space-y-1 max-h-32 overflow-auto">
-              {data.store_performance.slice(0, 3).map((item, idx) => (
+            <div className="space-y-1 max-h-64 overflow-auto">
+              {data.store_performance.slice(0, 8).map((item, idx) => (
                 <div
                   key={idx}
-                  className="text-xs bg-gray-50 p-1 rounded"
+                  className="text-[0.45rem] bg-gray-50 p-1 rounded"
                 >
                   <div className="flex justify-between">
                     <span className="truncate max-w-[60%]" title={item.store_name}>
@@ -273,7 +273,7 @@ const BatchAnalyticsPanel: React.FC = () => {
                       {formatCurrency(item.total_revenue)}
                     </span>
                   </div>
-                  <div className="text-xs text-gray-500 mt-0.5">
+                  <div className="text-[0.45rem] text-gray-500 mt-0.5">
                     {item.total_sales} sales •{" "}
                     {item.negative_feedback_rate.toFixed(1)}% negative
                   </div>
@@ -285,15 +285,15 @@ const BatchAnalyticsPanel: React.FC = () => {
 
         {/* Top Models */}
         {data.top_models && data.top_models.length > 0 && (
-          <div>
-            <div className="text-xs font-semibold text-gray-700 mb-1">
+          <div className="mt-8">
+            <div className="text-[0.5625rem] font-semibold text-gray-700 mb-1">
               Top Models
             </div>
-            <div className="space-y-1 max-h-24 overflow-auto">
-              {data.top_models.slice(0, 3).map((item, idx) => (
+            <div className="space-y-1 max-h-48 overflow-auto">
+              {data.top_models.slice(0, 8).map((item, idx) => (
                 <div
                   key={idx}
-                  className="flex justify-between text-xs bg-gray-50 p-1 rounded"
+                  className="flex justify-between text-[0.45rem] bg-gray-50 p-1 rounded"
                 >
                   <span className="truncate max-w-[70%]" title={`${item.brand} ${item.fridge_model}`}>
                     {item.brand} {item.fridge_model}
