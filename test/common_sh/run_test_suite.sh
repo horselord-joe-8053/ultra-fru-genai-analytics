@@ -42,6 +42,7 @@ run_test_suite() {
     local test_codes=()
     local use_cached_aws_val=false
     local force_rebuild_local_img=false
+    local use_stream=false
     
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -63,6 +64,10 @@ run_test_suite() {
                 ;;
             --force-rebuild-local-img)
                 force_rebuild_local_img=true
+                shift
+                ;;
+            --stream)
+                use_stream=true
                 shift
                 ;;
             *)
@@ -87,6 +92,7 @@ run_test_suite() {
     export TEST_ENV="$test_env"
     export USE_CACHED_AWS_VAL="$use_cached_aws_val"
     export FORCE_REBUILD_LOCAL_IMG="$force_rebuild_local_img"
+    export USE_STREAM="$use_stream"
     
     local total_tests=${#test_codes[@]}
     

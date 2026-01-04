@@ -22,6 +22,13 @@ run_single_test_with_timeout() {
     full_cmd="$full_cmd --query-list \"$test_code\""
     full_cmd="$full_cmd --log-file \"$log_file\""
     
+    # Add --stream flag if streaming mode
+    local stream_flag=""
+    if [[ "${USE_STREAM:-false}" == "true" ]]; then
+        full_cmd="$full_cmd --stream"
+        stream_flag="--stream"
+    fi
+    
     if [ -n "$timeout_cmd" ]; then
         # Use system timeout command (Linux or macOS with GNU coreutils)
         # Log full command before execution
@@ -32,6 +39,7 @@ run_single_test_with_timeout() {
                 --test-api-base-url "$api_base_url" \
                 --query-list "$test_code" \
                 --log-file "$log_file" \
+                $stream_flag \
                 >> "$log_file" 2>&1; then
             return 0
         else
@@ -49,6 +57,7 @@ run_single_test_with_timeout() {
             --query-list "$test_code" \
             --log-file "$log_file" \
             --timeout "$timeout_seconds" \
+            $stream_flag \
             >> "$log_file" 2>&1; then
             return 0
         else

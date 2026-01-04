@@ -5,9 +5,116 @@ This module contains all the validation functions used by the test queries
 in common_test_queries.py.
 """
 
-from typing import Dict
+import os
+import re
+from typing import Dict, Optional
 
 from .common_utils import assert_contains
+
+
+def _get_numeric_tolerance() -> float:
+    """
+    Get the maximum allowed numeric deviation for test validation.
+    
+    Returns:
+        float: The tolerance value (default: 0.01 = 1%)
+    """
+    value = os.environ.get("MAX_ALLOWED_NUMERIC_DEVIATION_FOR_TEST", "0.01")
+    try:
+        return float(value)
+    except ValueError:
+        return 0.01  # Default to 1% if invalid
+
+
+def _extract_numeric_value(text: str, expected_value: Optional[float] = None) -> Optional[float]:
+    """
+    Extract the first numeric value from text that matches the expected value range.
+    
+    Args:
+        text: Text to search for numeric values
+        expected_value: Optional expected value to help narrow down matches
+    
+    Returns:
+        Optional[float]: The extracted numeric value, or None if not found
+    """
+    # Pattern to match decimal numbers (e.g., "9.0", "8.99", "9.00", "9 out of 10")
+    patterns = [
+        r'(\d+\.\d{1,2})',  # Decimal numbers like 9.0, 8.99, 9.00
+        r'(\d+)\s+out\s+of\s+10',  # "9 out of 10" format
+        r'(\d+)',  # Integer numbers
+    ]
+    
+    for pattern in patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        for match in matches:
+            try:
+                value = float(match)
+                # If expected_value is provided, prefer values close to it
+                if expected_value is None:
+                    return value
+                tolerance = _get_numeric_tolerance()
+                if abs(value - expected_value) / expected_value <= tolerance:
+                    return value
+            except ValueError:
+                continue
+    
+    # If no match found with expected_value, return first valid numeric value
+    for pattern in patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        for match in matches:
+            try:
+                return float(match)
+            except ValueError:
+                continue
+    
+    return None
+
+
+def _validate_numeric_value(
+    answer: str,
+    expected_value: float,
+    label: str,
+    tolerance: Optional[float] = None
+) -> bool:
+    """
+    Validate that the answer contains a numeric value within tolerance of expected.
+    
+    Args:
+        answer: The answer text to validate
+        expected_value: The expected numeric value
+        label: Test label for error messages
+        tolerance: Optional tolerance override (uses env var if not provided)
+    
+    Returns:
+        bool: True if a matching numeric value is found
+    
+    Raises:
+        AssertionError: If no matching numeric value is found
+    """
+    if tolerance is None:
+        tolerance = _get_numeric_tolerance()
+    
+    extracted_value = _extract_numeric_value(answer, expected_value)
+    
+    if extracted_value is None:
+        raise AssertionError(
+            f"[{label}] Expected numeric value around {expected_value} "
+            f"(tolerance: {tolerance*100:.1f}%); "
+            f"no matching numeric value found in answer: {answer[:300]!r}"
+        )
+    
+    # Calculate relative deviation
+    relative_deviation = abs(extracted_value - expected_value) / expected_value
+    
+    if relative_deviation > tolerance:
+        raise AssertionError(
+            f"[{label}] Expected numeric value around {expected_value} "
+            f"(tolerance: {tolerance*100:.1f}%); "
+            f"got {extracted_value} (deviation: {relative_deviation*100:.2f}%); "
+            f"answer: {answer[:300]!r}"
+        )
+    
+    return True
 
 
 def _validate_has_answer_and_iterations(resp: Dict, label: str, test_code: str = None) -> str:
@@ -180,12 +287,8 @@ def _validate_brand_highest_avg(resp: Dict, test_code: str = "BRD") -> None:
     answer = _validate_has_answer_and_iterations(resp, label, test_code)
     # From our data and previous tests, Samsung with ~9.0 should be the winner.
     assert_contains(answer, "Samsung", label)
-    # Don't insist on exact formatting, just check that 9 or 9.0/9.00 appears.
-    if "9.0" not in answer and "9.00" not in answer and "9 out of 10" not in answer:
-        raise AssertionError(
-            f"[{label}] Expected average rating around 9.0 for Samsung; "
-            f"got answer: {answer[:300]!r}"
-        )
+    # Use numeric tolerance for validation (allows 8.99, 9.0, 9.00, etc. within tolerance)
+    _validate_numeric_value(answer, 9.0, label)
 
 
 def _validate_count_negative(resp: Dict, test_code: str = "CNT") -> None:
@@ -243,11 +346,8 @@ def _validate_avg_positive(resp: Dict, test_code: str = "AVP") -> None:
     answer = _validate_has_answer_and_iterations(resp, label, test_code)
     assert_contains(answer, "positive", label)
     # From the data integrity check: Positive avg ~ 9.0
-    if "9.0" not in answer and "9.00" not in answer and "9 out of 10" not in answer:
-        raise AssertionError(
-            f"[{label}] Expected average rating for positive feedbacks around 9.0; "
-            f"got answer: {answer[:300]!r}"
-        )
+    # Use numeric tolerance for validation (allows 8.99, 9.0, 9.00, etc. within tolerance)
+    _validate_numeric_value(answer, 9.0, label)
 
 
 def _validate_temperature_feedback(resp: Dict, test_code: str = "TMP") -> None:

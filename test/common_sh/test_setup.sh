@@ -18,6 +18,11 @@ setup_test_environment() {
     # Create test results directory and environment subdirectory if they don't exist
     mkdir -p "$TEST_RESULTS_DIR/${test_env}"
     
+    # Add stream_ prefix if streaming mode
+    if [[ "${USE_STREAM:-false}" == "true" ]]; then
+        run_prefix="stream_${run_prefix}"
+    fi
+    
     # Generate timestamped directory for this test run
     TIMESTAMP=$(date +%Y%m%d-%H%M%S)
     RUN_DIR="$TEST_RESULTS_DIR/${test_env}/${run_prefix}_$TIMESTAMP"

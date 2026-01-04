@@ -11,8 +11,9 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class UnifiedLogger:
@@ -178,6 +179,212 @@ def run_query(
 
     raise RuntimeError(
         f"Failed to run query after {max_retries} attempts. Last error: {last_error}"
+    )
+
+
+def _parse_sse_stream(stream, timeout: int) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Parse Server-Sent Events stream.
+    
+    Args:
+        stream: File-like object from urllib request
+        timeout: Maximum time to wait for complete event (seconds)
+    
+    Returns:
+        Dict mapping event types to lists of event data:
+        {
+            "question": [{"question": "..."}],
+            "method": [{"method": "..."}],
+            "tool_call_complete": [{...}, {...}],
+            "complete": [{"answer": "...", ...}],
+            "error": [{"message": "..."}]
+        }
+    
+    Raises:
+        RuntimeError if timeout is exceeded or stream is invalid
+    """
+    events: Dict[str, List[Dict[str, Any]]] = {}
+    current_event: Optional[str] = None
+    current_data: List[Dict[str, Any]] = []
+    
+    start_time = time.time()
+    
+    try:
+        for line_bytes in stream:
+            # Check timeout
+            if time.time() - start_time > timeout:
+                raise RuntimeError(f"Stream timeout after {timeout}s")
+            
+            line = line_bytes.decode('utf-8', errors='replace').rstrip('\n\r')
+            
+            if line.startswith('event:'):
+                # Save previous event
+                if current_event:
+                    if current_event not in events:
+                        events[current_event] = []
+                    events[current_event].extend(current_data)
+                # Start new event
+                current_event = line[6:].strip()
+                current_data = []
+            elif line.startswith('data:'):
+                data_str = line[5:].strip()
+                if data_str:
+                    try:
+                        data = json.loads(data_str)
+                        current_data.append(data)
+                    except json.JSONDecodeError:
+                        # Skip invalid JSON lines
+                        pass
+            elif line == '' and current_event == 'complete':
+                # Empty line after complete event - we're done
+                break
+        
+        # Save last event
+        if current_event:
+            if current_event not in events:
+                events[current_event] = []
+            events[current_event].extend(current_data)
+    
+    except Exception as e:
+        raise RuntimeError(f"Error parsing SSE stream: {e}") from e
+    
+    return events
+
+
+def _build_response_from_events(events: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """
+    Build final response dict from collected SSE events.
+    Matches structure of sync /query endpoint response.
+    
+    Args:
+        events: Dict mapping event types to lists of event data
+    
+    Returns:
+        Response dict matching sync endpoint format
+    
+    Raises:
+        RuntimeError if no complete event is found
+    """
+    # Check for error events first
+    error_events = events.get("error", [])
+    if error_events:
+        error_msg = error_events[-1].get("message", "Unknown error")
+        raise RuntimeError(f"Stream error: {error_msg}")
+    
+    # Extract complete event (should be last)
+    complete_events = events.get("complete", [])
+    if not complete_events:
+        raise RuntimeError("No 'complete' event received in stream")
+    
+    final_data = complete_events[-1]  # Use last complete event
+    
+    # Build response matching sync endpoint format
+    question_events = events.get("question", [])
+    method_events = events.get("method", [])
+    
+    response: Dict[str, Any] = {
+        "question": question_events[0].get("question", "") if question_events else "",
+        "method": method_events[0].get("method", "agentic") if method_events else "agentic",
+        "answer": final_data.get("answer", ""),
+        "iterations": final_data.get("iterations"),
+        "execution_time_ms": final_data.get("execution_time_ms"),
+        "token_usage": final_data.get("token_usage", {}),
+    }
+    
+    # Collect tool calls from tool_call_complete events
+    tool_calls: List[Dict[str, Any]] = []
+    for event_data in events.get("tool_call_complete", []):
+        tool_calls.append({
+            "iteration": event_data.get("iteration"),
+            "tool": event_data.get("tool"),
+            "input": event_data.get("input", {}),
+            "output": event_data.get("output", {}),
+            "execution_time_ms": event_data.get("execution_time_ms", 0),
+        })
+    
+    response["tool_calls"] = tool_calls
+    
+    return response
+
+
+def run_query_stream(
+    query: str,
+    max_retries: int = 3,
+    backoff_seconds: float = 1.0,
+    base_url: Optional[str] = None,
+    timeout: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Call the `/query/stream` endpoint and collect events until 'complete'.
+    
+    This function connects to the streaming endpoint, parses Server-Sent Events,
+    and collects all events until receiving the 'complete' event. It then builds
+    a response dict matching the structure of the sync `/query` endpoint.
+    
+    Args:
+        query: Natural language query string
+        max_retries: Maximum number of retry attempts
+        backoff_seconds: Base backoff time in seconds (multiplied by attempt number)
+        base_url: Optional explicit API base URL
+        timeout: Optional timeout in seconds for the entire stream operation
+    
+    Returns:
+        Final response dict with same structure as sync endpoint:
+        {
+            "question": "...",
+            "method": "...",
+            "answer": "...",
+            "iterations": ...,
+            "execution_time_ms": ...,
+            "token_usage": {...},
+            "tool_calls": [...]
+        }
+    
+    Raises:
+        RuntimeError if the request fails, timeout is exceeded, or no complete event is received
+    """
+    base_url = get_api_base_url(base_url)
+    # Use GET request with query parameter for streaming endpoint
+    url = f"{base_url}/query/stream?query={urllib.parse.quote(query)}"
+    last_error: str = ""
+    stream_timeout = timeout or 120  # Default 120s for streaming (longer than sync)
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            req = urllib.request.Request(url, method="GET")
+            req.add_header("Accept", "text/event-stream")
+            
+            with urllib.request.urlopen(req, timeout=stream_timeout) as resp:
+                if resp.getcode() != 200:
+                    last_error = f"HTTP {resp.getcode()}"
+                    if attempt < max_retries:
+                        time.sleep(backoff_seconds * attempt)
+                        continue
+                    raise RuntimeError(f"Stream endpoint returned HTTP {resp.getcode()}")
+                
+                # Parse SSE stream
+                events = _parse_sse_stream(resp, stream_timeout)
+                
+                # Build response from events
+                response = _build_response_from_events(events)
+                return response
+                
+        except urllib.error.HTTPError as e:
+            try:
+                raw = e.read()
+                text = raw.decode("utf-8", errors="replace")
+                parsed = json.loads(text)
+                last_error = f"HTTP {e.code}: {parsed}"
+            except Exception:
+                last_error = f"HTTP {e.code}: {str(e)}"
+        except Exception as e:  # noqa: BLE001
+            last_error = str(e)
+        
+        if attempt < max_retries:
+            time.sleep(backoff_seconds * attempt)
+    
+    raise RuntimeError(
+        f"Failed to run streaming query after {max_retries} attempts. Last error: {last_error}"
     )
 
 

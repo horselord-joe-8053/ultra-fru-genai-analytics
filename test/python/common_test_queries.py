@@ -24,6 +24,7 @@ from .common_utils import (
     print_header,
     print_subheader,
     run_query,
+    run_query_stream,
 )
 
 
@@ -612,6 +613,7 @@ def run_single_test(
     base_url: Optional[str] = None,
     log_file: Optional[str] = None,
     timeout: Optional[int] = None,
+    stream: bool = False,
 ) -> bool:
     """Run a single test by code.
 
@@ -621,6 +623,7 @@ def run_single_test(
         base_url: Optional explicit API base URL
         log_file: Optional path to log file (for appending output)
         timeout: Optional timeout in seconds (for systems without timeout command)
+        stream: If True, use /query/stream endpoint; if False, use /query endpoint
 
     Returns:
         True if test passed, False otherwise
@@ -661,7 +664,10 @@ def run_single_test(
             try:
                 import time
                 api_start = time.time()
-                resp = run_query(test_case.query, base_url=base_url, timeout=timeout)
+                if stream:
+                    resp = run_query_stream(test_case.query, base_url=base_url, timeout=timeout)
+                else:
+                    resp = run_query(test_case.query, base_url=base_url, timeout=timeout)
                 api_time = time.time() - api_start
                 actual_response = resp.get("answer", "")
                 # Pass test_code to validator for enhanced validation
@@ -672,7 +678,10 @@ def run_single_test(
         else:
             import time
             api_start = time.time()
-            resp = run_query(test_case.query, base_url=base_url)
+            if stream:
+                resp = run_query_stream(test_case.query, base_url=base_url, timeout=timeout)
+            else:
+                resp = run_query(test_case.query, base_url=base_url)
             api_time = time.time() - api_start
             actual_response = resp.get("answer", "")
             # Pass test_code to validator for enhanced validation
@@ -801,6 +810,7 @@ def run_tests(
     base_url: Optional[str] = None,
     log_file: Optional[str] = None,
     timeout: Optional[int] = None,
+    stream: bool = False,
 ) -> None:
     """Run tests specified by their three-character codes.
 
@@ -809,6 +819,7 @@ def run_tests(
         base_url: Optional explicit API base URL
         log_file: Optional path to log file (for appending output)
         timeout: Optional timeout in seconds (for systems without timeout command)
+        stream: If True, use /query/stream endpoint; if False, use /query endpoint
     """
     test_queries = get_test_queries()
     
@@ -827,7 +838,8 @@ def run_tests(
     # Only print headers when running standalone (no log_file)
     if not log_file:
         # Use logger methods instead of print_header/print_subheader
-        logger.header(f"Running {len(query_codes)} query test(s) against /query endpoint")
+        endpoint = "/query/stream" if stream else "/query"
+        logger.header(f"Running {len(query_codes)} query test(s) against {endpoint} endpoint")
     
     for idx, code in enumerate(query_codes, start=1):
         test_case = test_queries[code]
@@ -835,7 +847,7 @@ def run_tests(
         if not log_file:
             logger.subheader(f"Test {idx}/{len(query_codes)}: {code} - {test_case.name}")
         # run_single_test() will print query and result using its own logger instance
-        run_single_test(code, test_case, base_url=base_url, log_file=log_file, timeout=timeout)
+        run_single_test(code, test_case, base_url=base_url, log_file=log_file, timeout=timeout, stream=stream)
 
 
 def _main() -> None:
@@ -877,6 +889,12 @@ def _main() -> None:
         metavar="SECONDS",
         help="Timeout in seconds for the test (if no system timeout command available).",
     )
+    parser.add_argument(
+        "--stream",
+        dest="stream",
+        action="store_true",
+        help="Use streaming endpoint (/query/stream) instead of sync endpoint (/query).",
+    )
     args = parser.parse_args()
     
     # Determine which queries to run
@@ -895,6 +913,7 @@ def _main() -> None:
             base_url=args.test_api_base_url,
             log_file=args.log_file,
             timeout=args.timeout,
+            stream=args.stream,
         )
     
     main_cli_entry(_runner)
