@@ -77,6 +77,9 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ state }) => {
         {state.isStreaming && (
           <div className="text-xs text-blue-600 mt-1">● Streaming...</div>
         )}
+        {!state.isStreaming && !state.error && (state.question || state.toolCalls.length > 0) && (
+          <div className="text-xs text-green-600 mt-1">● Completed</div>
+        )}
         {state.error && (
           <div className="text-xs text-red-600 mt-1">Error: {state.error}</div>
         )}
@@ -90,7 +93,7 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ state }) => {
         {/* Part 1: Query Info */}
         {(state.question || state.method) && (
           <div className="mb-4">
-            <div className="text-gray-600 font-semibold mb-2">=== Part 1 ===</div>
+            <div className="text-gray-600 font-semibold mb-2">=== 1. General Query ===</div>
             {state.question && (
               <div className="text-gray-800 mb-1">
                 <span className="text-gray-500">question:</span> {state.question}
@@ -107,10 +110,9 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ state }) => {
         {/* Part 2: Tool Calls */}
         {state.toolCalls.length > 0 && (
           <div className="mb-4">
-            <div className="text-gray-600 font-semibold mb-2">=== Part 2 ===</div>
+            <div className="text-gray-600 font-semibold mb-2">=== 2. Tool Calls ===</div>
             {state.toolCalls.map((toolCall, index) => (
               <div key={index} className="mb-3 border-l-2 border-gray-300 pl-2">
-                <div className="text-gray-500 mb-1">----------------------------------------</div>
                 <div className="text-gray-800 mb-1">
                   <span className="text-gray-500">iteration:</span> {toolCall.iteration !== null && toolCall.iteration !== undefined ? toolCall.iteration : "final"}
                 </div>
@@ -151,7 +153,6 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ state }) => {
                 <div className="text-gray-800 mb-1">
                   <span className="text-gray-500">execution_time_ms:</span> {toolCall.execution_time_ms.toFixed(2)}
                 </div>
-                <div className="text-gray-500 mt-1">----------------------------------------</div>
               </div>
             ))}
           </div>
@@ -160,7 +161,7 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ state }) => {
         {/* Part 3: Final Stats */}
         {(state.iterations !== null || state.execution_time_ms !== null) && (
           <div className="mb-4">
-            <div className="text-gray-600 font-semibold mb-2">=== Part 3 ===</div>
+            <div className="text-gray-600 font-semibold mb-2">=== 3. Performance Stats ===</div>
             {state.iterations !== null && (
               <div className="text-gray-800 mb-1">
                 <span className="text-gray-500">iterations:</span> {state.iterations}
@@ -177,7 +178,7 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ state }) => {
         {/* Part 4: Token Usage */}
         {state.token_usage && (
           <div className="mb-4">
-            <div className="text-gray-600 font-semibold mb-2">=== Part 4 ===</div>
+            <div className="text-gray-600 font-semibold mb-2">=== 4. Token Usage Stats ===</div>
             <div className="text-gray-800 mb-1">
               <span className="text-gray-500">token_usage.input_tokens:</span> {state.token_usage.input_tokens}
             </div>
