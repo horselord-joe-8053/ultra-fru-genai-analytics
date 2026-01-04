@@ -42,7 +42,7 @@ check_java_21() {
     return 1
 }
 
-setup_spark() {
+setup_spark_local() {
     log_step "Setting up Spark 4.0.1 environment"
     
     # Idempotency check: If Spark is already configured, skip setup

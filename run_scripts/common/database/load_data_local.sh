@@ -1,22 +1,22 @@
 #!/bin/bash
-# Load CSV data into database via ETL script
+# Load CSV data into local database via ETL script
 # Idempotent: checks if data already exists before loading
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-source "$SCRIPT_DIR/../common/logger.sh"
-source "$SCRIPT_DIR/../common/load-env.sh"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+source "$SCRIPT_DIR/../../logger.sh"
+source "$SCRIPT_DIR/../../load-env.sh"
 
-ETL_SCRIPT="$REPO_ROOT/backend/etl/load_openai_embeddings_to_pgvector.py"
-CSV_FILE="$REPO_ROOT/data/raw/fridge_sales_with_rating.csv"
-
-load_data() {
-    log_step "Loading data into database"
+load_data_local() {
+    log_step "Loading data into database (local)"
+    
+    ETL_SCRIPT="$REPO_ROOT/backend/etl/load_openai_embeddings_to_pgvector.py"
+    CSV_FILE="$REPO_ROOT/data/raw/fridge_sales_with_rating.csv"
     
     # Load environment variables
-    load_env_file
+    load_env_file || true
     
     # Check if ETL script exists
     if [ ! -f "$ETL_SCRIPT" ]; then
@@ -90,10 +90,4 @@ load_data() {
         exit 1
     fi
 }
-
-main() {
-    load_data
-}
-
-main "$@"
 

@@ -42,7 +42,7 @@ main() {
     # Step 2: Build and push to ECR
     if [ "$SKIP_BUILD" = false ]; then
         log_step "Step 2/4: Building and pushing Docker image to ECR"
-        "$SCRIPT_DIR/../common_ecs_eks/build-push-ecr.sh" || exit 1
+        "$SCRIPT_DIR/../shared/build-push-ecr.sh" || exit 1
     else
         log_info "Step 2/4: Skipping ECR build/push (--skip-build flag set)"
     fi
@@ -59,7 +59,7 @@ main() {
             fi
             npm run build
         fi
-        "$SCRIPT_DIR/../common_ecs_eks/deploy-frontend.sh" || exit 1
+        "$SCRIPT_DIR/../shared/deploy-frontend.sh" || exit 1
     else
         log_info "Step 3/4: Skipping frontend deployment (--skip-frontend flag set)"
     fi

@@ -88,7 +88,7 @@ main() {
     # Step 3.5: Setup Spark environment (optional)
     if should_setup_spark; then
         log_step "Step 3.5/8: Setting up Spark environment (optional)"
-        if "$SCRIPT_DIR/setup-spark-4.0.sh"; then
+        if "$SCRIPT_DIR/../common/spark/setup-spark.sh" "local"; then
             # Validate Spark setup
             if command -v spark-submit >/dev/null 2>&1; then
                 if spark-submit --version 2>&1 | grep -qE "version 4\.0"; then
@@ -119,12 +119,12 @@ main() {
     
     # Step 6: Initialize database
     log_step "Step 6/8: Initializing database schema"
-    "$SCRIPT_DIR/init-db.sh" || exit 1
+    "$SCRIPT_DIR/../common/database/init_schema.sh" "local" || exit 1
     
     # Step 7: Load data (optional)
     if [ "$SKIP_DATA_LOAD" = false ]; then
         log_step "Step 7/8: Loading data into database"
-        "$SCRIPT_DIR/load-data.sh" || exit 1
+        "$SCRIPT_DIR/../common/database/load_data.sh" "local" || exit 1
     else
         log_info "Skipping data load (--skip-data-load flag set)"
     fi

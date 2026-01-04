@@ -1,21 +1,21 @@
 #!/bin/bash
-# Initialize database schema
-# Idempotent: SQL uses IF NOT EXISTS
+# Initialize database schema for local development
+# Uses local PostgreSQL (Docker or direct connection)
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-source "$SCRIPT_DIR/../common/logger.sh"
-source "$SCRIPT_DIR/../common/load-env.sh"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+source "$SCRIPT_DIR/../../logger.sh"
+source "$SCRIPT_DIR/../../load-env.sh"
 
-SCHEMA_FILE="$REPO_ROOT/sql/schema_pgvector.sql"
-
-init_database() {
-    log_step "Initializing database schema"
+init_schema_local() {
+    log_step "Initializing database schema (local)"
+    
+    SCHEMA_FILE="$REPO_ROOT/sql/schema_pgvector.sql"
     
     # Load environment variables
-    load_env_file
+    load_env_file || true
     
     # Check if schema file exists
     if [ ! -f "$SCHEMA_FILE" ]; then
@@ -63,10 +63,4 @@ init_database() {
         log_warning "Schema verification: Only $TABLE_COUNT expected tables found (expected 2+)"
     fi
 }
-
-main() {
-    init_database
-}
-
-main "$@"
 

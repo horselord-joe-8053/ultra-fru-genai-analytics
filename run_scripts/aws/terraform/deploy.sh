@@ -564,7 +564,7 @@ deploy_terragrunt() {
         if [ -z "$CONTAINER_IMAGE" ]; then
             log_error "CONTAINER_IMAGE not set. Container image is required for application deployment."
             log_info "The image should be built and pushed to ECR first."
-            log_info "Run: ./run_scripts/aws/common_ecs_eks/build-push-ecr.sh"
+            log_info "Run: ./run_scripts/aws/shared/build-push-ecr.sh"
             if [ "$DRY_RUN" = "true" ]; then
                 log_info "[DRY-RUN] Continuing with dry-run (image would be required for actual deployment)"
             else

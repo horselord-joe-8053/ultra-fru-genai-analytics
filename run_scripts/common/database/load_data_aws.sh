@@ -6,18 +6,15 @@
 # It reads credentials from .env file (single source of truth) and gets Aurora endpoint
 # from Terragrunt outputs.
 #
-# Usage: ./load_data_to_aurora.sh [environment]
-# Example: ./load_data_to_aurora.sh dev
-#
-# Note: This is for AWS setup, not local development.
-# For local development, use: run_scripts/local/load-data.sh
+# Usage: load_data_aws [environment]
+# Example: load_data_aws dev
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-source "$SCRIPT_DIR/../../common/logger.sh"
-source "$SCRIPT_DIR/../../common/load-env.sh"
+source "$SCRIPT_DIR/../../logger.sh"
+source "$SCRIPT_DIR/../../load-env.sh"
 
 # Default environment
 ENVIRONMENT="${1:-dev}"
@@ -29,11 +26,12 @@ AWS_REGION="${AWS_REGION:-us-east-1}"
 ETL_SCRIPT="$REPO_ROOT/backend/etl/load_openai_embeddings_to_pgvector.py"
 CSV_FILE="$REPO_ROOT/data/raw/fridge_sales_with_rating.csv"
 
-load_data() {
+load_data_aws() {
+    local env="${1:-$ENVIRONMENT}"
     log_step "Loading data into Aurora database"
     
     # Navigate to infrastructure directory
-    local infra_dir="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT/infrastructure"
+    local infra_dir="$REPO_ROOT/infra/terraform/environments/$env/infrastructure"
     if [ ! -d "$infra_dir" ]; then
         log_error "Infrastructure directory not found: $infra_dir"
         exit 1
@@ -53,7 +51,7 @@ load_data() {
         log_info "  db_secret_arn: ${db_secret_arn:-NOT SET}"
         log_info ""
         log_info "Please ensure infrastructure is deployed first:"
-        log_info "  ./run_scripts/aws/run.sh infrastructure $ENVIRONMENT"
+        log_info "  ./run_scripts/aws/run.sh infrastructure $env"
         exit 1
     fi
     
@@ -277,9 +275,5 @@ load_data() {
     fi
 }
 
-main() {
-    load_data
-}
-
-main "$@"
+# Function is exported for use by wrapper script
 

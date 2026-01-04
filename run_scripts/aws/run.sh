@@ -177,7 +177,7 @@ check_or_build_image() {
     log_info "Building and pushing container image..."
     log_info "Image will be tagged as: $CONTAINER_IMAGE"
     
-    if "$SCRIPT_DIR/common_ecs_eks/build-push-ecr.sh"; then
+    if "$SCRIPT_DIR/shared/build-push-ecr.sh"; then
         log_success "Container image built and pushed: $CONTAINER_IMAGE"
         log_info "This image URI will be used by Terraform to update the ECS task definition"
         log_info "Terraform will detect the change and trigger a new ECS deployment"
@@ -193,85 +193,6 @@ deploy_ecs_full() {
     log_step "Starting complete ECS deployment workflow"
     log_info "Environment: $ENVIRONMENT"
     
-    # Helper: ensure pgvector extension exists
-    ensure_pgvector_extension() {
-        if [ "$DRY_RUN" = "true" ]; then
-            log_info "[DRY-RUN] Skipping pgvector extension creation"
-            return 0
-        fi
-
-        local infra_dir="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT/infrastructure"
-        if [ ! -d "$infra_dir" ]; then
-            log_warning "Infrastructure directory not found at $infra_dir; skipping pgvector extension step"
-            return 0
-        fi
-
-        log_step "Ensuring pgvector extension on database"
-
-        # Fetch outputs from Terragrunt
-        local db_password_secret_arn db_endpoint db_port db_name db_user
-        db_password_secret_arn=$(cd "$infra_dir" && terragrunt output -raw db_password_secret_arn 2>/dev/null || true)
-        db_endpoint=$(cd "$infra_dir" && terragrunt output -raw aurora_endpoint 2>/dev/null || true)
-        db_port=$(cd "$infra_dir" && terragrunt output -raw aurora_port 2>/dev/null || echo "5432")
-        db_name=$(cd "$infra_dir" && terragrunt output -raw aurora_database_name 2>/dev/null || echo "fru_db")
-        db_user="${PGUSER:-fru_user}"
-
-        if [ -z "$db_password_secret_arn" ] || [ -z "$db_endpoint" ]; then
-            log_warning "Missing DB outputs (password secret or endpoint); skipping pgvector extension step"
-            return 0
-        fi
-
-        DB_PASSWORD_SECRET_ARN="$db_password_secret_arn" \
-        DB_ENDPOINT="$db_endpoint" \
-        DB_PORT="$db_port" \
-        DB_NAME="$db_name" \
-        DB_USERNAME="$db_user" \
-        AWS_PROFILE="${AWS_PROFILE:-admin}" \
-        AWS_REGION="${AWS_REGION:-$DEFAULT_AWS_REGION}" \
-        "$SCRIPT_DIR/terraform/post_create_pgvector.sh" "$ENVIRONMENT"
-    }
-
-    # Initialize database schema (creates tables: fru_sales_embeddings, batch_analytics)
-    init_db_schema() {
-        local infra_dir="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT/infrastructure"
-        
-        log_step "Initializing database schema"
-
-        # Check if schema initialization script exists
-        if [ ! -f "$SCRIPT_DIR/terraform/init_db_schema.sh" ]; then
-            log_warning "Schema initialization script not found; skipping schema setup"
-            return 0
-        fi
-
-        AWS_PROFILE="${AWS_PROFILE:-admin}" \
-        AWS_REGION="${AWS_REGION:-$DEFAULT_AWS_REGION}" \
-        "$SCRIPT_DIR/terraform/init_db_schema.sh" "$ENVIRONMENT" || {
-            log_warning "Schema initialization failed (tables may already exist or DB not ready)"
-            log_info "This is usually safe to ignore if tables already exist"
-        }
-    }
-
-    # Load data into Aurora database (idempotent: checks if data already exists)
-    load_data_to_aurora() {
-        log_step "Loading data into Aurora database"
-
-        # Check if data loading script exists
-        if [ ! -f "$SCRIPT_DIR/terraform/load_data_to_aurora.sh" ]; then
-            log_warning "Data loading script not found; skipping data load"
-            log_info "You can manually load data later:"
-            log_info "  ./run_scripts/aws/terraform/load_data_to_aurora.sh $ENVIRONMENT"
-            return 0
-        fi
-
-        AWS_PROFILE="${AWS_PROFILE:-admin}" \
-        AWS_REGION="${AWS_REGION:-$DEFAULT_AWS_REGION}" \
-        "$SCRIPT_DIR/terraform/load_data_to_aurora.sh" "$ENVIRONMENT" || {
-            log_warning "Data loading failed or was skipped"
-            log_info "This is usually safe to ignore if:"
-            log_info "  - Data already exists and is up to date (CSV/schema unchanged)"
-            log_info "  - You can manually reload with: ./run_scripts/aws/terraform/load_data_to_aurora.sh $ENVIRONMENT"
-        }
-    }
 
     # Step 1: Check/build container image (idempotent)
     log_step "Step 1/6: Checking container image availability"
@@ -303,62 +224,20 @@ deploy_ecs_full() {
     fi
     log_success "Step 3/6 PASSED: Infrastructure layer deployed"
 
-    # Step 3.5: Ensure pgvector extension exists (Aurora/Postgres)
-    ensure_pgvector_extension
-
-    # Step 3.6: Initialize database schema (creates tables: fru_sales_embeddings, batch_analytics)
-    init_db_schema
-
-    # Step 3.7: Load data into Aurora database (idempotent: checks if data already exists)
-    load_data_to_aurora
+    # Step 3.5: Setup database (pgvector, schema, data)
+    if [ "$DRY_RUN" != "true" ]; then
+        log_step "Step 3.5/6: Setting up database (pgvector, schema, data)"
+        "$SCRIPT_DIR/database/setup-database.sh" "$ENVIRONMENT" || {
+            log_warning "Database setup had issues (may already be set up)"
+        }
+    else
+        log_info "[DRY-RUN] Skipping database setup"
+    fi
     
-    # Step 3.8: Validate infrastructure outputs before deploying application
-    validate_infrastructure_outputs() {
-        local env="$1"
-        local terraform_dir="$REPO_ROOT/infra/terraform/environments"
-        local infra_dir="$terraform_dir/$env/infrastructure"
-        local required_outputs=(
-            "db_password_secret_arn"
-            "db_password_plain_secret_arn"
-            "db_username_secret_arn"
-            "aurora_endpoint"
-            "vpc_id"
-            "ecs_task_execution_role_arn"
-            "ecs_task_runtime_role_arn"
-        )
-        
-        log_info "Validating infrastructure layer outputs..."
-        
-        local missing_outputs=()
-        for output in "${required_outputs[@]}"; do
-            if ! (cd "$infra_dir" && terragrunt output -raw "$output" >/dev/null 2>&1); then
-                missing_outputs+=("$output")
-            fi
-        done
-        
-        if [ ${#missing_outputs[@]} -gt 0 ]; then
-            log_error "Required infrastructure outputs are missing!"
-            for output in "${missing_outputs[@]}"; do
-                log_error "  - $output"
-            done
-            log_error ""
-            log_error "Infrastructure layer deployment may have failed."
-            log_error ""
-            log_error "Troubleshooting:"
-            log_error "  1. Check infrastructure deployment status:"
-            log_error "     cd $infra_dir && terragrunt show"
-            log_error "  2. Check for errors in infrastructure deployment logs above"
-            log_error "  3. Redeploy infrastructure if needed:"
-            log_error "     ./run_scripts/aws/run.sh infrastructure $env"
-            return 1
-        fi
-        
-        log_success "All required infrastructure outputs validated"
-        return 0
-    }
-    
-    if ! validate_infrastructure_outputs "$ENVIRONMENT"; then
-        log_error "Step 4/6 FAILED: Infrastructure outputs validation failed"
+    # Step 3.6: Validate infrastructure outputs before deploying application
+    log_step "Step 3.6/6: Validating infrastructure outputs"
+    if ! "$SCRIPT_DIR/database/validate-infra-outputs.sh" "$ENVIRONMENT"; then
+        log_error "Step 3.6/6 FAILED: Infrastructure outputs validation failed"
         log_info "Reason: Required infrastructure outputs are missing"
         log_info "Fix infrastructure deployment issues before deploying application layer"
         exit 1
@@ -378,7 +257,7 @@ deploy_ecs_full() {
     # Step 5: Deploy frontend to S3 (for CloudFront to serve)
     log_step "Step 5/6: Deploying frontend to S3"
     export ENVIRONMENT="$ENVIRONMENT"
-    if ! "$SCRIPT_DIR/common_ecs_eks/deploy-frontend.sh"; then
+    if ! "$SCRIPT_DIR/shared/deploy-frontend.sh"; then
         log_error "Step 5/6 FAILED: Frontend deployment failed"
         log_info "Reason: Failed to build frontend or sync to S3"
         log_info "Check frontend build, AWS credentials, S3 permissions, and Terraform outputs"
