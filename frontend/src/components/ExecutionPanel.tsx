@@ -24,9 +24,11 @@ export interface ExecutionState {
 
 interface ExecutionPanelProps {
   state: ExecutionState;
+  onToggle?: () => void;
+  isVisible?: boolean;
 }
 
-const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ state }) => {
+const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ state, onToggle, isVisible = true }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new content arrives
@@ -72,16 +74,28 @@ const ExecutionPanel: React.FC<ExecutionPanelProps> = ({ state }) => {
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
-      <div className="p-3 border-b bg-white">
-        <h2 className="text-sm font-semibold text-gray-700">Execution Log</h2>
-        {state.isStreaming && (
-          <div className="text-xs text-blue-600 mt-1">● Streaming...</div>
-        )}
-        {!state.isStreaming && !state.error && (state.question || state.toolCalls.length > 0) && (
-          <div className="text-xs text-green-600 mt-1">● Completed</div>
-        )}
-        {state.error && (
-          <div className="text-xs text-red-600 mt-1">Error: {state.error}</div>
+      <div className="p-3 border-b bg-white flex items-center justify-between">
+        <div className="flex-1">
+          <h2 className="text-sm font-semibold text-gray-700">Execution Log</h2>
+          {state.isStreaming && (
+            <div className="text-xs text-blue-600 mt-1">● Streaming...</div>
+          )}
+          {!state.isStreaming && !state.error && (state.question || state.toolCalls.length > 0) && (
+            <div className="text-xs text-green-600 mt-1">● Completed</div>
+          )}
+          {state.error && (
+            <div className="text-xs text-red-600 mt-1">Error: {state.error}</div>
+          )}
+        </div>
+        {onToggle && (
+          <button
+            onClick={onToggle}
+            className="ml-2 w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-all duration-200"
+            title={isVisible ? "Hide panel" : "Show panel"}
+            aria-label={isVisible ? "Hide panel" : "Show panel"}
+          >
+            <span className="text-xs font-medium">{isVisible ? "×" : "+"}</span>
+          </button>
         )}
       </div>
       

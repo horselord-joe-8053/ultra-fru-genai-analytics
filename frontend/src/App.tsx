@@ -30,6 +30,30 @@ const App: React.FC = () => {
   });
   const eventSourceRef = useRef<EventSource | null>(null);
 
+  // Panel visibility and width state
+  const [panelVisibility, setPanelVisibility] = useState(() => {
+    const saved = localStorage.getItem("panelVisibility");
+    return saved ? JSON.parse(saved) : { executionLog: true, batchAnalytics: true };
+  });
+  const [panelWidths, setPanelWidths] = useState(() => {
+    const saved = localStorage.getItem("panelWidths");
+    return saved ? JSON.parse(saved) : { executionLog: 400, batchAnalytics: 380 };
+  });
+  const [isResizing, setIsResizing] = useState<string | null>(null);
+  const [resizeStartX, setResizeStartX] = useState(0);
+  const [resizeStartWidth, setResizeStartWidth] = useState(0);
+  const resizeRef = useRef<{ panel: string; startX: number; startWidth: number } | null>(null);
+
+  // Save panel visibility to localStorage
+  useEffect(() => {
+    localStorage.setItem("panelVisibility", JSON.stringify(panelVisibility));
+  }, [panelVisibility]);
+
+  // Save panel widths to localStorage
+  useEffect(() => {
+    localStorage.setItem("panelWidths", JSON.stringify(panelWidths));
+  }, [panelWidths]);
+
   // Cleanup EventSource on unmount
   useEffect(() => {
     return () => {
@@ -39,6 +63,64 @@ const App: React.FC = () => {
       }
     };
   }, []);
+
+  // Handle panel visibility toggle
+  const toggleExecutionLog = () => {
+    setPanelVisibility((prev: { executionLog: boolean; batchAnalytics: boolean }) => ({ ...prev, executionLog: !prev.executionLog }));
+  };
+
+  const toggleBatchAnalytics = () => {
+    setPanelVisibility((prev: { executionLog: boolean; batchAnalytics: boolean }) => ({ ...prev, batchAnalytics: !prev.batchAnalytics }));
+  };
+
+  // Resize handlers
+  const handleResizeStart = (panel: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(panel);
+    setResizeStartX(e.clientX);
+    setResizeStartWidth(panelWidths[panel as keyof typeof panelWidths]);
+    resizeRef.current = {
+      panel,
+      startX: e.clientX,
+      startWidth: panelWidths[panel as keyof typeof panelWidths],
+    };
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing || !resizeRef.current) return;
+
+      const deltaX = e.clientX - resizeRef.current.startX;
+      const newWidth = resizeRef.current.startWidth + deltaX;
+      const minWidth = 200;
+
+      if (newWidth >= minWidth) {
+        setPanelWidths((prev: { executionLog: number; batchAnalytics: number }) => ({
+          ...prev,
+          [resizeRef.current!.panel]: newWidth,
+        }));
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(null);
+      resizeRef.current = null;
+    };
+
+    if (isResizing) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    }
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isResizing]);
 
   // Sync Chat panel with Execution Log - update when answer arrives
   useEffect(() => {
@@ -227,19 +309,87 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-full">
+      {/* Chat Panel - Always visible, flexible width */}
       <div className="flex-1 border-r bg-white">
         <Chat messages={messages} onSend={sendQuery} loading={loading} />
       </div>
-      <div className="w-[400px] bg-gray-50 border-l border-r flex flex-col">
-        {/* Execution Panel (Real-time execution log) */}
-        <ExecutionPanel state={executionState} />
-      </div>
-      <div className="w-[380px] bg-gray-50 flex flex-col border-l">
-        {/* Batch Analytics Panel (Spark + Delta) */}
-        <div className="flex-1 overflow-hidden">
-          <BatchAnalyticsPanel />
+
+      {/* Execution Log Panel with Resize Handle */}
+      {panelVisibility.executionLog && (
+        <>
+          {/* Resize Handle - Left side (between Chat and Execution Log) */}
+          <div
+            className="w-1 bg-gray-300 hover:bg-blue-500 cursor-col-resize transition-colors flex-shrink-0 relative group"
+            onMouseDown={(e) => handleResizeStart("executionLog", e)}
+            style={{ cursor: isResizing === "executionLog" ? "col-resize" : "col-resize" }}
+          >
+            <div className="absolute inset-y-0 left-0 right-0 group-hover:bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </div>
+          <div
+            className="bg-gray-50 border-l border-r flex flex-col flex-shrink-0 transition-all duration-200 overflow-hidden"
+            style={{ width: `${panelWidths.executionLog}px` }}
+          >
+            <ExecutionPanel
+              state={executionState}
+              onToggle={toggleExecutionLog}
+              isVisible={panelVisibility.executionLog}
+            />
+          </div>
+        </>
+      )}
+
+      {/* Batch Analytics Panel with Resize Handle */}
+      {panelVisibility.batchAnalytics && (
+        <>
+          {/* Resize Handle - Between Execution Log and Batch Analytics (only if Execution Log is visible) */}
+          {panelVisibility.executionLog && (
+            <div
+              className="w-1 bg-gray-300 hover:bg-blue-500 cursor-col-resize transition-colors flex-shrink-0 relative group"
+              onMouseDown={(e) => handleResizeStart("batchAnalytics", e)}
+              style={{ cursor: isResizing === "batchAnalytics" ? "col-resize" : "col-resize" }}
+            >
+              <div className="absolute inset-y-0 left-0 right-0 group-hover:bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+          )}
+          <div
+            className="bg-gray-50 flex flex-col border-l flex-shrink-0 transition-all duration-200 overflow-hidden"
+            style={{ width: `${panelWidths.batchAnalytics}px` }}
+          >
+            <div className="flex-1 overflow-hidden">
+              <BatchAnalyticsPanel
+                onToggle={toggleBatchAnalytics}
+                isVisible={panelVisibility.batchAnalytics}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Show toggle buttons when panels are hidden */}
+      {!panelVisibility.executionLog && (
+        <div className="flex items-center border-l">
+          <button
+            onClick={toggleExecutionLog}
+            className="px-3 py-4 bg-gray-50 hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+            title="Show Execution Log"
+            aria-label="Show Execution Log"
+          >
+            <span className="text-sm font-medium">◀</span>
+          </button>
         </div>
-      </div>
+      )}
+      {!panelVisibility.batchAnalytics && (
+        <div className="flex items-center border-l">
+          <button
+            onClick={toggleBatchAnalytics}
+            className="px-3 py-4 bg-gray-50 hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+            title="Show Batch Analytics"
+            aria-label="Show Batch Analytics"
+          >
+            <span className="text-sm font-medium">◀</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 };

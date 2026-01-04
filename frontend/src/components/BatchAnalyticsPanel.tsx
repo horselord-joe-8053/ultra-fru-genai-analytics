@@ -35,7 +35,12 @@ interface BatchAnalyticsData {
   total_revenue: number;
 }
 
-const BatchAnalyticsPanel: React.FC = () => {
+interface BatchAnalyticsPanelProps {
+  onToggle?: () => void;
+  isVisible?: boolean;
+}
+
+const BatchAnalyticsPanel: React.FC<BatchAnalyticsPanelProps> = ({ onToggle, isVisible = true }) => {
   const [data, setData] = useState<BatchAnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -187,13 +192,25 @@ const BatchAnalyticsPanel: React.FC = () => {
           <h2 className="text-sm font-semibold text-gray-800">
             Batch Analytics
           </h2>
-          <button
-            onClick={fetchAnalytics}
-            className="text-xs text-blue-600 hover:underline"
-            title="Refresh"
-          >
-            ↻
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={fetchAnalytics}
+              className="text-xs text-blue-600 hover:underline"
+              title="Refresh"
+            >
+              ↻
+            </button>
+            {onToggle && (
+              <button
+                onClick={onToggle}
+                className="w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-all duration-200"
+                title={isVisible ? "Hide panel" : "Show panel"}
+                aria-label={isVisible ? "Hide panel" : "Show panel"}
+              >
+                <span className="text-xs font-medium">{isVisible ? "×" : "+"}</span>
+              </button>
+            )}
+          </div>
         </div>
         <p className="text-xs text-gray-500">
           Spark + Delta offline analytics
