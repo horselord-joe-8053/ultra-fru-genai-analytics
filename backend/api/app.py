@@ -61,6 +61,7 @@ app.logger = logging.getLogger(__name__)
 allowed_origins = get_required_env("ALLOWED_ORIGINS", "Comma-separated list of allowed CORS origins").split(",")
 CORS(app, resources={
     r"/query": {"origins": allowed_origins},
+    r"/query/stream": {"origins": allowed_origins},
     r"/query-v2": {"origins": allowed_origins},
     r"/analytics": {"origins": allowed_origins},
     r"/metrics/agent": {"origins": allowed_origins},
@@ -376,6 +377,13 @@ def get_analytics():
                             result[field] = json.loads(result[field])
                         except:
                             pass
+                
+                # Add defensive defaults for numeric fields (handle NULL values from database)
+                # These fields should never be NULL in practice, but handle gracefully if they are
+                if result.get("total_records") is None:
+                    result["total_records"] = 0
+                if result.get("total_revenue") is None:
+                    result["total_revenue"] = 0.0
                 
                 # Limit arrays to query_limit before returning
                 # This ensures API returns only what frontend needs, even if DB has more

@@ -10,8 +10,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VERIFICATION_DIR="$SCRIPT_DIR"
 
 # Source common utilities
-source "$SCRIPT_DIR/../common/logger.sh"
-source "$SCRIPT_DIR/../common/load-env.sh"
+source "$SCRIPT_DIR/../../common/logger.sh"
+source "$SCRIPT_DIR/../../common/load-env.sh"
 load_env_file || log_warning "Could not load .env"
 
 # Get parameters

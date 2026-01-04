@@ -231,11 +231,11 @@ const BatchAnalyticsPanel: React.FC<BatchAnalyticsPanelProps> = ({ onToggle, isV
           <div className="text-xs space-y-1">
             <div className="flex justify-between">
               <span>Total Records:</span>
-              <span className="font-mono">{data.total_records.toLocaleString()}</span>
+              <span className="font-mono">{(data.total_records ?? 0).toLocaleString()}</span>
             </div>
             <div className="flex justify-between">
               <span>Total Revenue:</span>
-              <span className="font-mono">{formatCurrency(data.total_revenue)}</span>
+              <span className="font-mono">{formatCurrency(data.total_revenue ?? 0)}</span>
             </div>
             <div className="flex justify-between">
               <span>Avg Price:</span>

@@ -168,6 +168,27 @@ resource "aws_cloudfront_distribution" "frontend" {
     compress               = true
   }
 
+  # Cache behavior for /query/stream endpoint (Server-Sent Events, no caching)
+  ordered_cache_behavior {
+    path_pattern     = "/query/stream"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = var.alb_dns_name != null ? (var.api_origin_id != null ? var.api_origin_id : "ALB-${var.project_name}-${var.environment}") : "S3-${aws_s3_bucket.frontend.bucket}"
+
+    forwarded_values {
+      query_string = true
+      cookies {
+        forward = "all"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl               = 0
+    default_ttl            = 0
+    max_ttl                = 0
+    compress               = false  # Don't compress SSE streams
+  }
+
   restrictions {
     geo_restriction {
       restriction_type = "none"

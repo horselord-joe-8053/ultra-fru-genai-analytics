@@ -55,6 +55,12 @@ inputs = {
   openai_embed_model = get_env("OPENAI_EMBED_MODEL", "")
   use_agent_query = get_env("USE_AGENT_QUERY", "")
   
+  # Analytics scheduler configuration (optional)
+  enable_analytics_scheduler = get_env("ENABLE_ANALYTICS_SCHEDULER", "false")
+  analytics_scheduler_interval_seconds = get_env("ANALYTICS_SCHEDULER_INTERVAL_SECONDS", "")
+  spark_home = get_env("SPARK_HOME", "/opt/spark")
+  delta_table_path = get_env("DELTA_TABLE_PATH", "data/delta/fru_sales")
+  
   # Feature flags
   enable_nat_gateway = true
   enable_bedrock_vpc_endpoint = true

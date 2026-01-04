@@ -215,6 +215,30 @@ variable "log_retention_days" {
   default     = 7
 }
 
+variable "enable_analytics_scheduler" {
+  type        = string
+  description = "Enable analytics scheduler (from .env - true/false)"
+  default     = "false"
+}
+
+variable "analytics_scheduler_interval_seconds" {
+  type        = string
+  description = "Analytics scheduler interval in seconds (from .env)"
+  default     = ""
+}
+
+variable "spark_home" {
+  type        = string
+  description = "Spark home directory (default: /opt/spark)"
+  default     = "/opt/spark"
+}
+
+variable "delta_table_path" {
+  type        = string
+  description = "Delta table path (from .env - local path or S3 path)"
+  default     = "data/delta/fru_sales"
+}
+
 variable "tags" {
   type        = map(string)
   description = "Common tags for all resources"

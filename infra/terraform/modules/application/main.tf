@@ -61,6 +61,11 @@ module "ecs" {
   enable_execute_command    = var.enable_execute_command
   log_retention_days        = var.log_retention_days
 
+  enable_analytics_scheduler            = var.enable_analytics_scheduler
+  analytics_scheduler_interval_seconds  = var.analytics_scheduler_interval_seconds
+  spark_home                            = var.spark_home
+  delta_table_path                      = var.delta_table_path
+
   tags = var.tags
 }
 

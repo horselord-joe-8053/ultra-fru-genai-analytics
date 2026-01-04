@@ -124,6 +124,22 @@ resource "aws_ecs_task_definition" "fru_api" {
         {
           name  = "USE_AGENT_QUERY"
           value = var.use_agent_query
+        },
+        {
+          name  = "ENABLE_ANALYTICS_SCHEDULER"
+          value = var.enable_analytics_scheduler
+        },
+        {
+          name  = "ANALYTICS_SCHEDULER_INTERVAL_SECONDS"
+          value = var.analytics_scheduler_interval_seconds
+        },
+        {
+          name  = "SPARK_HOME"
+          value = var.spark_home
+        },
+        {
+          name  = "DELTA_TABLE_PATH"
+          value = var.delta_table_path
         }
       ]
 
