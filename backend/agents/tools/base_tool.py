@@ -1,5 +1,7 @@
 """
 Base tool interface for agent tools.
+
+Applicable environment: [local] [aws {ecs | eks}] [azure {aci | aks}] [gcp {cloud-run | gke}]
 """
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Tuple

@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+"""
+Load CSV data into PostgreSQL with OpenAI embeddings and pgvector support.
+
+Applicable environment: [local] [aws {ecs | eks}] [azure {aci | aks}] [gcp {cloud-run | gke}]
+"""
 import os
 import time
 import pandas as pd

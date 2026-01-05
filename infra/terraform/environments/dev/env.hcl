@@ -59,7 +59,13 @@ inputs = {
   enable_analytics_scheduler = get_env("ENABLE_ANALYTICS_SCHEDULER", "false")
   analytics_scheduler_interval_seconds = get_env("ANALYTICS_SCHEDULER_INTERVAL_SECONDS", "")
   spark_home = get_env("SPARK_HOME", "/opt/spark")
+  # For AWS: S3 path will be set by infrastructure layer output (s3://bucket/delta/fru_sales)
+  # For local: use local path (data/delta/fru_sales)
+  # If DELTA_TABLE_PATH is set in .env, use it; otherwise use default
   delta_table_path = get_env("DELTA_TABLE_PATH", "data/delta/fru_sales")
+  # Delta Lake package (Maven coordinates) - required for Spark jobs
+  # Must be set in .env file (no default - fail-fast behavior)
+  delta_lake_package = get_env("DELTA_LAKE_PACKAGE", "")
   
   # Feature flags
   enable_nat_gateway = true

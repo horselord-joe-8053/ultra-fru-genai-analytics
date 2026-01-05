@@ -1,5 +1,7 @@
 """
 ReAct agent for autonomous query processing.
+
+Applicable environment: [local] [aws {ecs | eks}] [azure {aci | aks}] [gcp {cloud-run | gke}]
 """
 import json
 import re
@@ -9,7 +11,7 @@ from typing import Dict, Any, Optional, List, Callable
 from decimal import Decimal
 from datetime import datetime, date
 
-from backend.llm.bedrock_client import claude_complete
+from backend.llm.client_factory import claude_complete
 from .tools import SQLTool, SemanticSearchTool, SQLGeneratorTool
 from .logger import AgentLogger
 from .metrics import agent_metrics

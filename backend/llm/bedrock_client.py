@@ -1,11 +1,33 @@
+"""
+AWS Bedrock client (LEGACY - DEPRECATED).
+This file is kept for backward compatibility during migration.
+New code should use backend.llm.client_factory or backend.env_utils.aws.bedrock_client.
+
+This file will be removed in a future version after migration is complete.
+For new code, use:
+- backend.llm.client_factory.create_llm_client() (Factory Pattern)
+- backend.llm.client_factory.claude_complete() (backward compatibility wrapper)
+- backend.env_utils.aws.bedrock_client.AWSBedrockClient (direct access)
+
+Applicable environment: [aws {ecs | eks}]
+"""
 import os
 import json
 import logging
 import boto3
+import warnings
 from botocore.exceptions import ClientError, BotoCoreError
 from backend.utils.env_helpers import get_required_env
 
 logger = logging.getLogger(__name__)
+
+# Deprecation warning for imports
+warnings.warn(
+    "backend.llm.bedrock_client is deprecated. "
+    "Use backend.llm.client_factory or backend.env_utils.aws.bedrock_client instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 
 def get_claude_client():

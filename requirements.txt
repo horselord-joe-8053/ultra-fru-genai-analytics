@@ -1,9 +1,10 @@
 flask>=2.3.0,<3.0.0
 pyspark>=3.4.0
 delta-spark>=3.0.0
-boto3>=1.28.0
+boto3>=1.28.0  # AWS-specific (S3, Bedrock, RDS Data API) - optional for local dev
 psycopg2-binary>=2.9.0
 openai>=1.0.0
 pandas>=2.0.0
 flask-cors>=4.0.0
 APScheduler>=3.10.0
+anthropic>=0.18.0  # Local Claude API client - optional for AWS deployments

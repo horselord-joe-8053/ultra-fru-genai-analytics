@@ -13,8 +13,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-source "$SCRIPT_DIR/../../logger.sh"
-source "$SCRIPT_DIR/../../load-env.sh"
+source "$SCRIPT_DIR/../logger.sh"
+source "$SCRIPT_DIR/../load-env.sh"
 
 # Default environment
 ENVIRONMENT="${1:-dev}"

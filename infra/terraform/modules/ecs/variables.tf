@@ -235,8 +235,25 @@ variable "spark_home" {
 
 variable "delta_table_path" {
   type        = string
-  description = "Delta table path (from .env - local path or S3 path)"
+  description = "Delta table path (from .env - local path or S3 path). For AWS, should be S3 path (s3://bucket/delta/fru_sales). For local, use local path (data/delta/fru_sales)"
   default     = "data/delta/fru_sales"
+}
+
+variable "delta_lake_package" {
+  type        = string
+  description = "Delta Lake package (Maven coordinates) - required for Spark jobs. Format: io.delta:delta-spark_{SCALA_VERSION}:{DELTA_VERSION}. Standard: io.delta:delta-spark_2.13:4.0.0 (compatible with Spark 4.0.1). Must be set in .env file."
+  default     = ""
+  
+  validation {
+    condition     = length(var.delta_lake_package) > 0
+    error_message = "delta_lake_package cannot be empty. Please set DELTA_LAKE_PACKAGE in your .env file."
+  }
+}
+
+variable "s3_data_bucket_id" {
+  type        = string
+  description = "S3 bucket ID for analytics data (optional, for future use)"
+  default     = ""
 }
 
 variable "tags" {

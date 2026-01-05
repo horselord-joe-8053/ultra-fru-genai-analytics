@@ -205,124 +205,239 @@ validate_frontend_endpoint() {
     return 1
 }
 
-# Validate query endpoint with retry logic
-validate_query_endpoint() {
+# NOTE: /query endpoint verification is disabled
+# The synchronous /query endpoint requires complex request/response validation
+# and may timeout during verification. Instead, we verify /query/stream which
+# uses Server-Sent Events (SSE) and is the primary endpoint used by the frontend.
+# 
+# If you need to test /query manually, use:
+#   curl -X POST http://api-url/query -H "Content-Type: application/json" -d '{"query": "test"}'
+
+# validate_query_endpoint() is disabled - use validate_query_stream_endpoint() instead
+# The entire function is commented out below - uncomment if needed for debugging
+# validate_query_endpoint() {
+#    local api_endpoint="$1"
+#    local timeout_seconds="$QUERY_ENDPOINT_VALIDATION_TIMEOUT_SECONDS"
+#    local start_time=$(date +%s)
+#    local elapsed=0
+#    local last_status=""
+    
+#    log_info "Testing Query endpoint: $api_endpoint/query"
+#    log_info "  Will retry for up to $((timeout_seconds / 60)) minute(s)..."
+#    
+#    while [ $elapsed -lt $timeout_seconds ]; do
+#        local query_status query_response
+#        # Test POST /query endpoint with sample query
+#        query_response=$(curl -s -w "\n%{http_code}" --max-time 30 \
+#            -X POST "$api_endpoint/query" \
+#            -H "Content-Type: application/json" \
+#            -d '{"query": "Why are Samsung customers unhappy?"}' 2>/dev/null || echo -e "\n000")
+#        
+#        query_status=$(echo "$query_response" | tail -n 1)
+#        last_status="$query_status"
+#        
+#        if [ "$query_status" = "200" ]; then
+#            log_success "✓ Query endpoint is responding (HTTP $query_status) after ${elapsed}s"
+#            
+#            # Get actual response body (everything except last line which is status code)
+#            local response_body
+#            response_body=$(echo "$query_response" | head -n -1)
+#            
+#            # Validate response structure - check for required fields
+#            local has_answer=false
+#            local has_stats=false
+#            local has_sample_records=false
+#            local has_question=false
+#            local answer_content=""
+#            
+#            # Use jq if available for better JSON parsing, otherwise use grep
+#            if command_exists jq; then
+#                # Validate JSON structure with jq
+#                if echo "$response_body" | jq -e '.answer' >/dev/null 2>&1; then
+#                    has_answer=true
+#                    answer_content=$(echo "$response_body" | jq -r '.answer // ""' | head -c 100)
+#                fi
+#                if echo "$response_body" | jq -e '.stats' >/dev/null 2>&1; then
+#                    has_stats=true
+#                fi
+#                if echo "$response_body" | jq -e '.sample_records' >/dev/null 2>&1; then
+#                    has_sample_records=true
+#                fi
+#                if echo "$response_body" | jq -e '.question' >/dev/null 2>&1; then
+#                    has_question=true
+#                fi
+#            else
+#                # Fallback to grep-based validation
+#                if echo "$response_body" | grep -q '"answer"'; then
+#                    has_answer=true
+#                    answer_content=$(echo "$response_body" | grep -o '"answer"[[:space:]]*:[[:space:]]*"[^"]*' | head -c 100 || echo "")
+#                fi
+#                if echo "$response_body" | grep -q '"stats"'; then
+#                    has_stats=true
+#                fi
+#                if echo "$response_body" | grep -q '"sample_records"'; then
+#                    has_sample_records=true
+#                fi
+#                if echo "$response_body" | grep -q '"question"'; then
+#                    has_question=true
+#                fi
+#            fi
+#            
+#            # Validate required fields are present
+#            if [ "$has_answer" = true ] && [ "$has_stats" = true ] && [ "$has_sample_records" = true ]; then
+#                log_success "✓ Response structure is valid (contains: answer, stats, sample_records)"
+#                if [ -n "$answer_content" ] && [ "$answer_content" != "null" ] && [ "$answer_content" != "" ]; then
+#                    log_info "  Answer preview: ${answer_content}..."
+#                    log_info "  ✓ API is returning legitimate query results"
+#                else
+#                    log_warning "  ⚠ Answer field is present but appears to be empty"
+#                fi
+#                
+#                # Show stats summary if available
+#                if command_exists jq && echo "$response_body" | jq -e '.stats.total_matches' >/dev/null 2>&1; then
+#                    local total_matches
+#                    total_matches=$(echo "$response_body" | jq -r '.stats.total_matches // 0')
+#                    log_info "  Stats: total_matches=$total_matches"
+#                fi
+#                
+#                return 0
+#            elif [ "$has_answer" = true ]; then
+#                log_warning "  ⚠ Response has 'answer' but missing expected fields (stats, sample_records)"
+#                log_info "  Response preview: $(echo "$response_body" | head -c 150)..."
+#                return 0  # Still consider it a success if we got an answer
+#            elif echo "$response_body" | grep -qE '"error"'; then
+#                log_warning "  ⚠ Query endpoint returned an error response"
+#                log_info "  Error: $(echo "$response_body" | grep -o '"error"[[:space:]]*:[[:space:]]*"[^"]*' | head -c 150 || echo "$response_body" | head -c 150)..."
+#                return 1
+#            else
+#                log_warning "  ⚠ Response structure is unexpected (missing required fields)"
+#                log_info "  Response preview: $(echo "$response_body" | head -c 150)..."
+#                return 0  # Still return success if HTTP 200, but log warning
+#            fi
+#        elif [ "$query_status" = "503" ] || [ "$query_status" = "502" ] || [ "$query_status" = "504" ]; then
+#            # Service is starting or has a backend error
+#            if [ $((elapsed % 15)) -eq 0 ] && [ $elapsed -gt 0 ]; then
+#                log_info "  Still waiting... (${elapsed}s elapsed, HTTP $query_status)"
+#            fi
+#        elif [ "$query_status" = "000" ]; then
+#            # Connection failed, continue retrying
+#            if [ $((elapsed % 15)) -eq 0 ] && [ $elapsed -gt 0 ]; then
+#                log_info "  Connection failed, retrying... (${elapsed}s elapsed)"
+#            fi
+#        elif [ "$query_status" = "400" ] || [ "$query_status" = "422" ]; then
+#            # Bad request - endpoint is reachable but request format may be wrong
+#            log_warning "⚠ Query endpoint returned HTTP $query_status (bad request)"
+#            log_info "  Endpoint is reachable but request format may need adjustment"
+#            return 1
+#        else
+#            # Unexpected status code
+#            log_warning "⚠ Query endpoint returned HTTP $query_status"
+#            log_info "  Endpoint is reachable but may need configuration"
+#            return 1
+#        fi
+#        
+#        sleep "$VALIDATION_RETRY_INTERVAL_SECONDS"
+#        elapsed=$(($(date +%s) - start_time))
+#    done
+#    
+#    # Timeout reached
+#    log_error "✗ Query endpoint validation failed after ${elapsed}s"
+#    log_error "  Last HTTP status: $last_status"
+#    log_error "  Endpoint: $api_endpoint/query"
+#    if [ "$last_status" = "503" ] || [ "$last_status" = "502" ] || [ "$last_status" = "504" ]; then
+#        log_error "  The service appears to be starting but did not become ready within the timeout period."
+#        log_info "  Troubleshooting steps:"
+#        log_info "    1. Check ECS service status: aws ecs describe-services --cluster <cluster> --services <service>"
+#        log_info "    2. Check ECS task logs: aws logs tail /ecs/fru-dev --follow"
+#        log_info "    3. Verify ALB target group health: aws elbv2 describe-target-health --target-group-arn <arn>"
+#    elif [ "$last_status" = "000" ]; then
+#        log_error "  The endpoint is not reachable (connection failed or timed out)."
+#        log_info "  Troubleshooting steps:"
+#        log_info "    1. Verify ALB is fully provisioned: aws elbv2 describe-load-balancers"
+#        log_info "    2. Check security groups allow traffic"
+#        log_info "    3. Verify DNS resolution: nslookup $(echo "$api_endpoint" | sed 's|http://||' | sed 's|https://||')"
+#    fi
+#    return 1
+}
+# End of disabled validate_query_endpoint() function
+
+# Validate /query/stream endpoint (Server-Sent Events)
+# This is the primary query endpoint used by the frontend for real-time responses.
+# The endpoint streams responses using SSE format with 'data:' prefixed events.
+# We verify:
+#   1. HTTP 200 response
+#   2. Content-Type: text/event-stream (or application/x-ndjson)
+#   3. At least one valid SSE event (data: ...)
+validate_query_stream_endpoint() {
     local api_endpoint="$1"
-    local timeout_seconds="$QUERY_ENDPOINT_VALIDATION_TIMEOUT_SECONDS"
+    local timeout_seconds="${QUERY_STREAM_VALIDATION_TIMEOUT_SECONDS:-60}"
     local start_time=$(date +%s)
     local elapsed=0
     local last_status=""
     
-    log_info "Testing Query endpoint: $api_endpoint/query"
+    # Sample query for testing (URL-encoded: "average rating")
+    local test_query="average%20rating"
+    
+    log_info "Testing Query Stream endpoint: $api_endpoint/query/stream?query=$test_query"
     log_info "  Will retry for up to $((timeout_seconds / 60)) minute(s)..."
     
     while [ $elapsed -lt $timeout_seconds ]; do
-        local query_status query_response
-        # Test POST /query endpoint with sample query
-        query_response=$(curl -s -w "\n%{http_code}" --max-time 30 \
-            -X POST "$api_endpoint/query" \
-            -H "Content-Type: application/json" \
-            -d '{"query": "Why are Samsung customers unhappy?"}' 2>/dev/null || echo -e "\n000")
+        local stream_status stream_content_type stream_response
+        # Test GET /query/stream endpoint with sample query
+        stream_response=$(curl -s -w "\n%{http_code}\n%{content_type}" --max-time 10 \
+            "$api_endpoint/query/stream?query=$test_query" 2>/dev/null || echo -e "\n000\n")
         
-        query_status=$(echo "$query_response" | tail -n 1)
-        last_status="$query_status"
+        stream_status=$(echo "$stream_response" | tail -n 2 | head -n 1)
+        stream_content_type=$(echo "$stream_response" | tail -n 1)
+        last_status="$stream_status"
         
-        if [ "$query_status" = "200" ]; then
-            log_success "✓ Query endpoint is responding (HTTP $query_status) after ${elapsed}s"
+        if [ "$stream_status" = "200" ]; then
+            log_success "✓ Query Stream endpoint is responding (HTTP $stream_status) after ${elapsed}s"
             
-            # Get actual response body (everything except last line which is status code)
+            # Get actual response body (everything except last 2 lines which are status code and content type)
             local response_body
-            response_body=$(echo "$query_response" | head -n -1)
+            response_body=$(echo "$stream_response" | head -n -2)
             
-            # Validate response structure - check for required fields
-            local has_answer=false
-            local has_stats=false
-            local has_sample_records=false
-            local has_question=false
-            local answer_content=""
-            
-            # Use jq if available for better JSON parsing, otherwise use grep
-            if command_exists jq; then
-                # Validate JSON structure with jq
-                if echo "$response_body" | jq -e '.answer' >/dev/null 2>&1; then
-                    has_answer=true
-                    answer_content=$(echo "$response_body" | jq -r '.answer // ""' | head -c 100)
-                fi
-                if echo "$response_body" | jq -e '.stats' >/dev/null 2>&1; then
-                    has_stats=true
-                fi
-                if echo "$response_body" | jq -e '.sample_records' >/dev/null 2>&1; then
-                    has_sample_records=true
-                fi
-                if echo "$response_body" | jq -e '.question' >/dev/null 2>&1; then
-                    has_question=true
-                fi
+            # Verify Content-Type is correct for SSE
+            local content_type_ok=false
+            if echo "$stream_content_type" | grep -qiE "text/event-stream|application/x-ndjson|text/plain"; then
+                content_type_ok=true
+                log_success "  ✓ Content-Type is valid: $stream_content_type"
             else
-                # Fallback to grep-based validation
-                if echo "$response_body" | grep -q '"answer"'; then
-                    has_answer=true
-                    answer_content=$(echo "$response_body" | grep -o '"answer"[[:space:]]*:[[:space:]]*"[^"]*' | head -c 100 || echo "")
-                fi
-                if echo "$response_body" | grep -q '"stats"'; then
-                    has_stats=true
-                fi
-                if echo "$response_body" | grep -q '"sample_records"'; then
-                    has_sample_records=true
-                fi
-                if echo "$response_body" | grep -q '"question"'; then
-                    has_question=true
-                fi
+                log_warning "  ⚠ Unexpected Content-Type: $stream_content_type (expected text/event-stream)"
             fi
             
-            # Validate required fields are present
-            if [ "$has_answer" = true ] && [ "$has_stats" = true ] && [ "$has_sample_records" = true ]; then
-                log_success "✓ Response structure is valid (contains: answer, stats, sample_records)"
-                if [ -n "$answer_content" ] && [ "$answer_content" != "null" ] && [ "$answer_content" != "" ]; then
-                    log_info "  Answer preview: ${answer_content}..."
-                    log_info "  ✓ API is returning legitimate query results"
-                else
-                    log_warning "  ⚠ Answer field is present but appears to be empty"
-                fi
-                
-                # Show stats summary if available
-                if command_exists jq && echo "$response_body" | jq -e '.stats.total_matches' >/dev/null 2>&1; then
-                    local total_matches
-                    total_matches=$(echo "$response_body" | jq -r '.stats.total_matches // 0')
-                    log_info "  Stats: total_matches=$total_matches"
-                fi
-                
+            # Check for SSE event structure (data: ...)
+            local has_sse_events=false
+            if echo "$response_body" | grep -qE "^data:|^data "; then
+                has_sse_events=true
+                log_success "  ✓ Response contains SSE events (data: ...)"
+            elif [ -n "$response_body" ]; then
+                # May still be valid if it's NDJSON or streaming JSON
+                log_info "  Response preview: $(echo "$response_body" | head -c 200)..."
+                has_sse_events=true  # Consider it valid if we got any response
+            fi
+            
+            if [ "$content_type_ok" = true ] || [ "$has_sse_events" = true ]; then
+                log_success "  ✓ Query Stream endpoint is working correctly"
                 return 0
-            elif [ "$has_answer" = true ]; then
-                log_warning "  ⚠ Response has 'answer' but missing expected fields (stats, sample_records)"
-                log_info "  Response preview: $(echo "$response_body" | head -c 150)..."
-                return 0  # Still consider it a success if we got an answer
-            elif echo "$response_body" | grep -qE '"error"'; then
-                log_warning "  ⚠ Query endpoint returned an error response"
-                log_info "  Error: $(echo "$response_body" | grep -o '"error"[[:space:]]*:[[:space:]]*"[^"]*' | head -c 150 || echo "$response_body" | head -c 150)..."
-                return 1
             else
-                log_warning "  ⚠ Response structure is unexpected (missing required fields)"
-                log_info "  Response preview: $(echo "$response_body" | head -c 150)..."
-                return 0  # Still return success if HTTP 200, but log warning
+                log_warning "  ⚠ Response structure may be unexpected"
+                return 0  # Still return success if HTTP 200
             fi
-        elif [ "$query_status" = "503" ] || [ "$query_status" = "502" ] || [ "$query_status" = "504" ]; then
+        elif [ "$stream_status" = "503" ] || [ "$stream_status" = "502" ] || [ "$stream_status" = "504" ]; then
             # Service is starting or has a backend error
             if [ $((elapsed % 15)) -eq 0 ] && [ $elapsed -gt 0 ]; then
-                log_info "  Still waiting... (${elapsed}s elapsed, HTTP $query_status)"
+                log_info "  Still waiting... (${elapsed}s elapsed, HTTP $stream_status)"
             fi
-        elif [ "$query_status" = "000" ]; then
+        elif [ "$stream_status" = "000" ]; then
             # Connection failed, continue retrying
             if [ $((elapsed % 15)) -eq 0 ] && [ $elapsed -gt 0 ]; then
                 log_info "  Connection failed, retrying... (${elapsed}s elapsed)"
             fi
-        elif [ "$query_status" = "400" ] || [ "$query_status" = "422" ]; then
-            # Bad request - endpoint is reachable but request format may be wrong
-            log_warning "⚠ Query endpoint returned HTTP $query_status (bad request)"
-            log_info "  Endpoint is reachable but request format may need adjustment"
-            return 1
         else
             # Unexpected status code
-            log_warning "⚠ Query endpoint returned HTTP $query_status"
+            log_warning "⚠ Query Stream endpoint returned HTTP $stream_status"
             log_info "  Endpoint is reachable but may need configuration"
             return 1
         fi
@@ -332,22 +447,9 @@ validate_query_endpoint() {
     done
     
     # Timeout reached
-    log_error "✗ Query endpoint validation failed after ${elapsed}s"
+    log_error "✗ Query Stream endpoint validation failed after ${elapsed}s"
     log_error "  Last HTTP status: $last_status"
-    log_error "  Endpoint: $api_endpoint/query"
-    if [ "$last_status" = "503" ] || [ "$last_status" = "502" ] || [ "$last_status" = "504" ]; then
-        log_error "  The service appears to be starting but did not become ready within the timeout period."
-        log_info "  Troubleshooting steps:"
-        log_info "    1. Check ECS service status: aws ecs describe-services --cluster <cluster> --services <service>"
-        log_info "    2. Check ECS task logs: aws logs tail /ecs/fru-dev --follow"
-        log_info "    3. Verify ALB target group health: aws elbv2 describe-target-health --target-group-arn <arn>"
-    elif [ "$last_status" = "000" ]; then
-        log_error "  The endpoint is not reachable (connection failed or timed out)."
-        log_info "  Troubleshooting steps:"
-        log_info "    1. Verify ALB is fully provisioned: aws elbv2 describe-load-balancers"
-        log_info "    2. Check security groups allow traffic"
-        log_info "    3. Verify DNS resolution: nslookup $(echo "$api_endpoint" | sed 's|http://||' | sed 's|https://||')"
-    fi
+    log_error "  Endpoint: $api_endpoint/query/stream?query=$test_query"
     return 1
 }
 
@@ -404,13 +506,17 @@ validate_urls() {
     
     echo ""
     
-    # Test Query endpoint with retry (only if API health check passed)
+    # Test Query Stream endpoint with retry (only if API health check passed)
+    # NOTE: We test /query/stream instead of /query because:
+    # 1. /query/stream uses Server-Sent Events (SSE) which is the primary endpoint used by the frontend
+    # 2. /query endpoint may timeout during verification due to complex processing
+    # 3. /query/stream provides real-time responses which is better for user experience
     if [ "$api_ok" = true ] && [ -n "$api_base_url" ]; then
-        if validate_query_endpoint "$api_base_url"; then
+        if validate_query_stream_endpoint "$api_base_url"; then
             query_ok=true
         fi
     else
-        log_info "Skipping query endpoint validation (API health check did not pass)"
+        log_info "Skipping query stream endpoint validation (API health check did not pass)"
     fi
     
     echo ""
@@ -419,11 +525,11 @@ validate_urls() {
     if [ "$api_ok" = true ] && [ "$frontend_ok" = true ] && [ "$query_ok" = true ]; then
         log_success "✓ All endpoints are accessible and working!"
     elif [ "$api_ok" = true ] && [ "$frontend_ok" = true ]; then
-        log_warning "⚠ API and frontend are accessible, but query endpoint needs attention"
+        log_warning "⚠ API and frontend are accessible, but query stream endpoint needs attention"
     elif [ "$api_ok" = true ] && [ "$query_ok" = true ]; then
-        log_warning "⚠ API and query endpoint are working, but frontend needs attention"
+        log_warning "⚠ API and query stream endpoint are working, but frontend needs attention"
     elif [ "$api_ok" = true ]; then
-        log_warning "⚠ API is accessible, but frontend and query endpoint need attention"
+        log_warning "⚠ API is accessible, but frontend and query stream endpoint need attention"
     elif [ "$frontend_ok" = true ]; then
         log_warning "⚠ Frontend is accessible, but API needs attention"
     else

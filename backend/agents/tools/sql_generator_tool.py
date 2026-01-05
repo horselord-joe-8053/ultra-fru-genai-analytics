@@ -1,5 +1,7 @@
 """
 SQL generation tool for agent using LLM.
+
+Applicable environment: [local] [aws {ecs | eks}] [azure {aci | aks}] [gcp {cloud-run | gke}]
 """
 import time
 import logging
@@ -7,7 +9,7 @@ import re
 from typing import Dict, Any, Optional, Tuple
 
 from .base_tool import BaseTool
-from backend.llm.bedrock_client import claude_complete
+from backend.llm.client_factory import claude_complete
 
 logger = logging.getLogger(__name__)
 

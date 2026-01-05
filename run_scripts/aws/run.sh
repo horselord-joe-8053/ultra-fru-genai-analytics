@@ -1,9 +1,9 @@
 #!/bin/bash
 # Main AWS deployment orchestrator
 # Orchestrates end-to-end deployment workflows for ECS, EKS, and Terraform
-# Usage: ./run.sh [ecs-full|eks-full|infrastructure|ecs|eks|terraform] [options...]
+# Usage: ./run.sh [workflow] [environment] [options...]
 #
-# Default: ecs-full (complete ECS deployment)
+# Default: ecs-full dev (complete ECS deployment to dev environment)
 #
 # Workflows:
 #   ecs-full        → Complete ECS deployment (build image → setup infra → deploy app)
@@ -12,6 +12,53 @@
 #   ecs             → ECS-specific steps only (legacy, for quick updates)
 #   eks             → EKS-specific steps only (legacy, for quick updates)
 #   terraform       → Terraform-specific (legacy, for manual control)
+#
+# Environment:
+#   dev             → Development environment (default)
+#   prod            → Production environment
+#   If omitted, defaults to 'dev'
+#
+# Options:
+#   --dry-run                → Preview changes without modifying AWS resources
+#   --setup-data-lake        → Force setup of data-lake (S3 + Delta table) even if analytics disabled
+#   --skip-data-lake         → Skip data-lake setup even if analytics scheduler is enabled
+#
+# Data-Lake Setup Behavior:
+#   - Automatic: Setup if ENABLE_ANALYTICS_SCHEDULER=true in .env file
+#   - Flags override automatic detection (--setup-data-lake or --skip-data-lake)
+#   - When called from run.sh, uses full-workflow mode (comprehensive setup)
+#   - See DATA_LAKE_USAGE_GUIDE.md for detailed scenarios
+#
+# Practical Examples:
+#
+#   # Basic deployment (defaults to dev environment)
+#   ./run.sh ecs-full                                    # Deploy to dev (same as below)
+#   ./run.sh ecs-full dev                                # Deploy to dev environment
+#   ./run.sh ecs-full prod                               # Deploy to prod environment
+#
+#   # With data-lake flags
+#   ./run.sh ecs-full dev --setup-data-lake              # Force data-lake setup (even if analytics disabled)
+#   ./run.sh ecs-full dev --skip-data-lake               # Skip data-lake setup (even if analytics enabled)
+#   ./run.sh ecs-full dev --dry-run --setup-data-lake    # Preview deployment including data-lake
+#
+#   # First-time deployment with analytics enabled
+#   # In .env file: ENABLE_ANALYTICS_SCHEDULER=true
+#   ./run.sh ecs-full dev                                # Data-lake will be set up automatically in Step 3.7
+#
+#   # Deployment without analytics
+#   # In .env file: ENABLE_ANALYTICS_SCHEDULER=false (or unset)
+#   ./run.sh ecs-full dev                                # Data-lake setup will be skipped
+#
+#   # EKS deployment
+#   ./run.sh eks-full dev                                # Complete EKS deployment to dev
+#   ./run.sh eks-full prod --setup-data-lake             # EKS deployment to prod with data-lake
+#
+#   # Infrastructure only
+#   ./run.sh infrastructure dev                          # Deploy infrastructure layer only
+#   ./run.sh infrastructure prod                         # Deploy infrastructure to production
+#
+# See DATA_LAKE_USAGE_GUIDE.md for detailed data-lake scenarios and ENVIRONMENT_PARAMETER_EXPLAINED.md
+# for information about the environment parameter.
 
 set -e
 
@@ -38,13 +85,19 @@ DEFAULT_IMAGE_TAG="latest"
 # ============================================================================
 # Initialize variables
 DRY_RUN=false
+SKIP_DATA_LAKE=false
+SETUP_DATA_LAKE=false
 REMAINING_ARGS=()
 
-# First, extract --dry-run flag if present
+# First, extract flags if present
 ARGS_TO_PARSE=()
 for arg in "$@"; do
     if [ "$arg" = "--dry-run" ]; then
         DRY_RUN=true
+    elif [ "$arg" = "--skip-data-lake" ]; then
+        SKIP_DATA_LAKE=true
+    elif [ "$arg" = "--setup-data-lake" ]; then
+        SETUP_DATA_LAKE=true
     else
         ARGS_TO_PARSE+=("$arg")
     fi
@@ -65,8 +118,8 @@ else
     REMAINING_ARGS=("${ARGS_TO_PARSE[@]:1}")
 fi
 
-# Export DRY_RUN for sub-scripts
-export DRY_RUN
+# Export flags for sub-scripts
+export DRY_RUN SKIP_DATA_LAKE SETUP_DATA_LAKE
 
 # Show usage information
 show_usage() {
@@ -112,7 +165,10 @@ ${BLUE}Environments:${NC}
   dev     Development environment (default: $DEFAULT_ENVIRONMENT)
   prod    Production environment
 
-${BLUE}Options:${NC}
+  ${BLUE}Options:${NC}
+  ${GREEN}--dry-run${NC}          Preview changes without modifying AWS resources
+  ${GREEN}--setup-data-lake${NC}  Force setup of data-lake (S3 + Delta table) even if analytics disabled
+  ${GREEN}--skip-data-lake${NC}   Skip data-lake setup even if analytics scheduler is enabled
   ${GREEN}--dry-run${NC}     Show what would be done without making changes
                               - Terraform: Shows plan only (no apply)
                               - Docker: Shows what would be built/pushed
@@ -120,13 +176,40 @@ ${BLUE}Options:${NC}
                               - Kubernetes: Shows what would be applied
 
 ${BLUE}Examples:${NC}
-  $0                                    # Default: $DEFAULT_DEPLOYMENT_TYPE deployment
+  ${GREEN}Basic Deployments:${NC}
+  $0                                    # Default: $DEFAULT_DEPLOYMENT_TYPE to dev
   $0 ecs-full dev                      # Complete ECS deployment to dev
+  $0 ecs-full                          # Same as above (dev is default)
   $0 eks-full prod                     # Complete EKS deployment to prod
   $0 infrastructure dev                # Infrastructure only to dev
-  $0 ecs --skip-build                  # ECS-specific (skip image build)
+
+  ${GREEN}Data-Lake Scenarios:${NC}
+  # With analytics enabled in .env (ENABLE_ANALYTICS_SCHEDULER=true)
+  $0 ecs-full dev                      # Data-lake set up automatically in Step 3.7
+
+  # With analytics disabled in .env (ENABLE_ANALYTICS_SCHEDULER=false)
+  $0 ecs-full dev                      # Data-lake setup skipped
+  $0 ecs-full dev --setup-data-lake    # Force data-lake setup anyway
+  $0 ecs-full dev --skip-data-lake     # Force skip (even if analytics enabled)
+
+  ${GREEN}Other Options:${NC}
+  $0 ecs-full dev --dry-run            # Preview changes without deploying
+  $0 ecs-full dev --dry-run --setup-data-lake  # Preview including data-lake
   $0 terraform dev all                 # Terraform manual control
-  $0 ecs-full dev --dry-run            # Dry-run: show what would be deployed
+
+${BLUE}Data-Lake Setup:${NC}
+  The data-lake (S3 + Delta table) is automatically set up when:
+  - ENABLE_ANALYTICS_SCHEDULER=true in .env file (default behavior)
+  - Or --setup-data-lake flag is used (forces setup)
+  
+  It is skipped when:
+  - ENABLE_ANALYTICS_SCHEDULER=false or unset (default behavior)
+  - Or --skip-data-lake flag is used (forces skip)
+  
+  When run from this script, data-lake setup uses full-workflow mode:
+  - Comprehensive verification and setup
+  - Ensures everything is properly configured
+  - See DATA_LAKE_USAGE_GUIDE.md for detailed scenarios
 
 ${BLUE}Note:${NC}
   - All workflows are idempotent (safe to run multiple times)
@@ -134,6 +217,33 @@ ${BLUE}Note:${NC}
   - Infrastructure is shared between ECS and EKS deployments
   - Use --dry-run to preview changes without modifying AWS resources
 EOF
+}
+
+# Determine if data-lake setup is needed (consistent with local)
+# Priority order:
+#   1. Explicit flags (--skip-data-lake or --setup-data-lake) - highest priority
+#   2. Environment variable (ENABLE_ANALYTICS_SCHEDULER) - auto-detection
+#   3. Default: Skip (analytics scheduler disabled)
+should_setup_data_lake() {
+    # If explicitly skipped, don't setup
+    if [ "$SKIP_DATA_LAKE" = "true" ]; then
+        return 1
+    fi
+    
+    # If explicitly requested, do it
+    if [ "$SETUP_DATA_LAKE" = "true" ]; then
+        return 0
+    fi
+    
+    # Auto-detect: Check if analytics scheduler is enabled
+    load_env_file || true
+    
+    if [ "${ENABLE_ANALYTICS_SCHEDULER:-false}" = "true" ]; then
+        return 0  # Analytics scheduler enabled, need Delta Lake
+    fi
+    
+    # Default: Don't setup (analytics scheduler disabled)
+    return 1
 }
 
 # Check if container image exists in ECR (idempotent check)
@@ -195,6 +305,117 @@ deploy_ecs_full() {
     
 
     # Step 1: Check/build container image (idempotent)
+    log_step "Step 1/7: Checking container image availability"
+    if ! check_or_build_image; then
+        log_error "Step 1/7 FAILED: Container image check/build failed"
+        log_info "Reason: Unable to check ECR for existing image or build/push new image"
+        log_info "Check AWS credentials, ECR permissions, and Docker availability"
+        exit 1
+    fi
+    log_success "Step 1/7 PASSED: Container image ready"
+    
+    # Step 2: Setup Terraform state bucket
+    log_step "Step 2/7: Setting up Terraform state bucket"
+    if ! "$SCRIPT_DIR/terraform/setup-s3-bucket.sh"; then
+        log_error "Step 2/7 FAILED: Terraform state bucket setup failed"
+        log_info "Reason: Unable to create or configure S3 bucket for Terraform state"
+        log_info "Check AWS credentials, S3 permissions, and TF_STATE_BUCKET in .env"
+        exit 1
+    fi
+    log_success "Step 2/7 PASSED: Terraform state bucket ready"
+    
+    # Step 3: Deploy infrastructure
+    log_step "Step 3/7: Deploying infrastructure layer"
+    if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" infrastructure; then
+        log_error "Step 3/7 FAILED: Infrastructure deployment failed"
+        log_info "Reason: Terraform plan or apply failed for infrastructure layer"
+        log_info "Check Terraform configuration, AWS permissions, and plan output above"
+        exit 1
+    fi
+    log_success "Step 3/7 PASSED: Infrastructure layer deployed"
+
+    # Step 3.5: Setup database (pgvector, schema, data)
+    if [ "$DRY_RUN" != "true" ]; then
+        log_step "Step 3.5/7: Setting up database (pgvector, schema, data)"
+        "$SCRIPT_DIR/database/setup-database.sh" "$ENVIRONMENT" || {
+            log_warning "Database setup had issues (may already be set up)"
+        }
+    else
+        log_info "[DRY-RUN] Skipping database setup"
+    fi
+    
+    # Step 3.6: Validate infrastructure outputs before deploying application
+    log_step "Step 3.6/7: Validating infrastructure outputs"
+    if ! "$SCRIPT_DIR/database/validate-infra-outputs.sh" "$ENVIRONMENT"; then
+        log_error "Step 3.6/7 FAILED: Infrastructure outputs validation failed"
+        log_info "Reason: Required infrastructure outputs are missing"
+        log_info "Fix infrastructure deployment issues before deploying application layer"
+        exit 1
+    fi
+    
+    # Step 3.7: Setup data-lake (optional, only if analytics scheduler enabled)
+    # This step is conditionally executed based on:
+    #   - ENABLE_ANALYTICS_SCHEDULER=true in .env → Setup automatically
+    #   - --setup-data-lake flag → Force setup
+    #   - --skip-data-lake flag → Force skip
+    # When called from this workflow, uses full-workflow mode for comprehensive setup
+    if should_setup_data_lake; then
+        log_step "Step 3.7/7: Setting up data-lake (S3 + Delta table)"
+        if [ "$DRY_RUN" = "true" ]; then
+            log_info "[DRY-RUN] Would run: $SCRIPT_DIR/data-lake/setup-and-verify.sh"
+        else
+            export ENVIRONMENT="$ENVIRONMENT"
+            export DRY_RUN="$DRY_RUN"
+            export DATA_LAKE_SETUP_MODE="full-workflow"  # Set mode for full workflow
+            if ! "$SCRIPT_DIR/data-lake/setup-and-verify.sh"; then
+                log_warning "Data-lake setup had issues (application may still work without Delta tables)"
+                log_info "You can run data-lake setup separately: $SCRIPT_DIR/data-lake/setup-and-verify.sh"
+            fi
+        fi
+        log_success "Step 3.7/7 PASSED: Data-lake ready"
+    else
+        log_info "Skipping data-lake setup (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"
+    fi
+    
+    # Step 4: Deploy application (CONTAINER_IMAGE is already exported from check_or_build_image)
+    log_step "Step 4/7: Deploying application layer (ECS, ALB, CloudFront)"
+    log_info "Using container image: $CONTAINER_IMAGE"
+    if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" application; then
+        log_error "Step 4/7 FAILED: Application deployment failed"
+        log_info "Reason: Terraform plan or apply failed for application layer"
+        log_info "Check Terraform configuration, AWS permissions, CONTAINER_IMAGE, and plan output above"
+        exit 1
+    fi
+    log_success "Step 4/7 PASSED: Application layer deployed"
+    
+    # Step 5: Deploy frontend to S3 (for CloudFront to serve)
+    log_step "Step 5/7: Deploying frontend to S3"
+    export ENVIRONMENT="$ENVIRONMENT"
+    if ! "$SCRIPT_DIR/shared/deploy-frontend.sh"; then
+        log_error "Step 5/7 FAILED: Frontend deployment failed"
+        log_info "Reason: Failed to build frontend or sync to S3"
+        log_info "Check frontend build, AWS credentials, S3 permissions, and Terraform outputs"
+        exit 1
+    fi
+    log_success "Step 5/7 PASSED: Frontend deployed to S3"
+    
+    # Step 6: Post-deployment verification and manual test hints
+    log_step "Step 6/7: Verifying deployment and generating test instructions"
+    "$SCRIPT_DIR/verification/auto_verify_and_manual_hint.sh" "ecs-full" "$ENVIRONMENT" || {
+        log_warning "Post-deployment verification had issues (deployment may still be successful)"
+        log_info "Check the verification output above for details"
+    }
+    
+    log_success "Complete ECS deployment finished successfully!"
+    log_info "Your application should now be running on AWS ECS"
+}
+
+# Complete EKS deployment workflow
+deploy_eks_full() {
+    log_step "Starting complete EKS deployment workflow"
+    log_info "Environment: $ENVIRONMENT"
+    
+    # Step 1: Check/build container image (idempotent)
     log_step "Step 1/6: Checking container image availability"
     if ! check_or_build_image; then
         log_error "Step 1/6 FAILED: Container image check/build failed"
@@ -223,106 +444,38 @@ deploy_ecs_full() {
         exit 1
     fi
     log_success "Step 3/6 PASSED: Infrastructure layer deployed"
-
-    # Step 3.5: Setup database (pgvector, schema, data)
-    if [ "$DRY_RUN" != "true" ]; then
-        log_step "Step 3.5/6: Setting up database (pgvector, schema, data)"
-        "$SCRIPT_DIR/database/setup-database.sh" "$ENVIRONMENT" || {
-            log_warning "Database setup had issues (may already be set up)"
-        }
+    
+    # Step 3.7: Setup data-lake (optional, only if analytics scheduler enabled)
+    if should_setup_data_lake; then
+        log_step "Step 3.7/6: Setting up data-lake (S3 + Delta table)"
+        if [ "$DRY_RUN" = "true" ]; then
+            log_info "[DRY-RUN] Would run: $SCRIPT_DIR/data-lake/setup-and-verify.sh"
+        else
+            export ENVIRONMENT="$ENVIRONMENT"
+            export DRY_RUN="$DRY_RUN"
+            export DATA_LAKE_SETUP_MODE="full-workflow"  # Set mode for full workflow
+            if ! "$SCRIPT_DIR/data-lake/setup-and-verify.sh"; then
+                log_warning "Data-lake setup had issues (application may still work without Delta tables)"
+                log_info "You can run data-lake setup separately: $SCRIPT_DIR/data-lake/setup-and-verify.sh"
+            fi
+        fi
+        log_success "Step 3.7/6 PASSED: Data-lake ready"
     else
-        log_info "[DRY-RUN] Skipping database setup"
+        log_info "Skipping data-lake setup (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"
     fi
-    
-    # Step 3.6: Validate infrastructure outputs before deploying application
-    log_step "Step 3.6/6: Validating infrastructure outputs"
-    if ! "$SCRIPT_DIR/database/validate-infra-outputs.sh" "$ENVIRONMENT"; then
-        log_error "Step 3.6/6 FAILED: Infrastructure outputs validation failed"
-        log_info "Reason: Required infrastructure outputs are missing"
-        log_info "Fix infrastructure deployment issues before deploying application layer"
-        exit 1
-    fi
-    
-    # Step 4: Deploy application (CONTAINER_IMAGE is already exported from check_or_build_image)
-    log_step "Step 4/6: Deploying application layer (ECS, ALB, CloudFront)"
-    log_info "Using container image: $CONTAINER_IMAGE"
-    if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" application; then
-        log_error "Step 4/6 FAILED: Application deployment failed"
-        log_info "Reason: Terraform plan or apply failed for application layer"
-        log_info "Check Terraform configuration, AWS permissions, CONTAINER_IMAGE, and plan output above"
-        exit 1
-    fi
-    log_success "Step 4/6 PASSED: Application layer deployed"
-    
-    # Step 5: Deploy frontend to S3 (for CloudFront to serve)
-    log_step "Step 5/6: Deploying frontend to S3"
-    export ENVIRONMENT="$ENVIRONMENT"
-    if ! "$SCRIPT_DIR/shared/deploy-frontend.sh"; then
-        log_error "Step 5/6 FAILED: Frontend deployment failed"
-        log_info "Reason: Failed to build frontend or sync to S3"
-        log_info "Check frontend build, AWS credentials, S3 permissions, and Terraform outputs"
-        exit 1
-    fi
-    log_success "Step 5/6 PASSED: Frontend deployed to S3"
-    
-    # Step 6: Post-deployment verification and manual test hints
-    log_step "Step 6/6: Verifying deployment and generating test instructions"
-    "$SCRIPT_DIR/verification/auto_verify_and_manual_hint.sh" "ecs-full" "$ENVIRONMENT" || {
-        log_warning "Post-deployment verification had issues (deployment may still be successful)"
-        log_info "Check the verification output above for details"
-    }
-    
-    log_success "Complete ECS deployment finished successfully!"
-    log_info "Your application should now be running on AWS ECS"
-}
-
-# Complete EKS deployment workflow
-deploy_eks_full() {
-    log_step "Starting complete EKS deployment workflow"
-    log_info "Environment: $ENVIRONMENT"
-    
-    # Step 1: Check/build container image (idempotent)
-    log_step "Step 1/5: Checking container image availability"
-    if ! check_or_build_image; then
-        log_error "Step 1/5 FAILED: Container image check/build failed"
-        log_info "Reason: Unable to check ECR for existing image or build/push new image"
-        log_info "Check AWS credentials, ECR permissions, and Docker availability"
-        exit 1
-    fi
-    log_success "Step 1/5 PASSED: Container image ready"
-    
-    # Step 2: Setup Terraform state bucket
-    log_step "Step 2/5: Setting up Terraform state bucket"
-    if ! "$SCRIPT_DIR/terraform/setup-s3-bucket.sh"; then
-        log_error "Step 2/5 FAILED: Terraform state bucket setup failed"
-        log_info "Reason: Unable to create or configure S3 bucket for Terraform state"
-        log_info "Check AWS credentials, S3 permissions, and TF_STATE_BUCKET in .env"
-        exit 1
-    fi
-    log_success "Step 2/5 PASSED: Terraform state bucket ready"
-    
-    # Step 3: Deploy infrastructure
-    log_step "Step 3/5: Deploying infrastructure layer"
-    if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" infrastructure; then
-        log_error "Step 3/5 FAILED: Infrastructure deployment failed"
-        log_info "Reason: Terraform plan or apply failed for infrastructure layer"
-        log_info "Check Terraform configuration, AWS permissions, and plan output above"
-        exit 1
-    fi
-    log_success "Step 3/5 PASSED: Infrastructure layer deployed"
     
     # Step 4: Deploy EKS layer (EKS cluster, node groups, OIDC provider)
-    log_step "Step 4/5: Deploying EKS layer (EKS cluster, node groups, OIDC provider)"
+    log_step "Step 4/6: Deploying EKS layer (EKS cluster, node groups, OIDC provider)"
     if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" eks; then
-        log_error "Step 4/5 FAILED: EKS layer deployment failed"
+        log_error "Step 4/6 FAILED: EKS layer deployment failed"
         log_info "Reason: Terraform plan or apply failed for EKS layer"
         log_info "Check Terraform configuration, AWS permissions, EKS quotas, and plan output above"
         exit 1
     fi
-    log_success "Step 4/5 PASSED: EKS layer deployed"
+    log_success "Step 4/6 PASSED: EKS layer deployed"
     
     # Step 5: Configure kubectl and deploy Kubernetes manifests
-    log_step "Step 5/5: Configuring kubectl and deploying Kubernetes manifests"
+    log_step "Step 5/6: Configuring kubectl and deploying Kubernetes manifests"
     log_info "Using container image: $CONTAINER_IMAGE"
     
     # Get cluster name from Terraform output
@@ -369,7 +522,14 @@ deploy_eks_full() {
             exit 1
         fi
     fi
-    log_success "Step 5/5 PASSED: Kubernetes manifests deployed"
+    log_success "Step 5/6 PASSED: Kubernetes manifests deployed"
+    
+    # Step 6: Post-deployment verification and manual test hints
+    log_step "Step 6/6: Verifying deployment and generating test instructions"
+    "$SCRIPT_DIR/verification/auto_verify_and_manual_hint.sh" "eks-full" "$ENVIRONMENT" || {
+        log_warning "Post-deployment verification had issues (deployment may still be successful)"
+        log_info "Check the verification output above for details"
+    }
     
     log_success "Complete EKS deployment finished successfully!"
     log_info "Your application should now be running on AWS EKS"

@@ -1,5 +1,7 @@
 """
 Structured logging for agent execution.
+
+Applicable environment: [local] [aws {ecs | eks}] [azure {aci | aks}] [gcp {cloud-run | gke}]
 """
 import json
 import logging

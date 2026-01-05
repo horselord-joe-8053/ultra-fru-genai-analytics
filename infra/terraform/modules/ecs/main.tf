@@ -139,7 +139,17 @@ resource "aws_ecs_task_definition" "fru_api" {
         },
         {
           name  = "DELTA_TABLE_PATH"
+          # For AWS: use S3 path (s3://bucket/delta/fru_sales)
+          # For local: use local path (data/delta/fru_sales)
+          # The scheduler will detect S3 vs local based on path prefix
           value = var.delta_table_path
+        },
+        {
+          name  = "DELTA_LAKE_PACKAGE"
+          # Delta Lake package (Maven coordinates) - required for Spark jobs
+          # Format: io.delta:delta-spark_{SCALA_VERSION}:{DELTA_VERSION}
+          # Standard: io.delta:delta-spark_2.13:4.0.0 (compatible with Spark 4.0.1)
+          value = var.delta_lake_package
         }
       ]
 

@@ -50,6 +50,9 @@ module "iam" {
     "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/${var.bedrock_inference_profile_id}"
   ] : null
 
+  # S3 permissions: allow access to analytics data bucket
+  s3_data_bucket_arn = module.s3_data.bucket_arn
+
   tags = var.tags
 }
 
@@ -102,6 +105,16 @@ module "aurora" {
   preferred_backup_window  = var.aurora_preferred_backup_window
   kms_key_id              = var.aurora_kms_key_id
   deletion_protection     = var.deletion_protection
+
+  tags = var.tags
+}
+
+# S3 Data Bucket Module (for Delta tables and raw data)
+module "s3_data" {
+  source = "../s3-data"
+
+  project_name = var.project_name
+  environment  = var.environment
 
   tags = var.tags
 }

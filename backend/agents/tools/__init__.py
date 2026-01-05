@@ -1,5 +1,7 @@
 """
 Agent tools for query processing.
+
+Applicable environment: [local] [aws {ecs | eks}] [azure {aci | aks}] [gcp {cloud-run | gke}]
 """
 from .base_tool import BaseTool
 from .sql_tool import SQLTool

@@ -82,9 +82,44 @@ load_env_file() {
     # Local development configuration
     export LOCAL_SERVER_PORT="${LOCAL_SERVER_PORT:-5000}"  # Local API server port (default: 5000)
     
+    # Spark + Delta Lake configuration (.env is single source of truth, no defaults)
+    export DELTA_LAKE_PACKAGE="${DELTA_LAKE_PACKAGE:-}"  # No default - must be set in .env
+    
     log_success "Loaded environment variables from $env_path"
     log_info "Note: AWS credential variables (AWS_ADMIN_*, AWS_BEDROCK_*) are loaded but not exported"
     log_info "      Use AWS profiles (admin/bedrock) instead via --profile flag or AWS_PROFILE env var"
+    return 0
+}
+
+# Require Delta Lake package from environment (.env is single source of truth)
+# This function validates that DELTA_LAKE_PACKAGE is set and provides helpful error message if not
+# Usage: require_delta_lake_package
+# Returns: 0 if set, 1 if not set (caller should exit on error)
+require_delta_lake_package() {
+    # Ensure .env file is loaded
+    load_env_file || true
+    
+    # Check if DELTA_LAKE_PACKAGE is set (no defaults, .env is source of truth)
+    if [ -z "${DELTA_LAKE_PACKAGE:-}" ]; then
+        log_error "DELTA_LAKE_PACKAGE is not set in .env file"
+        log_error ""
+        log_error ".env file is the single source of truth for version configuration."
+        log_error "Please add DELTA_LAKE_PACKAGE to your .env file."
+        log_error ""
+        log_info "Standard combination: io.delta:delta-spark_2.13:4.0.0"
+        log_info "  - Spark: 4.0.1"
+        log_info "  - Delta Lake: 4.0.0"
+        log_info "  - Scala: 2.13.x"
+        log_info ""
+        log_info "Example .env entry:"
+        log_info "  DELTA_LAKE_PACKAGE=io.delta:delta-spark_2.13:4.0.0"
+        log_info ""
+        log_info "You can run: ./run_scripts/local/setup-env.sh to create/update .env file"
+        return 1
+    fi
+    
+    log_info "Using Delta Lake package: $DELTA_LAKE_PACKAGE"
+    log_info "Standard combination: Spark 4.0.1 + Delta Lake 4.0.0 + Scala 2.13"
     return 0
 }
 

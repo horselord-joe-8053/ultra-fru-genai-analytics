@@ -60,6 +60,12 @@ variable "rds_db_resource_arn" {
   default     = ""
 }
 
+variable "s3_data_bucket_arn" {
+  type        = string
+  description = "S3 bucket ARN for analytics data (for Delta tables). Set by infrastructure layer when S3 bucket is created."
+  default     = ""
+}
+
 variable "tags" {
   type        = map(string)
   description = "Common tags for all resources"

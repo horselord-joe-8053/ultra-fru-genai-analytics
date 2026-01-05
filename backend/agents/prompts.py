@@ -1,5 +1,7 @@
 """
 Prompts for the agent-based query system.
+
+Applicable environment: [local] [aws {ecs | eks}] [azure {aci | aks}] [gcp {cloud-run | gke}]
 """
 from typing import Dict, Any, Optional, List
 

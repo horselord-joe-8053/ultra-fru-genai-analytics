@@ -6,14 +6,28 @@ import os
 from datetime import datetime
 
 # Add project root to path for importing save_analytics_to_db
+# __file__ is at /app/spark_jobs/run_analytics.py, so project_root should be /app
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
+# Also add /app explicitly (in case __file__ path resolution differs in Spark context)
+if "/app" not in sys.path:
+    sys.path.insert(0, "/app")
+
 try:
-    from backend.services.save_analytics_to_db import save_analytics_to_db
+    from backend.services.analytics.save_to_db import save_analytics_to_db
+    print(f"✓ Successfully imported save_analytics_to_db from {project_root}/backend/services/analytics/save_to_db.py")
 except ImportError as e:
-    print(f"Warning: Could not import save_analytics_to_db: {e}")
-    print("Analytics will not be saved to database. Make sure backend/services/ is in Python path.")
+    print(f"✗ Warning: Could not import save_analytics_to_db: {e}")
+    print(f"  Project root detected: {project_root}")
+    print(f"  Python path (first 3 entries): {sys.path[:3]}")
+    backend_path = os.path.join(project_root, "backend")
+    print(f"  Backend directory exists: {os.path.exists(backend_path)}")
+    analytics_path = os.path.join(project_root, "backend", "services", "analytics")
+    print(f"  Analytics directory exists: {os.path.exists(analytics_path)}")
+    save_to_db_path = os.path.join(project_root, "backend", "services", "analytics", "save_to_db.py")
+    print(f"  save_to_db.py exists: {os.path.exists(save_to_db_path)}")
+    print("Analytics will be computed but not saved to database.")
     save_analytics_to_db = None
 
 def main(delta_path: str, output_dir: str):

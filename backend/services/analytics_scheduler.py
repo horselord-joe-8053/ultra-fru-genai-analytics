@@ -1,5 +1,7 @@
 """
 Scheduler service to run Spark batch analytics periodically.
+
+Applicable environment: [local] [aws {ecs | eks}] [azure {aci | aks}] [gcp {cloud-run | gke}]
 """
 import os
 import subprocess
@@ -7,6 +9,7 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from backend.utils.env_helpers import get_optional_env
+from backend.utils.filesystem import exists
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +28,15 @@ def run_spark_analytics():
         script_path = os.path.join(repo_root, "spark_jobs", "run_analytics.py")
         output_dir = os.path.join(repo_root, "data", "analytics")
         
-        # Check if Delta table exists
-        delta_full_path = os.path.join(repo_root, delta_path)
-        if not os.path.exists(delta_full_path):
+        # Check if Delta table exists (works for S3, local, EFS)
+        # If delta_path is absolute (starts with s3:// or /), use as-is
+        # Otherwise, join with repo_root
+        if delta_path.startswith('s3://') or delta_path.startswith('/'):
+            delta_full_path = delta_path
+        else:
+            delta_full_path = os.path.join(repo_root, delta_path)
+        
+        if not exists(delta_full_path):
             logger.warning(f"Delta table not found at {delta_full_path}, skipping analytics run")
             return
         
@@ -56,9 +65,20 @@ def run_spark_analytics():
         
         logger.info(f"Using Python: {api_python} (for psycopg2 support)")
         
+        # Require Delta Lake package from environment (.env is source of truth, no defaults)
+        delta_lake_package = os.environ.get("DELTA_LAKE_PACKAGE")
+        if not delta_lake_package:
+            logger.error("DELTA_LAKE_PACKAGE is not set in environment")
+            logger.error("Please add DELTA_LAKE_PACKAGE to your .env file")
+            logger.info("Standard combination: io.delta:delta-spark_2.13:4.0.0 (Spark 4.0.1 + Delta Lake 4.0.0 + Scala 2.13)")
+            logger.info("Example .env entry: DELTA_LAKE_PACKAGE=io.delta:delta-spark_2.13:4.0.0")
+            raise ValueError("DELTA_LAKE_PACKAGE must be set in .env file")
+        
+        logger.info(f"Using Delta Lake package: {delta_lake_package}")
+        
         cmd = [
             spark_submit,
-            "--packages", "io.delta:delta-spark_2.13:4.0.0",
+            "--packages", delta_lake_package,
             script_path,
             delta_path,
             output_dir

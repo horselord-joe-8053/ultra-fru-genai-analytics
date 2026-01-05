@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-source "$SCRIPT_DIR/../../logger.sh"
+source "$SCRIPT_DIR/../logger.sh"
 
 ENVIRONMENT="${1:-dev}"
 AWS_PROFILE="${AWS_PROFILE:-admin}"

@@ -22,6 +22,11 @@ services:
     build:
       context: ../../
       dockerfile: ./infra/docker/Dockerfile.api
+      args:
+        # Pass Spark and Hadoop versions from .env (source of truth)
+        # Defaults ensure builds work even if .env variables are missing
+        SPARK_VERSION: ${SPARK_VERSION:-4.0.1}
+        HADOOP_VERSION: ${HADOOP_VERSION:-3}
     container_name: fru_api
     restart: unless-stopped
     environment:
@@ -59,6 +64,8 @@ services:
       ENABLE_ANALYTICS_SCHEDULER: ${ENABLE_ANALYTICS_SCHEDULER:-false}
       ANALYTICS_SCHEDULER_INTERVAL_SECONDS: ${ANALYTICS_SCHEDULER_INTERVAL_SECONDS:-}
       SPARK_HOME: ${SPARK_HOME:-/opt/spark}
+      DELTA_TABLE_PATH: ${DELTA_TABLE_PATH:-data/delta/fru_sales}
+      DELTA_LAKE_PACKAGE: ${DELTA_LAKE_PACKAGE}
       
       # Batch analytics limits
       NUM_FOR_BATCH_ANALYTICS_TOP_SPARK_COMPUTE: ${NUM_FOR_BATCH_ANALYTICS_TOP_SPARK_COMPUTE:-20}
@@ -76,5 +83,7 @@ services:
       - ~/.aws:/root/.aws:ro
       # Mount backend code for development (changes picked up on restart)
       - ../../backend:/app/backend:ro
+      # Mount spark_jobs for development (changes picked up on restart)
+      - ../../spark_jobs:/app/spark_jobs:ro
       # Mount data directory for Spark jobs (Delta tables)
       - ../../data:/app/data:rw

@@ -1,5 +1,7 @@
 """
 SQL execution tool for agent.
+
+Applicable environment: [local] [aws {ecs | eks}] [azure {aci | aks}] [gcp {cloud-run | gke}]
 """
 import time
 import logging

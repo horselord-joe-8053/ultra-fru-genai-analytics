@@ -1,7 +1,44 @@
 #!/bin/bash
 # Main orchestrator script for local development setup
 # This script sets up and starts the entire local development environment
-# Usage: ./run.sh [--skip-frontend] [--skip-data-load] [--setup-spark] [--skip-spark]
+# Usage: ./run.sh [options...]
+#
+# Options:
+#   --skip-frontend         → Skip frontend development server startup
+#   --skip-data-load        → Skip loading data into database
+#   --setup-spark           → Force setup of Spark locally (even if not needed)
+#   --skip-spark            → Skip Spark setup (Spark runs in Docker anyway)
+#   --setup-data-lake       → Force setup of data-lake (Delta table) even if analytics disabled
+#   --skip-data-lake        → Skip data-lake setup even if analytics scheduler is enabled
+#
+# Data-Lake Setup Behavior:
+#   - Automatic: Setup if ENABLE_ANALYTICS_SCHEDULER=true in .env file
+#   - Flags override automatic detection (--setup-data-lake or --skip-data-lake)
+#   - When called from this script, uses full-workflow mode (comprehensive setup)
+#   - Runs in Step 7.5/9 if enabled
+#
+# Practical Examples:
+#
+#   # Basic setup (all defaults)
+#   ./run.sh                               # Full setup including data-lake if analytics enabled
+#
+#   # With analytics enabled (in .env: ENABLE_ANALYTICS_SCHEDULER=true)
+#   ./run.sh                               # Data-lake will be set up automatically in Step 7.5
+#
+#   # Without analytics (in .env: ENABLE_ANALYTICS_SCHEDULER=false or unset)
+#   ./run.sh                               # Data-lake setup will be skipped
+#
+#   # Force data-lake setup (even if analytics disabled)
+#   ./run.sh --setup-data-lake             # Force setup of data-lake
+#
+#   # Skip data-lake setup (even if analytics enabled)
+#   ./run.sh --skip-data-lake              # Skip data-lake setup
+#
+#   # Combine flags
+#   ./run.sh --skip-frontend --setup-data-lake    # Skip frontend, but include data-lake
+#   ./run.sh --skip-data-load --skip-data-lake    # Skip data load and data-lake
+#
+# See DATA_LAKE_USAGE_GUIDE.md for detailed data-lake scenarios.
 
 set -e
 
@@ -14,6 +51,8 @@ SKIP_FRONTEND=false
 SKIP_DATA_LOAD=false
 SETUP_SPARK=false
 SKIP_SPARK=false
+SKIP_DATA_LAKE=false
+SETUP_DATA_LAKE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -33,13 +72,49 @@ while [[ $# -gt 0 ]]; do
             SKIP_SPARK=true
             shift
             ;;
+        --setup-data-lake)
+            SETUP_DATA_LAKE=true
+            shift
+            ;;
+        --skip-data-lake)
+            SKIP_DATA_LAKE=true
+            shift
+            ;;
         *)
             log_error "Unknown option: $1"
-            log_info "Usage: $0 [--skip-frontend] [--skip-data-load] [--setup-spark] [--skip-spark]"
+            log_info "Usage: $0 [--skip-frontend] [--skip-data-load] [--setup-spark] [--skip-spark] [--setup-data-lake] [--skip-data-lake]"
             exit 1
             ;;
     esac
 done
+
+# Determine if data-lake setup is needed (consistent with AWS)
+# Priority order:
+#   1. Explicit flags (--skip-data-lake or --setup-data-lake) - highest priority
+#   2. Environment variable (ENABLE_ANALYTICS_SCHEDULER) - auto-detection
+#   3. Default: Skip (analytics scheduler disabled)
+should_setup_data_lake() {
+    # If explicitly skipped, don't setup
+    if [ "$SKIP_DATA_LAKE" = "true" ]; then
+        return 1
+    fi
+    
+    # If explicitly requested, do it
+    if [ "$SETUP_DATA_LAKE" = "true" ]; then
+        return 0
+    fi
+    
+    # Auto-detect: Check if analytics scheduler is enabled
+    source "$SCRIPT_DIR/../common/load-env.sh"
+    load_env_file || true
+    
+    if [ "${ENABLE_ANALYTICS_SCHEDULER:-false}" = "true" ]; then
+        return 0  # Analytics scheduler enabled, need Delta Lake
+    fi
+    
+    # Default: Don't setup (analytics scheduler disabled)
+    return 1
+}
 
 # Auto-detect if Spark setup is needed
 should_setup_spark() {
@@ -74,20 +149,20 @@ main() {
     log_step "Starting local development environment setup"
     
     # Step 1: Check prerequisites
-    log_step "Step 1/8: Checking prerequisites"
+    log_step "Step 1/9: Checking prerequisites"
     "$SCRIPT_DIR/../common/check-dependencies.sh" || exit 1
     
     # Step 2: Setup .env file
-    log_step "Step 2/8: Setting up environment file"
+    log_step "Step 2/9: Setting up environment file"
     "$SCRIPT_DIR/setup-env.sh" || exit 1
     
     # Step 3: Setup Python environment
-    log_step "Step 3/8: Setting up Python environment"
+    log_step "Step 3/9: Setting up Python environment"
     "$SCRIPT_DIR/setup-python.sh" || exit 1
     
     # Step 3.5: Setup Spark environment (optional)
     if should_setup_spark; then
-        log_step "Step 3.5/8: Setting up Spark environment (optional)"
+        log_step "Step 3.5/9: Setting up Spark environment (optional)"
         if "$SCRIPT_DIR/../common/spark/setup-spark.sh" "local"; then
             # Validate Spark setup
             if command -v spark-submit >/dev/null 2>&1; then
@@ -109,24 +184,41 @@ main() {
     fi
     
     # Step 4: Setup frontend dependencies
-    log_step "Step 4/8: Setting up frontend dependencies"
+    log_step "Step 4/9: Setting up frontend dependencies"
     "$SCRIPT_DIR/setup-frontend.sh" || exit 1
     
     # Step 5: Start Docker services
     # Use --force to ensure containers are recreated with latest .env variables
-    log_step "Step 5/8: Starting Docker services"
+    log_step "Step 5/9: Starting Docker services"
     "$SCRIPT_DIR/start-services.sh" --force || exit 1
     
     # Step 6: Initialize database
-    log_step "Step 6/8: Initializing database schema"
+    log_step "Step 6/9: Initializing database schema"
     "$SCRIPT_DIR/../common/database/init_schema.sh" "local" || exit 1
     
     # Step 7: Load data (optional)
     if [ "$SKIP_DATA_LOAD" = false ]; then
-        log_step "Step 7/8: Loading data into database"
+        log_step "Step 7/9: Loading data into database"
         "$SCRIPT_DIR/../common/database/load_data.sh" "local" || exit 1
     else
         log_info "Skipping data load (--skip-data-load flag set)"
+    fi
+    
+    # Step 7.5: Setup data-lake (optional, only if analytics scheduler enabled)
+    # This step is conditionally executed based on:
+    #   - ENABLE_ANALYTICS_SCHEDULER=true in .env → Setup automatically
+    #   - --setup-data-lake flag → Force setup
+    #   - --skip-data-lake flag → Force skip
+    # When called from this workflow, uses full-workflow mode for comprehensive setup
+    if should_setup_data_lake; then
+        log_step "Step 7.5/9: Setting up data-lake (Delta table)"
+        export DATA_LAKE_SETUP_MODE="full-workflow"  # Set mode for full workflow
+        if ! "$SCRIPT_DIR/data-lake/setup-and-verify.sh"; then
+            log_warning "Data-lake setup had issues (application may still work without Delta tables)"
+            log_info "You can run data-lake setup separately: $SCRIPT_DIR/data-lake/setup-and-verify.sh"
+        fi
+    else
+        log_info "Skipping data-lake setup (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"
     fi
     
     # Load .env to get LOCAL_SERVER_PORT
@@ -142,8 +234,9 @@ main() {
     log_info "  - API: http://localhost:${server_port}"
     echo ""
     
-    # Start frontend in background (optional)
+    # Step 8: Start frontend in background (optional)
     if [ "$SKIP_FRONTEND" = false ]; then
+        log_step "Step 8/9: Starting frontend development server"
         log_info "Starting frontend development server in background..."
         
         # Check if frontend is already running and kill it

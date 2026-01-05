@@ -1,6 +1,8 @@
 """
 Service to save Spark analytics results to PostgreSQL.
 Can be called from Spark job or Python script.
+
+Applicable environment: [local] [aws {ecs | eks}] [azure {aci | aks}] [gcp {cloud-run | gke}]
 """
 import os
 import json

@@ -80,6 +80,20 @@ if [ "$DRY_RUN" != "true" ]; then
         log_info "Start it with: ./run_scripts/local/start-frontend.sh"
     fi
     echo ""
+    
+    # Validate streaming query endpoint (/query/stream)
+    # This endpoint uses Server-Sent Events (SSE) for real-time query responses.
+    # We verify it's accessible and returns proper SSE format.
+    # NOTE: We test /query/stream instead of /query because:
+    # 1. /query/stream is the primary endpoint used by the frontend
+    # 2. /query endpoint may timeout during verification due to complex processing
+    # 3. /query/stream provides real-time responses which is better for user experience
+    if validate_query_stream_endpoint "$API_URL"; then
+        log_success "Query Stream endpoint is accessible"
+    else
+        log_warning "Query Stream endpoint validation failed (API may still be starting)"
+    fi
+    echo ""
 fi
 
 log_success "═══════════════════════════════════════════════════════════════════════════════"

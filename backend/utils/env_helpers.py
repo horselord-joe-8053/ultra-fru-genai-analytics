@@ -1,6 +1,8 @@
 """
 Environment variable helpers with fail-fast validation.
 Ensures .env is the single source of truth for configuration.
+
+Applicable environment: [local] [aws {ecs | eks}] [azure {aci | aks}] [gcp {cloud-run | gke}]
 """
 import os
 from typing import Optional

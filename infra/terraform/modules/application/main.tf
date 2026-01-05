@@ -64,7 +64,12 @@ module "ecs" {
   enable_analytics_scheduler            = var.enable_analytics_scheduler
   analytics_scheduler_interval_seconds  = var.analytics_scheduler_interval_seconds
   spark_home                            = var.spark_home
+  # Delta table path: For AWS, use S3 path from infrastructure layer (s3://bucket/delta/fru_sales)
+  # For local, use local path (data/delta/fru_sales)
+  # If explicitly set in .env via DELTA_TABLE_PATH, that takes precedence
   delta_table_path                      = var.delta_table_path
+  delta_lake_package                    = var.delta_lake_package
+  s3_data_bucket_id                     = var.s3_data_bucket_id
 
   tags = var.tags
 }

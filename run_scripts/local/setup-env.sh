@@ -79,6 +79,41 @@ ALLOWED_ORIGINS=*
 # ANALYTICS_SCHEDULER_INTERVAL_MINUTES=5
 # SPARK_HOME=/path/to/spark  # Optional, if spark-submit not in PATH
 # DELTA_TABLE_PATH=data/delta/fru_sales
+
+# =============================================================================
+# Spark + Delta Lake Configuration (REQUIRED)
+# =============================================================================
+# Standard combination: Spark 4.0.1 + Delta Lake 4.0.0 + Scala 2.13.x
+# This combination has been tested and verified to work correctly.
+# The Delta Lake package format is: io.delta:delta-spark_{SCALA_VERSION}:{DELTA_VERSION}
+#
+# IMPORTANT: This must be set in your .env file. No hardcoded defaults are used.
+# If not set, scripts will error with a helpful message.
+#
+# Delta Lake package (Maven coordinates) - REQUIRED
+# Format: io.delta:delta-spark_{SCALA_VERSION}:{DELTA_VERSION}
+# Standard: io.delta:delta-spark_2.13:4.0.0 (compatible with Spark 4.0.1)
+DELTA_LAKE_PACKAGE=io.delta:delta-spark_2.13:4.0.0
+
+# Spark version - used by Dockerfile.api during build (passed as build arg)
+# Expected version: 4.0.1
+# This is passed to Docker builds via docker-compose.yml (local) or build-push-ecr.sh (AWS)
+SPARK_VERSION=4.0.1
+
+# Hadoop version - used by Dockerfile.api during build (passed as build arg)
+# Expected version: 3 (Hadoop 3 is standard for Spark 4.x)
+# This is passed to Docker builds via docker-compose.yml (local) or build-push-ecr.sh (AWS)
+HADOOP_VERSION=3
+
+# Delta Lake version (for reference/documentation only, not directly used by scripts)
+# Expected version: 4.0.0
+# This documents the intended Delta Lake version (matches DELTA_LAKE_PACKAGE).
+DELTA_LAKE_VERSION=4.0.0
+
+# Scala version (for reference/documentation only, not directly used by scripts)
+# Expected version: 2.13.x
+# This documents the intended Scala version (matches DELTA_LAKE_PACKAGE).
+SCALA_VERSION=2.13
 EOF
         log_success "Created .env file"
     fi

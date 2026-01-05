@@ -172,9 +172,16 @@ build_and_push_ecr() {
         docker login --username AWS --password-stdin "$ECR_URL"
     
     # Build Docker image
+    # Pass Spark and Hadoop versions from .env (source of truth)
+    # load_env_file was called earlier, so SPARK_VERSION and HADOOP_VERSION are available
     log_info "Building Docker image for linux/amd64 platform (required for ECS Fargate)..."
+    log_info "Using SPARK_VERSION=${SPARK_VERSION:-4.0.1}, HADOOP_VERSION=${HADOOP_VERSION:-3}"
     cd "$REPO_ROOT"
-    docker build --platform linux/amd64 -t "$ECR_REPO_NAME:$IMAGE_TAG" -f $REPO_ROOT/infra/docker/Dockerfile.api .
+    docker build --platform linux/amd64 \
+        --build-arg SPARK_VERSION=${SPARK_VERSION:-4.0.1} \
+        --build-arg HADOOP_VERSION=${HADOOP_VERSION:-3} \
+        -t "$ECR_REPO_NAME:$IMAGE_TAG" \
+        -f $REPO_ROOT/infra/docker/Dockerfile.api .
     
     # Tag image
     log_info "Tagging image..."

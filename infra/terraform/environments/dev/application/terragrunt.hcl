@@ -40,6 +40,9 @@ dependency "infrastructure" {
     db_password_secret_arn       = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-password"
     db_password_plain_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-password-plain"
     db_username_secret_arn       = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-username"
+    s3_data_bucket_id            = "fru-dev-analytics-data-123456789012"
+    s3_data_bucket_arn           = "arn:aws:s3:::fru-dev-analytics-data-123456789012"
+    s3_delta_table_path          = "s3://fru-dev-analytics-data-123456789012/delta"
   }
   
   mock_outputs_allowed_terraform_commands = ["validate", "plan"]
@@ -82,6 +85,17 @@ inputs = {
   allowed_origins = include.env.inputs.allowed_origins
   openai_embed_model = include.env.inputs.openai_embed_model
   use_agent_query = include.env.inputs.use_agent_query
+  
+  # S3 configuration (from infrastructure layer)
+  s3_data_bucket_id = dependency.infrastructure.outputs.s3_data_bucket_id
+  s3_delta_table_path = dependency.infrastructure.outputs.s3_delta_table_path
+  
+  # Analytics scheduler configuration (from .env via env.hcl)
+  enable_analytics_scheduler = include.env.inputs.enable_analytics_scheduler
+  analytics_scheduler_interval_seconds = include.env.inputs.analytics_scheduler_interval_seconds
+  spark_home = include.env.inputs.spark_home
+  # Use S3 path for AWS, local path for local (will be set by env.hcl)
+  delta_table_path = include.env.inputs.delta_table_path != "data/delta/fru_sales" ? include.env.inputs.delta_table_path : dependency.infrastructure.outputs.s3_delta_table_path
   
   deletion_protection = include.env.inputs.deletion_protection
   

@@ -2,6 +2,11 @@
 """
 Load CSV data into Aurora using RDS Data API (no direct network connection required).
 Uses AWS RDS Data API instead of psycopg2 for Aurora Serverless compatibility.
+
+Note: This file will be moved to backend/env_utils/aws/rds_data_api.py during refactoring.
+For now, keeping both locations for backward compatibility.
+
+Applicable environment: [aws {ecs | eks}]
 """
 import os
 import json

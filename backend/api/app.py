@@ -1,3 +1,9 @@
+"""
+Flask API application.
+Environment-agnostic, works in local, AWS (ECS/EKS), Azure (ACI/AKS), GCP (Cloud Run/GKE).
+
+Applicable environment: [local] [aws {ecs | eks}] [azure {aci | aks}] [gcp {cloud-run | gke}]
+"""
 import os
 import json
 import logging
@@ -14,8 +20,8 @@ from psycopg2.extras import RealDictCursor
 from openai import OpenAI
 from openai import APIError as OpenAIError
 
-from backend.llm.bedrock_client import claude_complete, get_bedrock_client
-from backend.services.analytics_scheduler import start_analytics_scheduler
+from backend.llm.client_factory import claude_complete, get_bedrock_client
+from backend.services.analytics.scheduler import start_analytics_scheduler
 from backend.utils.env_helpers import get_required_env, get_optional_env, get_optional_bool_env, get_optional_int_env, get_required_int_env
 
 # Feature flag for agent-based query processing

@@ -1,5 +1,7 @@
 """
 Metrics tracking for agent performance.
+
+Applicable environment: [local] [aws {ecs | eks}] [azure {aci | aks}] [gcp {cloud-run | gke}]
 """
 import time
 import logging

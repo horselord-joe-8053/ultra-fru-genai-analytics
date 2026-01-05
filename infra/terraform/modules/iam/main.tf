@@ -169,3 +169,30 @@ resource "aws_iam_role_policy" "ecs_task_runtime_rds_iam" {
   })
 }
 
+# Policy for S3 access (for Delta tables and raw data)
+# This allows ECS tasks to read/write analytics data in S3
+# We always create this policy since we always create the S3 bucket in the infrastructure layer
+resource "aws_iam_role_policy" "ecs_task_runtime_s3" {
+  name  = "${var.project_name}-${var.environment}-ecs-runtime-s3"
+  role  = aws_iam_role.ecs_task_runtime.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket"
+        ]
+        Resource = var.s3_data_bucket_arn != "" ? [
+          var.s3_data_bucket_arn,
+          "${var.s3_data_bucket_arn}/*"
+        ] : []
+      }
+    ]
+  })
+}
+

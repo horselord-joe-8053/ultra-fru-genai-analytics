@@ -1,5 +1,7 @@
 """
 Semantic search tool for agent using pgvector.
+
+Applicable environment: [local] [aws {ecs | eks}] [azure {aci | aks}] [gcp {cloud-run | gke}]
 """
 import time
 import logging

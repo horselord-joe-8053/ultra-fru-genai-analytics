@@ -77,3 +77,24 @@ output "db_password_plain_secret_arn" {
   value       = module.secrets_manager.db_password_plain_secret_arn
 }
 
+# S3 Data Bucket Outputs
+output "s3_data_bucket_id" {
+  description = "S3 bucket ID for analytics data"
+  value       = module.s3_data.bucket_id
+}
+
+output "s3_data_bucket_arn" {
+  description = "S3 bucket ARN for analytics data"
+  value       = module.s3_data.bucket_arn
+}
+
+output "s3_delta_table_path" {
+  description = "S3 path for Delta tables (use this for DELTA_TABLE_PATH env var)"
+  value       = module.s3_data.delta_table_path
+}
+
+output "s3_raw_data_path" {
+  description = "S3 path for raw data files"
+  value       = module.s3_data.raw_data_path
+}
+
