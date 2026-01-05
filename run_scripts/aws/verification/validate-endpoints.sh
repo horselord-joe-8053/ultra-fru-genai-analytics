@@ -358,7 +358,7 @@ validate_frontend_endpoint() {
 #        log_info "    3. Verify DNS resolution: nslookup $(echo "$api_endpoint" | sed 's|http://||' | sed 's|https://||')"
 #    fi
 #    return 1
-}
+#}
 # End of disabled validate_query_endpoint() function
 
 # Validate /query/stream endpoint (Server-Sent Events)

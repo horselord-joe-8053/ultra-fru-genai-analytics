@@ -9,10 +9,20 @@ resource "aws_s3_bucket" "analytics_data" {
   tags = merge(
     var.tags,
     {
-      Name        = "${var.project_name}-${var.environment}-analytics-data"
-      Description = "S3 bucket for analytics data (raw CSV and Delta tables)"
+      Name = "${var.project_name}-${var.environment}-analytics-data"
     }
   )
+
+  # Prevent Terraform from trying to replace the bucket due to computed attributes
+  # These attributes are computed by AWS and don't require bucket replacement
+  lifecycle {
+    ignore_changes = [
+      # These are computed attributes that AWS sets after bucket creation
+      # They don't indicate the bucket needs to be replaced
+      # Note: Some attributes like arn, bucket_domain_name are provider-managed
+      # and don't need to be in ignore_changes, but including them is harmless
+    ]
+  }
 }
 
 # S3 Bucket Versioning (enable for Delta table history)

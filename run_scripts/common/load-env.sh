@@ -85,6 +85,12 @@ load_env_file() {
     # Spark + Delta Lake configuration (.env is single source of truth, no defaults)
     export DELTA_LAKE_PACKAGE="${DELTA_LAKE_PACKAGE:-}"  # No default - must be set in .env
     
+    # Analytics scheduler configuration (for Terragrunt get_env())
+    export ENABLE_ANALYTICS_SCHEDULER="${ENABLE_ANALYTICS_SCHEDULER:-}"
+    export ANALYTICS_SCHEDULER_INTERVAL_SECONDS="${ANALYTICS_SCHEDULER_INTERVAL_SECONDS:-}"
+    export SPARK_HOME="${SPARK_HOME:-}"
+    export DELTA_TABLE_PATH="${DELTA_TABLE_PATH:-}"
+    
     log_success "Loaded environment variables from $env_path"
     log_info "Note: AWS credential variables (AWS_ADMIN_*, AWS_BEDROCK_*) are loaded but not exported"
     log_info "      Use AWS profiles (admin/bedrock) instead via --profile flag or AWS_PROFILE env var"

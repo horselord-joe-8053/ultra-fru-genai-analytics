@@ -112,10 +112,10 @@ log_success "Step 1/3 PASSED: Data-lake infrastructure ready"
 # Step 2: Create Delta table
 log_step "Step 2/3: Creating Delta table in S3"
 if [ "$DRY_RUN" = "true" ]; then
-    log_info "[DRY-RUN] Would run: $SCRIPT_DIR/steps/create-delta-table.sh"
+    log_info "[DRY-RUN] Would run: $SCRIPT_DIR/steps/create-delta-table-for-env.sh"
 else
     export DATA_LAKE_SETUP_MODE="$DATA_LAKE_SETUP_MODE"  # Pass mode to step
-    if ! "$SCRIPT_DIR/steps/create-delta-table.sh"; then
+    if ! "$SCRIPT_DIR/steps/create-delta-table-for-env.sh"; then
         log_warning "Step 2/3 had issues: Delta table creation failed"
         if [ "$DATA_LAKE_SETUP_MODE" = "full-workflow" ]; then
             log_error "Full-workflow mode requires successful Delta table creation"

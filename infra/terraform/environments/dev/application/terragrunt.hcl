@@ -87,6 +87,8 @@ inputs = {
   use_agent_query = include.env.inputs.use_agent_query
   
   # S3 configuration (from infrastructure layer)
+  # S3 data bucket information (fail-fast if infrastructure outputs not available)
+  # These must come from infrastructure outputs - fail-fast if infrastructure layer wasn't deployed
   s3_data_bucket_id = dependency.infrastructure.outputs.s3_data_bucket_id
   s3_delta_table_path = dependency.infrastructure.outputs.s3_delta_table_path
   
@@ -94,8 +96,11 @@ inputs = {
   enable_analytics_scheduler = include.env.inputs.enable_analytics_scheduler
   analytics_scheduler_interval_seconds = include.env.inputs.analytics_scheduler_interval_seconds
   spark_home = include.env.inputs.spark_home
-  # Use S3 path for AWS, local path for local (will be set by env.hcl)
-  delta_table_path = include.env.inputs.delta_table_path != "data/delta/fru_sales" ? include.env.inputs.delta_table_path : dependency.infrastructure.outputs.s3_delta_table_path
+  # Delta table path: Use S3 path from infrastructure layer (fail-fast if not available)
+  # Infrastructure outputs s3_delta_table_path as "s3://bucket/delta", append /fru_sales for the table name
+  # This must come from infrastructure output - fail-fast if infrastructure layer wasn't deployed
+  delta_table_path = "${dependency.infrastructure.outputs.s3_delta_table_path}/fru_sales"
+  delta_lake_package = include.env.inputs.delta_lake_package
   
   deletion_protection = include.env.inputs.deletion_protection
   
