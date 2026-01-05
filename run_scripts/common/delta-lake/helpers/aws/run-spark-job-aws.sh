@@ -1,13 +1,6 @@
 #!/bin/bash
-# Run Spark job on ECS to create Delta table (helper function)
-# Creates a one-time ECS task and waits for completion
-# Usage: run-spark-job-ecs.sh <INPUT_PATH> <OUTPUT_PATH> <SPARK_PACKAGES> <CLUSTER_NAME> <SERVICE_NAME> <TASK_DEF_ARN>
-#   INPUT_PATH: CSV file path (s3a:// format)
-#   OUTPUT_PATH: Delta table path (s3a:// format)
-#   SPARK_PACKAGES: Spark packages
-#   CLUSTER_NAME: ECS cluster name
-#   SERVICE_NAME: ECS service name (to get task definition and network config)
-#   TASK_DEF_ARN: Task definition ARN (optional, will get from service if not provided)
+# Run Spark job on AWS ECS to create Delta table
+# Usage: run-spark-job-aws.sh <INPUT_PATH> <OUTPUT_PATH> <SPARK_PACKAGES> <CLUSTER_NAME> <SERVICE_NAME> <TASK_DEF_ARN>
 
 set -e
 
@@ -26,7 +19,7 @@ if [ -z "$INPUT_PATH" ] || [ -z "$OUTPUT_PATH" ] || [ -z "$SPARK_PACKAGES" ] || 
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../../logger.sh"
+source "$SCRIPT_DIR/../../../logger.sh"
 
 # Get task definition from service if not provided
 if [ -z "$TASK_DEF_ARN" ]; then

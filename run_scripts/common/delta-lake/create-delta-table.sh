@@ -23,7 +23,7 @@ DRY_RUN="${DRY_RUN:-false}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$SCRIPT_DIR/../../logger.sh"
+source "$SCRIPT_DIR/../logger.sh"
 
 if [ -z "$INPUT_PATH" ] || [ -z "$OUTPUT_PATH" ]; then
     log_error "INPUT_PATH and OUTPUT_PATH are required"
@@ -53,7 +53,7 @@ log_info "Execution method: $EXECUTION_METHOD"
 log_info "Mode: $MODE"
 
 # Check if Delta table exists
-if "$SCRIPT_DIR/check-delta-table-exists.sh" "$OUTPUT_PATH" "$PATH_CHECK_METHOD" 2>/dev/null; then
+if "$SCRIPT_DIR/helpers/check-delta-table-exists.sh" "$OUTPUT_PATH" "$PATH_CHECK_METHOD" 2>/dev/null; then
     TABLE_EXISTS=true
 else
     TABLE_EXISTS=false
@@ -101,8 +101,7 @@ fi
 # Execute Spark job based on execution method
 case "$EXECUTION_METHOD" in
     local|docker)
-        # Use common Spark execution helper
-        "$SCRIPT_DIR/run-spark-job.sh" \
+        "$SCRIPT_DIR/helpers/local/run-spark-job-local.sh" \
             "$INPUT_PATH" \
             "$OUTPUT_PATH" \
             "$SPARK_PACKAGES" \
@@ -110,13 +109,12 @@ case "$EXECUTION_METHOD" in
             "${SPARK_SUBMIT_PATH:-spark-submit}"
         ;;
     ecs_task)
-        # Use ECS execution helper
         if [ -z "$CLUSTER_NAME" ] || [ -z "$SERVICE_NAME" ]; then
             log_error "CLUSTER_NAME and SERVICE_NAME are required for ECS execution"
             exit 1
         fi
         
-        "$SCRIPT_DIR/run-spark-job-ecs.sh" \
+        "$SCRIPT_DIR/helpers/aws/run-spark-job-aws.sh" \
             "$INPUT_PATH" \
             "$OUTPUT_PATH" \
             "$SPARK_PACKAGES" \

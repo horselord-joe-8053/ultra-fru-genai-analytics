@@ -15,7 +15,7 @@ OUTPUT_PATH="$2"
 SPARK_PACKAGES="$3"
 EXECUTION_METHOD="${4:-local}"
 SPARK_SUBMIT_PATH="${5:-spark-submit}"
-REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../../.." && pwd)}"
 
 if [ -z "$INPUT_PATH" ] || [ -z "$OUTPUT_PATH" ] || [ -z "$SPARK_PACKAGES" ]; then
     echo "Error: INPUT_PATH, OUTPUT_PATH, and SPARK_PACKAGES are required" >&2
@@ -23,7 +23,7 @@ if [ -z "$INPUT_PATH" ] || [ -z "$OUTPUT_PATH" ] || [ -z "$SPARK_PACKAGES" ]; th
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../../logger.sh"
+source "$SCRIPT_DIR/../../../logger.sh"
 
 case "$EXECUTION_METHOD" in
     local)

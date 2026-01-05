@@ -362,14 +362,14 @@ deploy_ecs_full() {
     if should_setup_data_lake; then
         log_step "Step 3.7/7: Setting up data-lake (S3 + Delta table)"
         if [ "$DRY_RUN" = "true" ]; then
-            log_info "[DRY-RUN] Would run: $SCRIPT_DIR/data-lake/setup-and-verify.sh"
+            log_info "[DRY-RUN] Would run: $SCRIPT_DIR/delta-lake/setup-and-verify.sh"
         else
             export ENVIRONMENT="$ENVIRONMENT"
             export DRY_RUN="$DRY_RUN"
             export DATA_LAKE_SETUP_MODE="full-workflow"  # Set mode for full workflow
-            if ! "$SCRIPT_DIR/data-lake/setup-and-verify.sh"; then
+            if ! "$SCRIPT_DIR/delta-lake/setup-and-verify.sh"; then
                 log_warning "Data-lake setup had issues (application may still work without Delta tables)"
-                log_info "You can run data-lake setup separately: $SCRIPT_DIR/data-lake/setup-and-verify.sh"
+                log_info "You can run data-lake setup separately: $SCRIPT_DIR/delta-lake/setup-and-verify.sh"
             fi
         fi
         log_success "Step 3.7/7 PASSED: Data-lake ready"
@@ -449,14 +449,14 @@ deploy_eks_full() {
     if should_setup_data_lake; then
         log_step "Step 3.7/6: Setting up data-lake (S3 + Delta table)"
         if [ "$DRY_RUN" = "true" ]; then
-            log_info "[DRY-RUN] Would run: $SCRIPT_DIR/data-lake/setup-and-verify.sh"
+            log_info "[DRY-RUN] Would run: $SCRIPT_DIR/delta-lake/setup-and-verify.sh"
         else
             export ENVIRONMENT="$ENVIRONMENT"
             export DRY_RUN="$DRY_RUN"
             export DATA_LAKE_SETUP_MODE="full-workflow"  # Set mode for full workflow
-            if ! "$SCRIPT_DIR/data-lake/setup-and-verify.sh"; then
+            if ! "$SCRIPT_DIR/delta-lake/setup-and-verify.sh"; then
                 log_warning "Data-lake setup had issues (application may still work without Delta tables)"
-                log_info "You can run data-lake setup separately: $SCRIPT_DIR/data-lake/setup-and-verify.sh"
+                log_info "You can run data-lake setup separately: $SCRIPT_DIR/delta-lake/setup-and-verify.sh"
             fi
         fi
         log_success "Step 3.7/6 PASSED: Data-lake ready"
