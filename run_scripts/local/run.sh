@@ -23,10 +23,10 @@
 #   ./run.sh                               # Full setup including data-lake if analytics enabled
 #
 #   # With analytics enabled (in .env: ENABLE_ANALYTICS_SCHEDULER=true)
-#   ./run.sh                               # Data-lake will be set up automatically in Step 7.5
+#   ./run.sh                               # Delta-lake will be set up automatically in Step 7.5
 #
 #   # Without analytics (in .env: ENABLE_ANALYTICS_SCHEDULER=false or unset)
-#   ./run.sh                               # Data-lake setup will be skipped
+#   ./run.sh                               # Delta-lake setup will be skipped
 #
 #   # Force data-lake setup (even if analytics disabled)
 #   ./run.sh --setup-data-lake             # Force setup of data-lake
@@ -214,7 +214,7 @@ main() {
         log_step "Step 7.5/9: Setting up data-lake (Delta table)"
         export DATA_LAKE_SETUP_MODE="full-workflow"  # Set mode for full workflow
         if ! "$SCRIPT_DIR/delta-lake/setup-and-verify.sh"; then
-            log_warning "Data-lake setup had issues (application may still work without Delta tables)"
+            log_warning "Delta-lake setup had issues (application may still work without Delta tables)"
             log_info "You can run data-lake setup separately: $SCRIPT_DIR/delta-lake/setup-and-verify.sh"
         fi
     else

@@ -32,7 +32,7 @@ else
     VARS_FILE=$("$REPO_ROOT/run_scripts/common/delta-lake/setup-delta-lake.sh" 2>&1 | tee /dev/stderr | tail -1)
     EXIT_CODE=${PIPESTATUS[0]}
     if [ $EXIT_CODE -ne 0 ]; then
-        log_error "Step 1/3 FAILED: Data-lake infrastructure setup failed"
+        log_error "Step 1/3 FAILED: Delta-lake infrastructure setup failed"
         exit 1
     fi
     if [ -n "$VARS_FILE" ] && [ -f "$VARS_FILE" ]; then
@@ -40,7 +40,7 @@ else
         rm -f "$VARS_FILE"
     fi
 fi
-log_success "Step 1/3 PASSED: Data-lake infrastructure ready"
+log_success "Step 1/3 PASSED: Delta-lake infrastructure ready"
 
 log_step "Step 2/3: Creating Delta table in S3"
 if [ "$DRY_RUN" = "true" ]; then
@@ -71,11 +71,11 @@ else
     export VERIFY_METHOD="s3"
     if ! "$REPO_ROOT/run_scripts/common/delta-lake/verify-delta-lake.sh"; then
         if [ "$DATA_LAKE_SETUP_MODE" = "full-workflow" ]; then
-            log_error "Step 3/3 FAILED: Data-lake verification failed"
+            log_error "Step 3/3 FAILED: Delta-lake verification failed"
             exit 1
         fi
     fi
 fi
-log_success "Step 3/3 PASSED: Data-lake verification complete"
+log_success "Step 3/3 PASSED: Delta-lake verification complete"
 
-log_success "Data-lake setup and verification completed successfully!"
+log_success "Delta-lake setup and verification completed successfully!"

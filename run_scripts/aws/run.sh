@@ -43,11 +43,11 @@
 #
 #   # First-time deployment with analytics enabled
 #   # In .env file: ENABLE_ANALYTICS_SCHEDULER=true
-#   ./run.sh ecs-full dev                                # Data-lake will be set up automatically in Step 3.7
+#   ./run.sh ecs-full dev                                # Delta-lake will be set up automatically in Step 3.7
 #
 #   # Deployment without analytics
 #   # In .env file: ENABLE_ANALYTICS_SCHEDULER=false (or unset)
-#   ./run.sh ecs-full dev                                # Data-lake setup will be skipped
+#   ./run.sh ecs-full dev                                # Delta-lake setup will be skipped
 #
 #   # EKS deployment
 #   ./run.sh eks-full dev                                # Complete EKS deployment to dev
@@ -185,10 +185,10 @@ ${BLUE}Examples:${NC}
 
   ${GREEN}Data-Lake Scenarios:${NC}
   # With analytics enabled in .env (ENABLE_ANALYTICS_SCHEDULER=true)
-  $0 ecs-full dev                      # Data-lake set up automatically in Step 3.7
+  $0 ecs-full dev                      # Delta-lake set up automatically in Step 3.7
 
   # With analytics disabled in .env (ENABLE_ANALYTICS_SCHEDULER=false)
-  $0 ecs-full dev                      # Data-lake setup skipped
+  $0 ecs-full dev                      # Delta-lake setup skipped
   $0 ecs-full dev --setup-data-lake    # Force data-lake setup anyway
   $0 ecs-full dev --skip-data-lake     # Force skip (even if analytics enabled)
 
@@ -368,11 +368,11 @@ deploy_ecs_full() {
             export DRY_RUN="$DRY_RUN"
             export DATA_LAKE_SETUP_MODE="full-workflow"  # Set mode for full workflow
             if ! "$SCRIPT_DIR/delta-lake/setup-and-verify.sh"; then
-                log_warning "Data-lake setup had issues (application may still work without Delta tables)"
+                log_warning "Delta-lake setup had issues (application may still work without Delta tables)"
                 log_info "You can run data-lake setup separately: $SCRIPT_DIR/delta-lake/setup-and-verify.sh"
             fi
         fi
-        log_success "Step 3.7/7 PASSED: Data-lake ready"
+        log_success "Step 3.7/7 PASSED: Delta-lake ready"
     else
         log_info "Skipping data-lake setup (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"
     fi
@@ -455,11 +455,11 @@ deploy_eks_full() {
             export DRY_RUN="$DRY_RUN"
             export DATA_LAKE_SETUP_MODE="full-workflow"  # Set mode for full workflow
             if ! "$SCRIPT_DIR/delta-lake/setup-and-verify.sh"; then
-                log_warning "Data-lake setup had issues (application may still work without Delta tables)"
+                log_warning "Delta-lake setup had issues (application may still work without Delta tables)"
                 log_info "You can run data-lake setup separately: $SCRIPT_DIR/delta-lake/setup-and-verify.sh"
             fi
         fi
-        log_success "Step 3.7/6 PASSED: Data-lake ready"
+        log_success "Step 3.7/6 PASSED: Delta-lake ready"
     else
         log_info "Skipping data-lake setup (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"
     fi
