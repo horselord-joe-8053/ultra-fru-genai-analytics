@@ -135,7 +135,8 @@ resource "aws_ecs_task_definition" "fru_api" {
         },
         {
           name  = "SPARK_HOME"
-          value = var.spark_home
+          # Default to /opt/spark if spark_home is empty (handles case where env var is set to empty string)
+          value = var.spark_home != "" ? var.spark_home : "/opt/spark"
         },
         {
           name  = "DELTA_TABLE_PATH"

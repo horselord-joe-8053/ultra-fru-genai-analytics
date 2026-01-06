@@ -31,38 +31,55 @@ def verify_delta_table_exists(delta_path: str, repo_root: str = None, is_ecs_dep
     Returns:
         bool: True if Delta table exists (has _delta_log directory), False otherwise
     """
+    logger.debug(
+        f"verify_delta_table_exists() called with: "
+        f"delta_path={delta_path}, repo_root={repo_root}, "
+        f"is_ecs_deployment={is_ecs_deployment}, is_eks_deployment={is_eks_deployment}"
+    )
+    
     # Get repo_root if not provided
     if repo_root is None:
-        repo_root = get_optional_env(
-            "REPO_ROOT",
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        )
+        computed_repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        repo_root = get_optional_env("REPO_ROOT", computed_repo_root)
+        logger.debug(f"repo_root not provided, computed: {computed_repo_root}, using: {repo_root}")
+    else:
+        logger.debug(f"Using provided repo_root: {repo_root}")
     
     # Determine if this is an AWS deployment (S3-based)
     is_aws_deployment = is_ecs_deployment or is_eks_deployment
+    logger.debug(f"Deployment type - is_ecs_deployment={is_ecs_deployment}, is_eks_deployment={is_eks_deployment}, is_aws_deployment={is_aws_deployment}")
     
     # Construct full path: If delta_path is absolute (starts with s3:// or /), use as-is
     # Otherwise, join with repo_root
     if delta_path.startswith('s3://') or delta_path.startswith('s3a://') or delta_path.startswith('/'):
         delta_full_path = delta_path
+        logger.debug(f"delta_path is absolute, using as-is: {delta_full_path}")
     else:
         delta_full_path = os.path.join(repo_root, delta_path)
+        logger.debug(f"delta_path is relative, joined with repo_root: {delta_full_path}")
     
     # For Delta tables, check for _delta_log directory (this is what indicates a Delta table exists)
-    # For S3 (AWS deployments): append /_delta_log to the path
+    # For S3 (AWS deployments): append /_delta_log/ to the path (trailing slash for directory check)
     # For local: append /_delta_log to the path
     # Use deployment type (is_aws_deployment) instead of path-based detection for consistency
     if is_aws_deployment:
-        delta_log_path = delta_full_path.rstrip('/') + '/_delta_log'
+        # For S3, directories should end with / for proper detection by s3_exists()
+        delta_log_path = delta_full_path.rstrip('/') + '/_delta_log/'
+        logger.debug(f"AWS deployment detected, constructed _delta_log path with trailing slash: {delta_log_path}")
     else:
         delta_log_path = os.path.join(delta_full_path, '_delta_log')
+        logger.debug(f"Local deployment detected, constructed _delta_log path: {delta_log_path}")
+    
+    logger.info(f"Checking for Delta table _delta_log at: {delta_log_path}")
     
     # Check if _delta_log directory exists
     table_exists = exists(delta_log_path)
     
-    if not table_exists:
+    if table_exists:
+        logger.info(f"✓ Delta table found at {delta_full_path} (verified _delta_log at {delta_log_path})")
+    else:
         logger.warning(
-            f"Delta table not found at {delta_full_path} "
+            f"✗ Delta table not found at {delta_full_path} "
             f"(checked for _delta_log at {delta_log_path})"
         )
     

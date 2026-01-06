@@ -27,6 +27,12 @@ def run_spark_analytics():
         spark_home = get_optional_env("SPARK_HOME", "/opt/spark")
         spark_submit = os.path.join(spark_home, "bin", "spark-submit")
         
+        # Ensure spark-submit exists
+        if not os.path.exists(spark_submit):
+            error_msg = f"spark-submit not found at {spark_submit}. SPARK_HOME={spark_home}. Is Spark installed?"
+            logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
+        
         script_path = os.path.join(repo_root, "spark_jobs", "run_analytics.py")
         output_dir = os.path.join(repo_root, "data", "analytics")
         

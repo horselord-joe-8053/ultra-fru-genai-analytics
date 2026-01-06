@@ -39,6 +39,12 @@ def main(delta_path: str, output_dir: str):
     spark_compute_limit = int(os.getenv("NUM_FOR_BATCH_ANALYTICS_TOP_SPARK_COMPUTE", "20"))
     print(f"Using Spark compute limit: {spark_compute_limit} items per aggregation")
     
+    # Convert s3:// to s3a:// for Spark/Hadoop compatibility
+    # Spark uses s3a:// filesystem, not s3://
+    spark_delta_path = delta_path.replace("s3://", "s3a://", 1) if delta_path.startswith("s3://") else delta_path
+    if spark_delta_path != delta_path:
+        print(f"Converted S3 path for Spark: {delta_path} -> {spark_delta_path}")
+    
     spark = (
         SparkSession.builder.appName("fru-batch-analytics")
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
@@ -46,8 +52,8 @@ def main(delta_path: str, output_dir: str):
         .getOrCreate()
     )
     
-    # Read Delta table
-    df = spark.read.format("delta").load(delta_path)
+    # Read Delta table (use s3a:// path for Spark)
+    df = spark.read.format("delta").load(spark_delta_path)
     
     print("=" * 80)
     print("FRU Batch Analytics Report")

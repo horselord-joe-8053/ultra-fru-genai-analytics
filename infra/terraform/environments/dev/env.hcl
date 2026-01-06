@@ -61,6 +61,8 @@ inputs = {
   # Analytics scheduler configuration (optional)
   enable_analytics_scheduler = get_env("ENABLE_ANALYTICS_SCHEDULER", "false")
   analytics_scheduler_interval_seconds = get_env("ANALYTICS_SCHEDULER_INTERVAL_SECONDS", "")
+  # SPARK_HOME: default to /opt/spark if not set or empty
+  # Use get_env() with default, but Terraform will also handle empty string case
   spark_home = get_env("SPARK_HOME", "/opt/spark")
   # For AWS: S3 path will be set by infrastructure layer output (s3://bucket/delta/fru_sales)
   # For local: use local path (data/delta/fru_sales)

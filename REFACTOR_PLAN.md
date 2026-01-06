@@ -1087,3 +1087,78 @@ backend/
 ---
 
 **Status:** 📋 Plan created, awaiting approval before execution
+
+---
+
+## 12. Delta Table Verification Logic Consolidation (Future)
+
+### 📋 Overview
+There is significant functional overlap between Python-based verification (runtime) and shell script-based verification (setup/deployment). Both implementations need to be kept (different contexts), but should follow unified logic patterns.
+
+**Analysis Document**: See `cursor_gen/DELTA_TABLE_VERIFICATION_ANALYSIS.md` for detailed analysis.
+
+### 🔍 Key Findings
+
+#### Overlap:
+- Both check for `_delta_log` directory existence
+- Both support S3 and local filesystem paths
+- Both handle path construction (absolute vs relative)
+
+#### Differences:
+- **Python**: Runs in containers at runtime, uses boto3
+- **Shell**: Runs during setup/deployment, uses AWS CLI
+- **Cannot replace each other** due to different execution contexts
+
+#### Issues Found:
+1. ✅ **FIXED**: Python normalizes `s3a://` → `s3://` (boto3 compatibility)
+2. ❌ **TODO**: Shell scripts don't normalize `s3a://` → `s3://`
+3. ⚠️ **Consider**: Shell scripts validate log file count; Python only checks existence
+4. ⚠️ **Consider**: Different error handling (exceptions vs exit codes)
+
+### 📝 Action Items (Future)
+
+#### Immediate (High Priority):
+1. **Fix shell script `s3a://` support**
+   - Update `run_scripts/common/delta-lake/helpers/check-delta-table-exists.sh`
+   - Normalize `s3a://` → `s3://` before AWS CLI calls
+   - Match Python implementation
+
+2. **Consider adding log file validation to Python**
+   - Optional check for `.json` file count in `_delta_log`
+   - Match shell script validation depth
+   - Make it optional to not break existing behavior
+
+#### Medium-Term:
+3. **Create verification specification document**
+   - Define what "valid Delta table" means
+   - Document path normalization rules
+   - Document error handling expectations
+   - Single source of truth for both implementations
+
+4. **Add integration tests**
+   - Test both implementations against same Delta tables
+   - Verify they produce same results
+   - Catch regressions early
+
+5. **Improve logging consistency**
+   - Align log message formats
+   - Use same terminology
+   - Ensure same information is logged
+
+### 🎯 Implementation Notes
+
+**Python Normalization** (current):
+```python
+# backend/utils/filesystem.py line 46
+normalized_path = path.replace('s3a://', 's3://', 1) if path.startswith('s3a://') else path
+```
+
+**Shell Script Needed**:
+```bash
+# Normalize s3a:// to s3:// for AWS CLI (which only supports s3://)
+if [[ "$PATH_TO_CHECK" == s3a://* ]]; then
+    PATH_TO_CHECK="${PATH_TO_CHECK/s3a:\/\//s3:\/\/}"
+fi
+```
+
+**Status:** 📋 Planned for future refactoring phase
