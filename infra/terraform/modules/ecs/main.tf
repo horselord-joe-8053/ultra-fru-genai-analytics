@@ -150,6 +150,13 @@ resource "aws_ecs_task_definition" "fru_api" {
           # Format: io.delta:delta-spark_{SCALA_VERSION}:{DELTA_VERSION}
           # Standard: io.delta:delta-spark_2.13:4.0.0 (compatible with Spark 4.0.1)
           value = var.delta_lake_package
+        },
+        {
+          name  = "DEPLOYMENT_TYPE"
+          # Deployment type (e.g., 'ecs', 'eks') - used by analytics scheduler
+          # to determine if S3A packages and configuration are needed
+          # Local deployments don't set this (will be empty/None)
+          value = var.deployment_type
         }
       ]
 

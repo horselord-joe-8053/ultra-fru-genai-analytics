@@ -101,6 +101,7 @@ inputs = {
   # This must come from infrastructure output - fail-fast if infrastructure layer wasn't deployed
   delta_table_path = "${dependency.infrastructure.outputs.s3_delta_table_path}/fru_sales"
   delta_lake_package = include.env.inputs.delta_lake_package
+  deployment_type = "ecs"  # Set to "ecs" for ECS deployments, "eks" for EKS deployments
   
   deletion_protection = include.env.inputs.deletion_protection
   

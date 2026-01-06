@@ -23,15 +23,20 @@ if [ ! -d "$DELTA_DIR" ]; then
     exit 1
 fi
 
-if [ "$MODE" = "standalone" ]; then
-    if [ -d "$DELTA_DIR/_delta_log" ]; then
+# Use common helper to check if Delta table exists
+if ! "$SCRIPT_DIR/../check-delta-table-exists.sh" "$DELTA_DIR" "filesystem" 2>/dev/null; then
+    if [ "$MODE" = "standalone" ]; then
+        # Standalone mode: exit silently if table doesn't exist (idempotent check)
         exit 0
-    fi
-else
-    if [ ! -d "$DELTA_DIR/_delta_log" ]; then
-        log_error "_delta_log directory is missing"
+    else
+        # Full-workflow mode: fail if table doesn't exist
+        log_error "Delta table does not exist at: $DELTA_DIR"
         exit 1
     fi
+fi
+
+# Table exists - verify it has log entries (full-workflow mode only)
+if [ "$MODE" != "standalone" ]; then
     DELTA_LOG_COUNT=$(find "$DELTA_DIR/_delta_log" -name "*.json" 2>/dev/null | wc -l | tr -d ' ')
     if [ "$DELTA_LOG_COUNT" -eq 0 ]; then
         log_error "Delta table has no log entries"

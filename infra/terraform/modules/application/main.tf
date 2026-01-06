@@ -69,6 +69,7 @@ module "ecs" {
   # If explicitly set in .env via DELTA_TABLE_PATH, that takes precedence
   delta_table_path                      = var.delta_table_path
   delta_lake_package                    = var.delta_lake_package
+  deployment_type                       = var.deployment_type
   s3_data_bucket_id                     = var.s3_data_bucket_id
 
   tags = var.tags

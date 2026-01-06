@@ -29,25 +29,24 @@ if ! aws s3 ls "s3://$S3_BUCKET_ID" --profile "${AWS_PROFILE:-admin}" >/dev/null
     exit 1
 fi
 
-if [ "$MODE" = "standalone" ]; then
-    if [ -n "$S3_DELTA_PATH" ]; then
-        # S3_DELTA_PATH is s3://bucket/delta, append /fru_sales for the table name
-        DELTA_TABLE_NAME="${DELTA_TABLE_NAME:-fru_sales}"
-        DELTA_LOG_PATH="$S3_DELTA_PATH/$DELTA_TABLE_NAME/_delta_log"
-        if ! aws s3 ls "$DELTA_LOG_PATH/" --profile "${AWS_PROFILE:-admin}" >/dev/null 2>&1; then
+if [ -n "$S3_DELTA_PATH" ]; then
+    # S3_DELTA_PATH is s3://bucket/delta, append /fru_sales for the table name
+    DELTA_TABLE_NAME="${DELTA_TABLE_NAME:-fru_sales}"
+    DELTA_TABLE_PATH="$S3_DELTA_PATH/$DELTA_TABLE_NAME"
+    
+    # Use common helper to check if Delta table exists
+    if ! "$SCRIPT_DIR/../check-delta-table-exists.sh" "$DELTA_TABLE_PATH" "s3" 2>/dev/null; then
+        if [ "$MODE" = "standalone" ]; then
+            # Standalone mode: exit silently if table doesn't exist (idempotent check)
             exit 0
-        fi
-    fi
-else
-    if [ -n "$S3_DELTA_PATH" ]; then
-        # S3_DELTA_PATH is s3://bucket/delta, append /fru_sales for the table name
-        DELTA_TABLE_NAME="${DELTA_TABLE_NAME:-fru_sales}"
-        DELTA_LOG_PATH="$S3_DELTA_PATH/$DELTA_TABLE_NAME/_delta_log"
-        if ! aws s3 ls "$DELTA_LOG_PATH/" --profile "${AWS_PROFILE:-admin}" >/dev/null 2>&1; then
-            log_error "Delta table does not exist at: $DELTA_LOG_PATH"
+        else
+            # Full-workflow mode: fail if table doesn't exist
+            log_error "Delta table does not exist at: $DELTA_TABLE_PATH"
             exit 1
         fi
-        log_info "Delta table verified at: $S3_DELTA_PATH/$DELTA_TABLE_NAME"
     fi
+    
+    # Table exists
+    log_info "Delta table verified at: $DELTA_TABLE_PATH"
 fi
 

@@ -9,7 +9,7 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from backend.utils.env_helpers import get_optional_env
-from backend.utils.filesystem import exists
+from backend.services.analytics.verify_delta_table import verify_delta_table_exists
 
 logger = logging.getLogger(__name__)
 
@@ -30,20 +30,40 @@ def run_spark_analytics():
         script_path = os.path.join(repo_root, "spark_jobs", "run_analytics.py")
         output_dir = os.path.join(repo_root, "data", "analytics")
         
-        # Check if Delta table exists (works for S3, local, EFS)
-        # Supports:
-        #   - S3 paths: s3://bucket-name/delta/fru_sales (for AWS deployments)
-        #   - Local paths: data/delta/fru_sales (for local development)
-        #   - Absolute paths: /app/data/delta/fru_sales (for Docker containers)
-        # If delta_path is absolute (starts with s3:// or /), use as-is
-        # Otherwise, join with repo_root
-        if delta_path.startswith('s3://') or delta_path.startswith('/'):
-            delta_full_path = delta_path
-        else:
-            delta_full_path = os.path.join(repo_root, delta_path)
+        # Detect deployment type from environment variable (set by infrastructure for AWS)
+        # Local deployments don't set this, so it will be empty/None
+        # This validation must happen FIRST (fail-fast) before any mode-conscious logic
+        deployment_type = os.environ.get("DEPLOYMENT_TYPE", "").lower()
+        is_ecs_deployment = "ecs" in deployment_type
+        is_eks_deployment = "eks" in deployment_type
         
-        if not exists(delta_full_path):
-            logger.warning(f"Delta table not found at {delta_full_path}, skipping analytics run")
+        # Detect if path is S3-based (s3:// or s3a://)
+        is_s3_based = delta_path.startswith('s3://') or delta_path.startswith('s3a://')
+        
+        # Fail-fast validation: Ensure DEPLOYMENT_TYPE matches path type
+        if is_ecs_deployment != is_s3_based:
+            if is_ecs_deployment and not is_s3_based:
+                error_msg = (
+                    f"Configuration mismatch: DEPLOYMENT_TYPE={deployment_type} indicates ECS deployment, "
+                    f"but DELTA_TABLE_PATH={delta_path} is not an S3 path (should start with s3:// or s3a://). "
+                    f"Please ensure DELTA_TABLE_PATH is set to an S3 path for ECS deployments."
+                )
+            elif not is_ecs_deployment and is_s3_based:
+                error_msg = (
+                    f"Configuration mismatch: DELTA_TABLE_PATH={delta_path} is an S3 path, "
+                    f"but DEPLOYMENT_TYPE={deployment_type or '(not set)'} does not indicate ECS deployment. "
+                    f"For ECS deployments, DEPLOYMENT_TYPE should be set to 'ecs' via Terraform."
+                )
+            else:
+                error_msg = f"Configuration mismatch: DEPLOYMENT_TYPE={deployment_type}, DELTA_TABLE_PATH={delta_path}"
+            
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        # Check if Delta table exists using helper function (after deployment type validation)
+        # Pass deployment type flags for consistent logic (uses DEPLOYMENT_TYPE, not path-based detection)
+        if not verify_delta_table_exists(delta_path, repo_root, is_ecs_deployment, is_eks_deployment):
+            logger.warning("Delta table not found, skipping analytics run")
             return
         
         # Configure Spark to use the API's Python (which has psycopg2)
@@ -82,13 +102,43 @@ def run_spark_analytics():
         
         logger.info(f"Using Delta Lake package: {delta_lake_package}")
         
-        cmd = [
-            spark_submit,
-            "--packages", delta_lake_package,
-            script_path,
-            delta_path,
-            output_dir
-        ]
+        # Build Spark packages: add S3A packages if ECS deployment
+        # After validation, is_ecs_deployment == is_s3_based, so use is_ecs_deployment (explicit signal from infrastructure)
+        # Pattern matches setup-and-verify.sh line 58 and run-spark-job-aws.sh
+        if is_ecs_deployment:
+            spark_packages = f"{delta_lake_package},org.apache.hadoop:hadoop-aws:3.3.6,com.amazonaws:aws-java-sdk-bundle:1.12.470"
+            logger.info(f"ECS deployment detected (DEPLOYMENT_TYPE={deployment_type}) - adding S3A packages (hadoop-aws, aws-java-sdk-bundle)")
+        else:
+            spark_packages = delta_lake_package
+            logger.info(f"Local deployment detected (DEPLOYMENT_TYPE not set) - using Delta Lake package only")
+        
+        # Build spark-submit command
+        # For ECS deployments, add S3A configuration (same pattern as run-spark-job-aws.sh)
+        cmd = [spark_submit, "--packages", spark_packages]
+        
+        if is_ecs_deployment:
+            # Add S3A configuration flags (pattern from run-spark-job-aws.sh lines 90-103)
+            # These ensure S3A filesystem works correctly with Spark
+            cmd.extend([
+                "--conf", "spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem",
+                "--conf", "spark.hadoop.fs.s3a.aws.credentials.provider=org.apache.hadoop.fs.s3a.auth.IAMInstanceCredentialsProvider",
+                "--conf", "spark.hadoop.fs.s3a.connection.timeout=60000",
+                "--conf", "spark.hadoop.fs.s3a.connection.establish.timeout=5000",
+                "--conf", "spark.hadoop.fs.s3a.connection.maximum=15",
+                "--conf", "spark.hadoop.fs.s3a.attempts.maximum=3",
+                "--conf", "spark.hadoop.fs.s3a.retry.interval=1000",
+                "--conf", "spark.hadoop.fs.s3a.threads.max=10",
+                "--conf", "spark.hadoop.fs.s3a.threads.core=5",
+                "--conf", "spark.hadoop.fs.s3a.threads.keepalivetime=60",
+                "--conf", "spark.hadoop.fs.s3a.multipart.uploads.expiration=86400",
+                "--conf", "spark.hadoop.fs.s3a.multipart.purge.age=86400",
+                "--conf", "spark.hadoop.fs.s3a.fast.upload=true",
+                "--conf", "spark.hadoop.fs.s3a.block.size=134217728",
+            ])
+            logger.info("Added S3A configuration flags for AWS S3 access")
+        
+        # Add script path and arguments
+        cmd.extend([script_path, delta_path, output_dir])
         
         logger.info(f"Running Spark analytics: {' '.join(cmd)}")
         result = subprocess.run(

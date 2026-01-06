@@ -250,6 +250,12 @@ variable "delta_lake_package" {
   }
 }
 
+variable "deployment_type" {
+  type        = string
+  description = "Deployment type (e.g., 'ecs', 'eks') - used by analytics scheduler to determine if S3A packages are needed"
+  default     = "ecs"
+}
+
 variable "s3_data_bucket_id" {
   type        = string
   description = "S3 bucket ID for analytics data (optional, for future use)"
