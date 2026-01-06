@@ -39,6 +39,21 @@ fi
 
 log_info "Using task definition: $TASK_DEF_ARN"
 
+# Get container name from task definition
+CONTAINER_NAME=$(aws ecs describe-task-definition \
+    --task-definition "$TASK_DEF_ARN" \
+    --profile "$AWS_PROFILE" \
+    --region "$AWS_REGION" \
+    --query 'taskDefinition.containerDefinitions[0].name' \
+    --output text 2>&1)
+
+if [ -z "$CONTAINER_NAME" ] || [ "$CONTAINER_NAME" = "None" ]; then
+    log_error "Could not get container name from task definition"
+    exit 1
+fi
+
+log_info "Using container name: $CONTAINER_NAME"
+
 # Get subnet IDs and security group from the service
 SERVICE_DETAILS=$(aws ecs describe-services \
     --cluster "$CLUSTER_NAME" \
@@ -62,8 +77,31 @@ if [ -n "$SECURITY_GROUP_IDS" ]; then
     log_info "Using security groups: $SECURITY_GROUP_IDS"
 fi
 
-# Build the command to run
-SPARK_CMD="/opt/spark/bin/spark-submit --packages $SPARK_PACKAGES /app/spark_jobs/ingest_delta.py $INPUT_PATH $OUTPUT_PATH"
+# Build the command to run with S3A configuration
+# Add S3A configs as --conf flags to override any environment variables or defaults
+# Units vary by property:
+#   - Connection timeouts: milliseconds (connection.timeout, connection.establish.timeout, retry.interval)
+#   - Multipart/thread settings: seconds (multipart.uploads.expiration, multipart.purge.age, threads.keepalivetime)
+#   - Size: bytes (block.size)
+#   - Counts: no unit (connection.maximum, attempts.maximum, threads.max, threads.core)
+# All values must be numeric, not "60s" or "24h" (which causes NumberFormatException)
+SPARK_CMD="/opt/spark/bin/spark-submit \
+  --packages $SPARK_PACKAGES \
+  --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
+  --conf spark.hadoop.fs.s3a.aws.credentials.provider=org.apache.hadoop.fs.s3a.auth.IAMInstanceCredentialsProvider \
+  --conf spark.hadoop.fs.s3a.connection.timeout=60000 \
+  --conf spark.hadoop.fs.s3a.connection.establish.timeout=5000 \
+  --conf spark.hadoop.fs.s3a.connection.maximum=15 \
+  --conf spark.hadoop.fs.s3a.attempts.maximum=3 \
+  --conf spark.hadoop.fs.s3a.retry.interval=1000 \
+  --conf spark.hadoop.fs.s3a.threads.max=10 \
+  --conf spark.hadoop.fs.s3a.threads.core=5 \
+  --conf spark.hadoop.fs.s3a.threads.keepalivetime=60 \
+  --conf spark.hadoop.fs.s3a.multipart.uploads.expiration=86400 \
+  --conf spark.hadoop.fs.s3a.multipart.purge.age=86400 \
+  --conf spark.hadoop.fs.s3a.fast.upload=true \
+  --conf spark.hadoop.fs.s3a.block.size=134217728 \
+  /app/spark_jobs/ingest_delta.py $INPUT_PATH $OUTPUT_PATH"
 
 log_info "Spark command: $SPARK_CMD"
 
@@ -81,9 +119,10 @@ NETWORK_CONFIG_JSON=$(jq -n \
 # Prepare command override JSON
 COMMAND_OVERRIDE_JSON=$(jq -n \
     --arg cmd "$SPARK_CMD" \
+    --arg container "$CONTAINER_NAME" \
     '{
         "containerOverrides": [{
-            "name": "api",
+            "name": $container,
             "command": ["sh", "-c", $cmd]
         }]
     }')
@@ -138,7 +177,15 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
             log_info "Delta table path: $OUTPUT_PATH"
             
             # Get logs for verification
-            LOG_GROUP="/ecs/${CLUSTER_NAME}"
+            # Log group name is /ecs/{project}-{environment}, not /ecs/{cluster-name}
+            # Extract environment from cluster name (e.g., "fru-dev-cluster" -> "dev")
+            ENV_FROM_CLUSTER=$(echo "$CLUSTER_NAME" | sed 's/.*-\([^-]*\)-cluster$/\1/')
+            if [ -z "$ENV_FROM_CLUSTER" ] || [ "$ENV_FROM_CLUSTER" = "$CLUSTER_NAME" ]; then
+                # Fallback: try to get from task definition or use default pattern
+                LOG_GROUP="/ecs/fru-${ENV_FROM_CLUSTER:-dev}"
+            else
+                LOG_GROUP="/ecs/fru-${ENV_FROM_CLUSTER}"
+            fi
             LOG_STREAM=$(aws ecs describe-tasks \
                 --cluster "$CLUSTER_NAME" \
                 --tasks "$TASK_ARN" \
@@ -167,7 +214,15 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
             log_error "Stopped reason: $STOPPED_REASON"
             
             # Get logs
-            LOG_GROUP="/ecs/${CLUSTER_NAME}"
+            # Log group name is /ecs/{project}-{environment}, not /ecs/{cluster-name}
+            # Extract environment from cluster name (e.g., "fru-dev-cluster" -> "dev")
+            ENV_FROM_CLUSTER=$(echo "$CLUSTER_NAME" | sed 's/.*-\([^-]*\)-cluster$/\1/')
+            if [ -z "$ENV_FROM_CLUSTER" ] || [ "$ENV_FROM_CLUSTER" = "$CLUSTER_NAME" ]; then
+                # Fallback: try to get from task definition or use default pattern
+                LOG_GROUP="/ecs/fru-${ENV_FROM_CLUSTER:-dev}"
+            else
+                LOG_GROUP="/ecs/fru-${ENV_FROM_CLUSTER}"
+            fi
             LOG_STREAM=$(aws ecs describe-tasks \
                 --cluster "$CLUSTER_NAME" \
                 --tasks "$TASK_ARN" \
@@ -177,8 +232,16 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
                 --output text 2>&1)
             
             if [ -n "$LOG_STREAM" ] && [ "$LOG_STREAM" != "None" ]; then
-                log_info "Fetching task logs..."
-                aws logs tail "$LOG_GROUP" --log-stream-names "$LOG_STREAM" --since 30m --profile "$AWS_PROFILE" --region "$AWS_REGION" 2>&1 | tail -50
+                log_info "Fetching task logs (full output) from $LOG_GROUP/$LOG_STREAM..."
+                aws logs tail "$LOG_GROUP" --log-stream-names "$LOG_STREAM" --since 30m --profile "$AWS_PROFILE" --region "$AWS_REGION" 2>&1
+            else
+                log_warning "No log stream available for task (task may have failed before writing logs)"
+                log_info "Trying to get logs from most recent log stream in $LOG_GROUP..."
+                RECENT_STREAM=$(aws logs describe-log-streams --log-group-name "$LOG_GROUP" --profile "$AWS_PROFILE" --region "$AWS_REGION" --order-by LastEventTime --descending --max-items 1 --query 'logStreams[0].logStreamName' --output text 2>&1)
+                if [ -n "$RECENT_STREAM" ] && [ "$RECENT_STREAM" != "None" ]; then
+                    log_info "Fetching logs from most recent stream: $RECENT_STREAM"
+                    aws logs tail "$LOG_GROUP" --log-stream-names "$RECENT_STREAM" --since 30m --profile "$AWS_PROFILE" --region "$AWS_REGION" 2>&1 | head -100
+                fi
             fi
             
             exit 1

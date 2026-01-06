@@ -49,17 +49,18 @@ else
     load_env_file || true
     CSV_PATH="${CSV_PATH:-s3://$S3_BUCKET_ID/raw/fridge_sales_with_rating.csv}"
     DELTA_TABLE_PATH="${S3_DELTA_PATH:-s3://$S3_BUCKET_ID/delta}/fru_sales"
+    # Convert s3:// to s3a:// for Spark (hadoop-aws supports s3a://, not s3://)
+    CSV_PATH="${CSV_PATH//s3:\/\//s3a:\/\/}"
+    DELTA_TABLE_PATH="${DELTA_TABLE_PATH//s3:\/\//s3a:\/\/}"
     export PATH_CHECK_METHOD="s3"
     export EXECUTION_METHOD="ecs_task"
     export MODE="$DATA_LAKE_SETUP_MODE"
-    export SPARK_PACKAGES="${DELTA_LAKE_PACKAGE}"
+    export SPARK_PACKAGES="${DELTA_LAKE_PACKAGE},org.apache.hadoop:hadoop-aws:3.3.6,com.amazonaws:aws-java-sdk-bundle:1.12.470"
     export CLUSTER_NAME="fru-${ENVIRONMENT}-cluster"
     export SERVICE_NAME="fru-${ENVIRONMENT}-api-service"
     if ! "$REPO_ROOT/run_scripts/common/delta-lake/create-delta-table.sh" "$CSV_PATH" "$DELTA_TABLE_PATH"; then
-        if [ "$DATA_LAKE_SETUP_MODE" = "full-workflow" ]; then
-            log_error "Step 2/3 FAILED: Delta table creation failed"
-            exit 1
-        fi
+        log_error "Step 2/3 FAILED: Delta table creation failed"
+        exit 1
     fi
 fi
 log_success "Step 2/3 PASSED: Delta table ready"

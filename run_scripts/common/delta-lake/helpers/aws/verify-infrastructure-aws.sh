@@ -31,18 +31,23 @@ fi
 
 if [ "$MODE" = "standalone" ]; then
     if [ -n "$S3_DELTA_PATH" ]; then
-        DELTA_LOG_PATH="$S3_DELTA_PATH/_delta_log"
+        # S3_DELTA_PATH is s3://bucket/delta, append /fru_sales for the table name
+        DELTA_TABLE_NAME="${DELTA_TABLE_NAME:-fru_sales}"
+        DELTA_LOG_PATH="$S3_DELTA_PATH/$DELTA_TABLE_NAME/_delta_log"
         if ! aws s3 ls "$DELTA_LOG_PATH/" --profile "${AWS_PROFILE:-admin}" >/dev/null 2>&1; then
             exit 0
         fi
     fi
 else
     if [ -n "$S3_DELTA_PATH" ]; then
-        DELTA_LOG_PATH="$S3_DELTA_PATH/_delta_log"
+        # S3_DELTA_PATH is s3://bucket/delta, append /fru_sales for the table name
+        DELTA_TABLE_NAME="${DELTA_TABLE_NAME:-fru_sales}"
+        DELTA_LOG_PATH="$S3_DELTA_PATH/$DELTA_TABLE_NAME/_delta_log"
         if ! aws s3 ls "$DELTA_LOG_PATH/" --profile "${AWS_PROFILE:-admin}" >/dev/null 2>&1; then
-            log_error "Delta table does not exist"
+            log_error "Delta table does not exist at: $DELTA_LOG_PATH"
             exit 1
         fi
+        log_info "Delta table verified at: $S3_DELTA_PATH/$DELTA_TABLE_NAME"
     fi
 fi
 

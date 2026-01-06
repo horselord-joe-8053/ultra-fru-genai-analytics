@@ -25,9 +25,12 @@ inputs = {
   aurora_instance_count = 1
   
   # ECS configuration
+  # Note: Memory increased to 4096 MB (4 GB) to support Spark jobs in local mode
+  # Spark requires ~2-3 GB for driver + executor + Delta Lake processing
+  # CPU increased to 1024 (1 vCPU) to match memory increase (Fargate requires specific CPU/memory combinations)
   ecs_desired_count = 1
-  ecs_task_cpu = 256
-  ecs_task_memory = 512
+  ecs_task_cpu = 1024
+  ecs_task_memory = 4096
   
   # EKS configuration
   eks_cluster_version = "1.28"

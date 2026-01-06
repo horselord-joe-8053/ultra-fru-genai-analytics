@@ -49,10 +49,8 @@ else
     export MODE="$DATA_LAKE_SETUP_MODE"
     export SPARK_PACKAGES="${DELTA_LAKE_PACKAGE}"
     if ! "$REPO_ROOT/run_scripts/common/delta-lake/create-delta-table.sh" "$CSV_PATH" "$OUTPUT_PATH"; then
-        if [ "$DATA_LAKE_SETUP_MODE" = "full-workflow" ]; then
-            log_error "Step 2/3 FAILED: Delta table creation failed"
-            exit 1
-        fi
+        log_error "Step 2/3 FAILED: Delta table creation failed"
+        exit 1
     fi
 fi
 log_success "Step 2/3 PASSED: Delta table ready"
