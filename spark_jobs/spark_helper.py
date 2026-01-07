@@ -1,5 +1,6 @@
 """
-Helper functions for Spark jobs debugging and diagnostics.
+Debugging utilities for Spark jobs.
+Helps diagnose S3A configuration and environment variable issues.
 """
 import os
 

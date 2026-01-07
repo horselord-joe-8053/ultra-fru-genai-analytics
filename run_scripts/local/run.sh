@@ -212,10 +212,9 @@ main() {
     # When called from this workflow, uses full-workflow mode for comprehensive setup
     if should_setup_data_lake; then
         log_step "Step 7.5/9: Setting up data-lake (Delta table)"
-        export DATA_LAKE_SETUP_MODE="full-workflow"  # Set mode for full workflow
-        if ! "$SCRIPT_DIR/delta-lake/setup-and-verify.sh"; then
+        if ! "$SCRIPT_DIR/../spark_delta-lake_scripts/local/delta-lake/setup-and-verify.sh"; then
             log_warning "Delta-lake setup had issues (application may still work without Delta tables)"
-            log_info "You can run data-lake setup separately: $SCRIPT_DIR/delta-lake/setup-and-verify.sh"
+            log_info "You can run data-lake setup separately: $SCRIPT_DIR/../spark_delta-lake_scripts/local/delta-lake/setup-and-verify.sh"
         fi
     else
         log_info "Skipping data-lake setup (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"

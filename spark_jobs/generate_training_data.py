@@ -1,9 +1,21 @@
+"""
+Generate NLQ training data from Delta table.
+Creates question-SQL pairs for training natural language query models.
+"""
 from pyspark.sql import SparkSession
 import json
 import os
 import sys
 
+
 def main(delta_path: str, out_jsonl: str):
+    """
+    Generate training data pairs (question, SQL) from Delta table.
+    
+    Args:
+        delta_path: Path to Delta table
+        out_jsonl: Output JSONL file path
+    """
     spark = SparkSession.builder.appName("fru-generate-training-data").getOrCreate()
     df = spark.read.format("delta").load(delta_path)
 

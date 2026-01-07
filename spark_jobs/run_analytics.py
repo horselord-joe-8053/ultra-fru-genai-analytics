@@ -5,27 +5,25 @@ import json
 import os
 from datetime import datetime
 
-# Add project root to path for importing save_analytics_to_db
-# __file__ is at /app/spark_jobs/run_analytics.py, so project_root should be /app
+# Add project root to Python path for imports
+# In Docker: /app/spark_jobs/run_analytics.py -> /app
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
-
-# Also add /app explicitly (in case __file__ path resolution differs in Spark context)
 if "/app" not in sys.path:
     sys.path.insert(0, "/app")
 
 try:
-    from backend.services.analytics.save_to_db import save_analytics_to_db
-    print(f"✓ Successfully imported save_analytics_to_db from {project_root}/backend/services/analytics/save_to_db.py")
+    from spark_jobs.utils.save_to_db import save_analytics_to_db
+    print(f"✓ Successfully imported save_analytics_to_db from {project_root}/spark_jobs/utils/save_to_db.py")
 except ImportError as e:
     print(f"✗ Warning: Could not import save_analytics_to_db: {e}")
     print(f"  Project root detected: {project_root}")
     print(f"  Python path (first 3 entries): {sys.path[:3]}")
-    backend_path = os.path.join(project_root, "backend")
-    print(f"  Backend directory exists: {os.path.exists(backend_path)}")
-    analytics_path = os.path.join(project_root, "backend", "services", "analytics")
-    print(f"  Analytics directory exists: {os.path.exists(analytics_path)}")
-    save_to_db_path = os.path.join(project_root, "backend", "services", "analytics", "save_to_db.py")
+    spark_jobs_path = os.path.join(project_root, "spark_jobs")
+    print(f"  Spark jobs directory exists: {os.path.exists(spark_jobs_path)}")
+    utils_path = os.path.join(project_root, "spark_jobs", "utils")
+    print(f"  Utils directory exists: {os.path.exists(utils_path)}")
+    save_to_db_path = os.path.join(project_root, "spark_jobs", "utils", "save_to_db.py")
     print(f"  save_to_db.py exists: {os.path.exists(save_to_db_path)}")
     print("Analytics will be computed but not saved to database.")
     save_analytics_to_db = None
@@ -39,11 +37,9 @@ def main(delta_path: str, output_dir: str):
     spark_compute_limit = int(os.getenv("NUM_FOR_BATCH_ANALYTICS_TOP_SPARK_COMPUTE", "20"))
     print(f"Using Spark compute limit: {spark_compute_limit} items per aggregation")
     
-    # Convert s3:// to s3a:// for Spark/Hadoop compatibility
-    # Spark uses s3a:// filesystem, not s3://
-    spark_delta_path = delta_path.replace("s3://", "s3a://", 1) if delta_path.startswith("s3://") else delta_path
-    if spark_delta_path != delta_path:
-        print(f"Converted S3 path for Spark: {delta_path} -> {spark_delta_path}")
+    # Convert s3:// to s3a:// for Spark (Spark uses s3a:// filesystem)
+    from spark_jobs.utils.spark_config import to_spark_path
+    spark_delta_path = to_spark_path(delta_path)
     
     spark = (
         SparkSession.builder.appName("fru-batch-analytics")

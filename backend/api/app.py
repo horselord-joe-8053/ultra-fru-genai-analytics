@@ -21,7 +21,8 @@ from openai import OpenAI
 from openai import APIError as OpenAIError
 
 from backend.llm.client_factory import claude_complete, get_bedrock_client
-from backend.services.analytics.scheduler import start_analytics_scheduler
+# Analytics scheduler moved to spark_jobs/scheduler.py
+# Scheduler runs as separate process (see spark_jobs/run_scheduler.py)
 from backend.utils.env_helpers import get_required_env, get_optional_env, get_optional_bool_env, get_optional_int_env, get_required_int_env
 
 # Feature flag for agent-based query processing
@@ -799,21 +800,9 @@ if __name__ == "__main__":
 
     init_agent()
     
-    # Start analytics scheduler (if enabled)
-    enable_scheduler = get_optional_bool_env("ENABLE_ANALYTICS_SCHEDULER", False)
-    
-    if enable_scheduler:
-        try:
-            scheduler_interval_seconds = get_required_int_env(
-                "ANALYTICS_SCHEDULER_INTERVAL_SECONDS",
-                "Analytics scheduler interval in seconds (required when ENABLE_ANALYTICS_SCHEDULER=true)"
-            )
-            scheduler = start_analytics_scheduler(interval_seconds=scheduler_interval_seconds)
-            app.logger.info(f"Analytics scheduler enabled (runs every {scheduler_interval_seconds} seconds)")
-        except Exception as e:
-            app.logger.warning(f"Failed to start analytics scheduler: {e}. Analytics will not run automatically.")
-    else:
-        app.logger.info("Analytics scheduler disabled. Set ENABLE_ANALYTICS_SCHEDULER=true to enable.")
-    
+    # Analytics scheduler moved to spark_jobs/scheduler.py
+    # To run scheduler, use: python -m spark_jobs.run_scheduler
+    # Or configure Docker entrypoint to run both Flask and scheduler
     app.logger.info("Starting FRU API server...")
+    app.logger.info("Note: Analytics scheduler runs separately (see spark_jobs/run_scheduler.py)")
     app.run(host="0.0.0.0", port=5000)
