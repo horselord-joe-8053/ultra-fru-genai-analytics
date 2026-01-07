@@ -6,12 +6,12 @@
 # Default: ecs-full dev (complete ECS deployment to dev environment)
 #
 # Workflows:
-#   ecs-full        → Complete ECS deployment (build image → setup infra → deploy app)
-#   eks-full        → Complete EKS deployment (build image → setup infra → deploy app)
-#   infrastructure  → Infrastructure only (setup infra, no application)
-#   ecs             → ECS-specific steps only (legacy, for quick updates)
-#   eks             → EKS-specific steps only (legacy, for quick updates)
-#   terraform       → Terraform-specific (legacy, for manual control)
+#   ecs-full        → Complete ECS deployment (build image → setup infra → deploy app + verification)
+#   eks-full        → Complete EKS deployment (build image → setup infra → deploy app + verification)
+#   infrastructure  → Infrastructure only (via terraform/deploy.sh infrastructure: VPC, networking, DB, S3, ECS/EKS infra; no app rollout)
+#   ecs             → ECS-only deployment (legacy: ecs/deploy.sh → update ECS task definition/service only; no infra/Terraform orchestration)
+#   eks             → EKS-only deployment (legacy: eks/deploy.sh → apply/update Kubernetes manifests/Helm charts only; no infra/Terraform orchestration)
+#   terraform       → Terraform-only driver (legacy: terraform/deploy.sh → manual plan/apply for chosen stacks; no image build or app-level orchestration)
 #
 # Environment:
 #   dev             → Development environment (default)
@@ -26,7 +26,7 @@
 # Data-Lake Setup Behavior:
 #   - Automatic: Setup if ENABLE_ANALYTICS_SCHEDULER=true in .env file
 #   - Flags override automatic detection (--setup-data-lake or --skip-data-lake)
-#   - When called from run.sh, uses full-workflow mode (comprehensive setup)
+#   - Idempotent: Setup scripts are safe to run multiple times (create-if-missing)
 #   - See DATA_LAKE_USAGE_GUIDE.md for detailed scenarios
 #
 # Practical Examples:
@@ -219,7 +219,7 @@ ${BLUE}Note:${NC}
 EOF
 }
 
-# Determine if data-lake setup is needed (consistent with local)
+# Determine if data-lake setup is needed (same rules as local run.sh)
 # Priority order:
 #   1. Explicit flags (--skip-data-lake or --setup-data-lake) - highest priority
 #   2. Environment variable (ENABLE_ANALYTICS_SCHEDULER) - auto-detection
@@ -358,7 +358,7 @@ deploy_ecs_full() {
     #   - ENABLE_ANALYTICS_SCHEDULER=true in .env → Setup automatically
     #   - --setup-data-lake flag → Force setup
     #   - --skip-data-lake flag → Force skip
-    # When called from this workflow, uses full-workflow mode for comprehensive setup
+    # All setup scripts are idempotent (safe to re-run).
     if should_setup_data_lake; then
         log_step "Step 3.7/7: Setting up data-lake (S3 + Delta table)"
         if [ "$DRY_RUN" = "true" ]; then

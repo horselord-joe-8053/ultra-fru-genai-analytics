@@ -3,8 +3,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
-source "$SCRIPT_DIR/../../../../common/logger.sh"
-source "$SCRIPT_DIR/../../../../common/load-env.sh"
+source "$REPO_ROOT/run_scripts/common/logger.sh"
+source "$REPO_ROOT/run_scripts/common/load-env.sh"
 
 # Setup and verify Delta Lake for local development
 # All operations are idempotent (safe to run multiple times)
