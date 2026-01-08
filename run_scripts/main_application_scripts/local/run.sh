@@ -15,7 +15,7 @@
 #   - Automatic: Setup if ENABLE_ANALYTICS_SCHEDULER=true in .env file
 #   - Flags override automatic detection (--setup-data-lake or --skip-data-lake)
 #   - When called from this script, uses full-workflow mode (comprehensive setup)
-#   - Runs in Step 7.5/9 if enabled
+#   - Runs in Step 7.5/8 if enabled (combined with optional Spark setup)
 #
 # Practical Examples:
 #
@@ -147,77 +147,96 @@ main() {
     log_step "Starting local development environment setup"
     
     # Step 1: Check prerequisites
-    log_step "Step 1/9: Checking prerequisites"
+    log_step "Step 1/8: Checking prerequisites"
     "$REPO_ROOT/run_scripts/main_application_scripts/common/check-dependencies.sh" || exit 1
     
     # Step 2: Setup .env file
-    log_step "Step 2/9: Setting up environment file"
+    log_step "Step 2/8: Setting up environment file"
     "$SCRIPT_DIR/setup-env.sh" || exit 1
     
     # Step 3: Setup Python environment
-    log_step "Step 3/9: Setting up Python environment"
+    log_step "Step 3/8: Setting up Python environment"
     "$SCRIPT_DIR/setup-python.sh" || exit 1
     
-    # Step 3.5: Setup Spark environment (optional)
-    if should_setup_spark; then
-        log_step "Step 3.5/9: Setting up Spark environment (optional)"
-        if "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/spark/setup-spark.sh" "local"; then
-            # Validate Spark setup
-            if command -v spark-submit >/dev/null 2>&1; then
-                if spark-submit --version 2>&1 | grep -qE "version 4\.0"; then
-                    log_success "Spark 4.0.1 is configured and ready"
-                else
-                    log_warning "Spark is configured but version check failed"
-                fi
-            else
-                log_info "Spark setup completed (spark-submit not in PATH, but this is optional)"
-            fi
-        else
-            log_warning "Spark setup had issues (this is optional - Spark runs in Docker)"
-        fi
-    else
-        log_info "Skipping Spark setup (Spark is already installed in the Docker container)"
-        log_info "The fru_api container includes Spark 4.0.1, so local Spark is not needed"
-        log_info "Use --setup-spark only if you want to run Spark jobs manually outside Docker"
-    fi
-    
     # Step 4: Setup frontend dependencies
-    log_step "Step 4/9: Setting up frontend dependencies"
+    log_step "Step 4/8: Setting up frontend dependencies"
     "$SCRIPT_DIR/setup-frontend.sh" || exit 1
     
     # Step 5: Start Docker services
     # Use --force to ensure containers are recreated with latest .env variables
-    log_step "Step 5/9: Starting Docker services"
+    log_step "Step 5/8: Starting Docker services"
     "$SCRIPT_DIR/start-services.sh" --force || exit 1
     
     # Step 6: Initialize database
-    log_step "Step 6/9: Initializing database schema"
+    log_step "Step 6/8: Initializing database schema"
     "$REPO_ROOT/run_scripts/main_application_scripts/common/database/init_schema.sh" "local" || exit 1
     
     # Step 7: Load data (optional)
     if [ "$SKIP_DATA_LOAD" = false ]; then
-        log_step "Step 7/9: Loading data into database"
+        log_step "Step 7/8: Loading data into database"
         "$REPO_ROOT/run_scripts/main_application_scripts/common/database/load_data.sh" "local" || exit 1
     else
         log_info "Skipping data load (--skip-data-load flag set)"
     fi
     
-    # Step 7.5: Setup data-lake (optional, only if analytics scheduler enabled)
-    # This step is conditionally executed based on:
-    #   - ENABLE_ANALYTICS_SCHEDULER=true in .env → Setup automatically
-    #   - --setup-data-lake flag → Force setup
-    #   - --skip-data-lake flag → Force skip
-    # When called from this workflow, uses full-workflow mode for comprehensive setup
-    if should_setup_data_lake; then
-        log_step "Step 7.5/9: Setting up data-lake (Delta table)"
-        if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/local/delta-lake/setup-and-verify.sh"; then
-            log_warning "Delta-lake setup had issues (application may still work without Delta tables)"
-            log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/local/delta-lake/setup-and-verify.sh"
+    # Step 7.5: Setup Spark and data-lake (combined step)
+    # This step combines:
+    #   - Optional local Spark setup (for manual Spark job execution outside Docker)
+    #   - Delta Lake setup (uses Docker Spark by default)
+    # 
+    # Spark setup (optional):
+    #   - Only runs if --setup-spark flag is used or should_setup_spark() returns true
+    #   - Local Spark is optional because Delta Lake setup uses Docker Spark
+    #   - Use --setup-spark only if you want to run Spark jobs manually outside Docker
+    #
+    # Delta Lake setup (conditional):
+    #   - Executes if ENABLE_ANALYTICS_SCHEDULER=true in .env → Setup automatically
+    #   - Or if --setup-data-lake flag → Force setup
+    #   - Or if --skip-data-lake flag → Force skip
+    #   - Uses Docker Spark execution (EXECUTION_METHOD="docker")
+    if should_setup_spark || should_setup_data_lake; then
+        log_step "Step 7.5/8: Setting up Spark and data-lake"
+        
+        # Part 1: Optional local Spark setup (for manual usage)
+        if should_setup_spark; then
+            log_info "Setting up Spark environment locally (optional - for manual Spark job execution)"
+            if "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/spark/setup-spark.sh" "local"; then
+                # Validate Spark setup
+                if command -v spark-submit >/dev/null 2>&1; then
+                    if spark-submit --version 2>&1 | grep -qE "version 4\.0"; then
+                        log_success "Spark 4.0.1 is configured and ready (for manual usage)"
+                    else
+                        log_warning "Spark is configured but version check failed"
+                    fi
+                else
+                    log_info "Spark setup completed (spark-submit not in PATH, but this is optional)"
+                fi
+            else
+                log_warning "Spark setup had issues (this is optional - Delta Lake setup uses Docker Spark)"
+            fi
+        else
+            log_info "Skipping local Spark setup (Spark runs in Docker container)"
+            log_info "The fru_api container includes Spark 4.0.1, so local Spark is not needed for Delta Lake setup"
+            log_info "Use --setup-spark only if you want to run Spark jobs manually outside Docker"
+        fi
+        
+        # Part 2: Delta Lake setup (uses Docker Spark)
+        if should_setup_data_lake; then
+            log_info "Setting up data-lake (Delta table) using Docker Spark"
+            if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/local/delta-lake/setup-and-verify.sh"; then
+                log_warning "Delta-lake setup had issues (application may still work without Delta tables)"
+                log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/local/delta-lake/setup-and-verify.sh"
+            else
+                log_success "Delta Lake setup completed successfully"
+            fi
+        else
+            log_info "Skipping Delta Lake setup (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"
         fi
     else
-        log_info "Skipping data-lake setup (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"
-    fi
-    
+        log_info "Skipping Spark and data-lake setup"
+        log_info "  - Local Spark: Not needed (Spark runs in Docker container)"
+        log_info "  - Delta Lake: Skipped (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"
+    fi 
     # Summary
     # Note: Environment variables (including LOCAL_SERVER_PORT) are already loaded at script startup
     log_success "Local development environment is ready!"
@@ -230,7 +249,7 @@ main() {
     
     # Step 8: Start frontend in background (optional)
     if [ "$SKIP_FRONTEND" = false ]; then
-        log_step "Step 8/9: Starting frontend development server"
+        log_step "Step 8/8: Starting frontend development server"
         log_info "Starting frontend development server in background..."
         
         # Check if frontend is already running and kill it
