@@ -22,6 +22,7 @@
 #   --dry-run                → Preview changes without modifying AWS resources
 #   --setup-data-lake        → Force setup of data-lake (S3 + Delta table) even if analytics disabled
 #   --skip-data-lake         → Skip data-lake setup even if analytics scheduler is enabled
+#   --skip-cleanup           → Skip cleanup phase (Phase 7)
 #
 # Data-Lake Setup Behavior:
 #   - Automatic: Setup if ENABLE_ANALYTICS_SCHEDULER=true in .env file
@@ -89,6 +90,7 @@ DEFAULT_IMAGE_TAG="latest"
 DRY_RUN=false
 SKIP_DATA_LAKE=false
 SETUP_DATA_LAKE=false
+SKIP_CLEANUP=false
 REMAINING_ARGS=()
 
 # First, extract flags if present
@@ -100,6 +102,8 @@ for arg in "$@"; do
         SKIP_DATA_LAKE=true
     elif [ "$arg" = "--setup-data-lake" ]; then
         SETUP_DATA_LAKE=true
+    elif [ "$arg" = "--skip-cleanup" ]; then
+        SKIP_CLEANUP=true
     else
         ARGS_TO_PARSE+=("$arg")
     fi
@@ -121,7 +125,7 @@ else
 fi
 
 # Export flags for sub-scripts
-export DRY_RUN SKIP_DATA_LAKE SETUP_DATA_LAKE
+export DRY_RUN SKIP_DATA_LAKE SETUP_DATA_LAKE SKIP_CLEANUP
 
 # Show usage information
 show_usage() {
@@ -307,47 +311,49 @@ deploy_ecs_full() {
     # ============================================================================
     # Phase 1: Environment Preparation - Step 1.3: Prepare container image
     # ============================================================================
-    log_step "Phase 1: Step 1.3/9: Checking container image availability"
+    log_step "Phase 1: Step 1.3 - Step 1/10: Checking container image availability"
     if ! check_or_build_image; then
-        log_error "Phase 1: Step 1.3/9 FAILED: Container image check/build failed"
+        log_error "Phase 1: Step 1.3 - Step 1/10 FAILED: Container image check/build failed"
         log_info "Reason: Unable to check ECR for existing image or build/push new image"
         log_info "Check AWS credentials, ECR permissions, and Docker availability"
         exit 1
     fi
-    log_success "Phase 1: Step 1.3/9 PASSED: Container image ready"
+    log_success "Phase 1: Step 1.3 - Step 1/10 PASSED: Container image ready"
     
     # ============================================================================
     # Phase 2: Infrastructure Setup
     # ============================================================================
-    log_step "Phase 2: Step 2.2/9: Setting up Terraform state bucket"
+    log_step "Phase 2: Step 2.2 - Step 2/10: Setting up Terraform state bucket"
     if ! "$SCRIPT_DIR/terraform/setup-s3-bucket.sh"; then
-        log_error "Phase 2: Step 2.2/9 FAILED: Terraform state bucket setup failed"
+        log_error "Phase 2: Step 2.2 - Step 2/10 FAILED: Terraform state bucket setup failed"
         log_info "Reason: Unable to create or configure S3 bucket for Terraform state"
         log_info "Check AWS credentials, S3 permissions, and TF_STATE_BUCKET in .env"
         exit 1
     fi
-    log_success "Phase 2: Step 2.2/9 PASSED: Terraform state bucket ready"
+    log_success "Phase 2: Step 2.2 - Step 2/10 PASSED: Terraform state bucket ready"
     
     # ============================================================================
     # Phase 2: Infrastructure Setup - Step 2.3: Deploy infrastructure layer
     # ============================================================================
-    log_step "Phase 2: Step 2.3/9: Deploying infrastructure layer"
+    log_step "Phase 2: Step 2.3 - Step 3/10: Deploying infrastructure layer"
     if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" infrastructure; then
-        log_error "Phase 2: Step 2.3/9 FAILED: Infrastructure deployment failed"
+        log_error "Phase 2: Step 2.3 - Step 3/10 FAILED: Infrastructure deployment failed"
         log_info "Reason: Terraform plan or apply failed for infrastructure layer"
         log_info "Check Terraform configuration, AWS permissions, and plan output above"
         exit 1
     fi
-    log_success "Phase 2: Step 2.3/9 PASSED: Infrastructure layer deployed"
+    log_success "Phase 2: Step 2.3 - Step 3/10 PASSED: Infrastructure layer deployed"
 
     # ============================================================================
     # Phase 3: Database Setup - Step 3.3: Setup database (includes 3.1, 3.2, pgvector)
     # ============================================================================
     if [ "$DRY_RUN" != "true" ]; then
-        log_step "Phase 3: Step 3.3/9: Setting up database (pgvector, schema, data)"
-        "$SCRIPT_DIR/database/setup-database.sh" "$ENVIRONMENT" || {
-            log_warning "Database setup had issues (may already be set up)"
-        }
+        log_step "Phase 3: Step 3.3 - Step 4/10: Setting up database (pgvector, schema, data)"
+        if "$SCRIPT_DIR/database/setup-database.sh" "$ENVIRONMENT"; then
+            log_success "Phase 3: Step 3.3 - Step 4/10 PASSED: Database setup completed"
+        else
+            log_warning "Phase 3: Step 3.3 - Step 4/10 had issues (may already be set up)"
+        fi
     else
         log_info "[DRY-RUN] Skipping database setup"
     fi
@@ -355,32 +361,33 @@ deploy_ecs_full() {
     # ============================================================================
     # Phase 3: Database Setup - Step 3.4: Validate infrastructure outputs
     # ============================================================================
-    log_step "Phase 3: Step 3.4/9: Validating infrastructure outputs"
+    log_step "Phase 3: Step 3.4 - Step 5/10: Validating infrastructure outputs"
     if ! "$SCRIPT_DIR/database/validate-infra-outputs.sh" "$ENVIRONMENT"; then
-        log_error "Phase 3: Step 3.4/9 FAILED: Infrastructure outputs validation failed"
+        log_error "Phase 3: Step 3.4 - Step 5/10 FAILED: Infrastructure outputs validation failed"
         log_info "Reason: Required infrastructure outputs are missing"
         log_info "Fix infrastructure deployment issues before deploying application layer"
         exit 1
     fi
-    log_success "Phase 3: Step 3.4/9 PASSED: Infrastructure outputs validated"
+    log_success "Phase 3: Step 3.4 - Step 5/10 PASSED: Infrastructure outputs validated"
     
     # ============================================================================
     # Phase 4: Data Lake Setup
     # ============================================================================
     # Step 4.1: Setup data-lake [CONDITIONAL]
     if should_setup_data_lake; then
-        log_step "Phase 4: Step 4.1/9: Setting up data-lake (S3 + Delta table)"
+        log_step "Phase 4: Step 4.1 - Step 6/10: Setting up data-lake (S3 + Delta table)"
         if [ "$DRY_RUN" = "true" ]; then
             log_info "[DRY-RUN] Would run: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
         else
             export ENVIRONMENT="$ENVIRONMENT"
             export DRY_RUN="$DRY_RUN"
             if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"; then
-                log_warning "Delta-lake setup had issues (application may still work without Delta tables)"
+                log_warning "Phase 4: Step 4.1 - Step 6/10 had issues (application may still work without Delta tables)"
                 log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
+            else
+                log_success "Phase 4: Step 4.1 - Step 6/10 PASSED: Delta-lake ready"
             fi
         fi
-        log_success "Phase 4: Step 4.1/9 PASSED: Delta-lake ready"
     else
         log_info "Skipping data-lake setup (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"
     fi
@@ -388,28 +395,28 @@ deploy_ecs_full() {
     # ============================================================================
     # Phase 5: Application Deployment
     # ============================================================================
-    log_step "Phase 5: Step 5.1/9: Deploying application layer (ECS, ALB, CloudFront)"
+    log_step "Phase 5: Step 5.1 - Step 7/10: Deploying application layer (ECS, ALB, CloudFront)"
     log_info "Using container image: $CONTAINER_IMAGE"
     if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" application; then
-        log_error "Phase 5: Step 5.1/9 FAILED: Application deployment failed"
+        log_error "Phase 5: Step 5.1 - Step 7/10 FAILED: Application deployment failed"
         log_info "Reason: Terraform plan or apply failed for application layer"
         log_info "Check Terraform configuration, AWS permissions, CONTAINER_IMAGE, and plan output above"
         exit 1
     fi
-    log_success "Phase 5: Step 5.1/9 PASSED: Application layer deployed"
+    log_success "Phase 5: Step 5.1 - Step 7/10 PASSED: Application layer deployed"
     
     # ============================================================================
     # Phase 5: Application Deployment - Step 5.2: Deploy frontend to S3
     # ============================================================================
-    log_step "Phase 5: Step 5.2/9: Deploying frontend to S3"
+    log_step "Phase 5: Step 5.2 - Step 8/10: Deploying frontend to S3"
     export ENVIRONMENT="$ENVIRONMENT"
     if ! "$SCRIPT_DIR/shared/deploy-frontend.sh"; then
-        log_error "Phase 5: Step 5.2/9 FAILED: Frontend deployment failed"
+        log_error "Phase 5: Step 5.2 - Step 8/10 FAILED: Frontend deployment failed"
         log_info "Reason: Failed to build frontend or sync to S3"
         log_info "Check frontend build, AWS credentials, S3 permissions, and Terraform outputs"
         exit 1
     fi
-    log_success "Phase 5: Step 5.2/9 PASSED: Frontend deployed to S3"
+    log_success "Phase 5: Step 5.2 - Step 8/10 PASSED: Frontend deployed to S3"
     
     log_success "Complete ECS deployment finished successfully!"
     log_info "Your application should now be running on AWS ECS"
@@ -425,38 +432,38 @@ deploy_eks_full() {
     # ============================================================================
     # Phase 1: Environment Preparation - Step 1.3: Prepare container image
     # ============================================================================
-    log_step "Phase 1: Step 1.3/8: Checking container image availability"
+    log_step "Phase 1: Step 1.3 - Step 1/8: Checking container image availability"
     if ! check_or_build_image; then
-        log_error "Phase 1: Step 1.3/8 FAILED: Container image check/build failed"
+        log_error "Phase 1: Step 1.3 - Step 1/8 FAILED: Container image check/build failed"
         log_info "Reason: Unable to check ECR for existing image or build/push new image"
         log_info "Check AWS credentials, ECR permissions, and Docker availability"
         exit 1
     fi
-    log_success "Phase 1: Step 1.3/8 PASSED: Container image ready"
+    log_success "Phase 1: Step 1.3 - Step 1/8 PASSED: Container image ready"
     
     # ============================================================================
     # Phase 2: Infrastructure Setup
     # ============================================================================
-    log_step "Phase 2: Step 2.2/8: Setting up Terraform state bucket"
+    log_step "Phase 2: Step 2.2 - Step 2/8: Setting up Terraform state bucket"
     if ! "$SCRIPT_DIR/terraform/setup-s3-bucket.sh"; then
-        log_error "Phase 2: Step 2.2/8 FAILED: Terraform state bucket setup failed"
+        log_error "Phase 2: Step 2.2 - Step 2/8 FAILED: Terraform state bucket setup failed"
         log_info "Reason: Unable to create or configure S3 bucket for Terraform state"
         log_info "Check AWS credentials, S3 permissions, and TF_STATE_BUCKET in .env"
         exit 1
     fi
-    log_success "Phase 2: Step 2.2/8 PASSED: Terraform state bucket ready"
+    log_success "Phase 2: Step 2.2 - Step 2/8 PASSED: Terraform state bucket ready"
     
     # ============================================================================
     # Phase 2: Infrastructure Setup - Step 2.3: Deploy infrastructure layer
     # ============================================================================
-    log_step "Phase 2: Step 2.3/8: Deploying infrastructure layer"
+    log_step "Phase 2: Step 2.3 - Step 3/8: Deploying infrastructure layer"
     if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" infrastructure; then
-        log_error "Phase 2: Step 2.3/8 FAILED: Infrastructure deployment failed"
+        log_error "Phase 2: Step 2.3 - Step 3/8 FAILED: Infrastructure deployment failed"
         log_info "Reason: Terraform plan or apply failed for infrastructure layer"
         log_info "Check Terraform configuration, AWS permissions, and plan output above"
         exit 1
     fi
-    log_success "Phase 2: Step 2.3/8 PASSED: Infrastructure layer deployed"
+    log_success "Phase 2: Step 2.3 - Step 3/8 PASSED: Infrastructure layer deployed"
     
     # ============================================================================
     # (Phase 3: Database Setup is handled via Kubernetes manifests for EKS)
@@ -467,18 +474,19 @@ deploy_eks_full() {
     # ============================================================================
     # Step 4.1: Setup data-lake [CONDITIONAL]
     if should_setup_data_lake; then
-        log_step "Phase 4: Step 4.1/8: Setting up data-lake (S3 + Delta table)"
+        log_step "Phase 4: Step 4.1 - Step 4/8: Setting up data-lake (S3 + Delta table)"
         if [ "$DRY_RUN" = "true" ]; then
             log_info "[DRY-RUN] Would run: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
         else
             export ENVIRONMENT="$ENVIRONMENT"
             export DRY_RUN="$DRY_RUN"
             if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"; then
-                log_warning "Delta-lake setup had issues (application may still work without Delta tables)"
+                log_warning "Phase 4: Step 4.1 - Step 4/8 had issues (application may still work without Delta tables)"
                 log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
+            else
+                log_success "Phase 4: Step 4.1 - Step 4/8 PASSED: Delta-lake ready"
             fi
         fi
-        log_success "Phase 4: Step 4.1/8 PASSED: Delta-lake ready"
     else
         log_info "Skipping data-lake setup (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"
     fi
@@ -487,19 +495,19 @@ deploy_eks_full() {
     # Phase 5: Application Deployment
     # ============================================================================
     # Step 5.1: Deploy EKS layer
-    log_step "Phase 5: Step 5.1/8: Deploying EKS layer (EKS cluster, node groups, OIDC provider)"
+    log_step "Phase 5: Step 5.1 - Step 5/8: Deploying EKS layer (EKS cluster, node groups, OIDC provider)"
     if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" eks; then
-        log_error "Phase 5: Step 5.1/8 FAILED: EKS layer deployment failed"
+        log_error "Phase 5: Step 5.1 - Step 5/8 FAILED: EKS layer deployment failed"
         log_info "Reason: Terraform plan or apply failed for EKS layer"
         log_info "Check Terraform configuration, AWS permissions, EKS quotas, and plan output above"
         exit 1
     fi
-    log_success "Phase 5: Step 5.1/8 PASSED: EKS layer deployed"
+    log_success "Phase 5: Step 5.1 - Step 5/8 PASSED: EKS layer deployed"
     
     # ============================================================================
     # Phase 5: Application Deployment - Step 5.3: Deploy Kubernetes manifests
     # ============================================================================
-    log_step "Phase 5: Step 5.3/8: Configuring kubectl and deploying Kubernetes manifests"
+    log_step "Phase 5: Step 5.3 - Step 6/8: Configuring kubectl and deploying Kubernetes manifests"
     log_info "Using container image: $CONTAINER_IMAGE"
     
     # Get cluster name from Terraform output
@@ -538,13 +546,13 @@ deploy_eks_full() {
         
         # Deploy Kubernetes manifests
         if ! "$SCRIPT_DIR/eks/deploy.sh"; then
-            log_error "Phase 5: Step 5.3/8 FAILED: Kubernetes manifest deployment failed"
+            log_error "Phase 5: Step 5.3 - Step 6/8 FAILED: Kubernetes manifest deployment failed"
             log_info "Reason: Kubernetes manifest application or verification failed"
             log_info "Check Kubernetes manifests, EKS cluster status, and kubectl output above"
             exit 1
         fi
     fi
-    log_success "Phase 5: Step 5.3/8 PASSED: Kubernetes manifests deployed"
+    log_success "Phase 5: Step 5.3 - Step 6/8 PASSED: Kubernetes manifests deployed"
     
     log_success "Complete EKS deployment finished successfully!"
     log_info "Your application should now be running on AWS EKS"
@@ -560,27 +568,27 @@ deploy_infrastructure() {
     # ============================================================================
     # Phase 2: Infrastructure Setup
     # ============================================================================
-    log_step "Phase 2: Step 2.2/2: Setting up Terraform state bucket"
+    log_step "Phase 2: Step 2.2 - Step 1/2: Setting up Terraform state bucket"
     if ! "$SCRIPT_DIR/terraform/setup-s3-bucket.sh"; then
-        log_error "Phase 2: Step 2.2/2 FAILED: Terraform state bucket setup failed"
+        log_error "Phase 2: Step 2.2 - Step 1/2 FAILED: Terraform state bucket setup failed"
         log_info "Reason: Unable to create or configure S3 bucket for Terraform state"
         log_info "Check AWS credentials, S3 permissions, and TF_STATE_BUCKET in .env"
         exit 1
     fi
-    log_success "Phase 2: Step 2.2/2 PASSED: Terraform state bucket ready"
+    log_success "Phase 2: Step 2.2 - Step 1/2 PASSED: Terraform state bucket ready"
     
     # ============================================================================
     # Phase 2: Infrastructure Setup
     # ============================================================================
     # Step 2.3: Deploy infrastructure layer
-    log_step "Phase 2: Step 2.3/2: Deploying infrastructure layer"
+    log_step "Phase 2: Step 2.3 - Step 2/2: Deploying infrastructure layer"
     if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" infrastructure; then
-        log_error "Phase 2: Step 2.3/2 FAILED: Infrastructure deployment failed"
+        log_error "Phase 2: Step 2.3 - Step 2/2 FAILED: Infrastructure deployment failed"
         log_info "Reason: Terraform plan or apply failed for infrastructure layer"
         log_info "Check Terraform configuration, AWS permissions, and plan output above"
         exit 1
     fi
-    log_success "Phase 2: Step 2.3/2 PASSED: Infrastructure layer deployed"
+    log_success "Phase 2: Step 2.3 - Step 2/2 PASSED: Infrastructure layer deployed"
     
     log_success "Infrastructure deployment finished successfully!"
     log_info "Infrastructure is ready. Deploy application with: $0 ecs-full or $0 eks-full"
@@ -671,12 +679,61 @@ main() {
     # Note: Phase 6 only runs for full deployment workflows (ecs-full, eks-full)
     # Infrastructure-only and legacy workflows skip this phase
     if [ "$DEPLOYMENT_TYPE" = "ecs-full" ] || [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
-        log_step "Phase 6: Step 6.1: Verifying deployment and generating test instructions"
+        local step_num="9"
+        local total_steps="10"
+        if [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
+            step_num="7"
+            total_steps="8"
+        fi
+        log_step "Phase 6: Step 6.1 - Step ${step_num}/${total_steps}: Verifying deployment and generating test instructions"
         echo ""
         "$SCRIPT_DIR/verification/auto_verify_and_manual_hint.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "$DRY_RUN" || {
-            log_warning "Post-deployment verification had issues (deployment may still be successful)"
+            log_warning "Phase 6: Step 6.1 - Step ${step_num}/${total_steps} had issues (deployment may still be successful)"
             log_info "Check the verification output above for details"
         }
+    fi
+    
+    # ============================================================================
+    # Phase 7: Cleanup
+    # ============================================================================
+    # Step 7.1: Cleanup orphaned resources (optional)
+    # Note: Cleanup is optional and can be skipped
+    # Use --skip-cleanup flag to skip this phase
+    # Only runs for full deployment workflows (ecs-full, eks-full)
+    if [ "$SKIP_CLEANUP" != "true" ]; then
+        if [ "$DEPLOYMENT_TYPE" = "ecs-full" ] || [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
+            # Determine container system
+            local cont_sys="ecs"
+            if [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
+                cont_sys="eks"
+            fi
+            
+            local step_num="10"
+            local total_steps="10"
+            if [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
+                step_num="8"
+                total_steps="8"
+            fi
+            
+            log_step "Phase 7: Step 7.1 - Step ${step_num}/${total_steps}: Cleaning up orphaned AWS resources"
+            echo ""
+            # Build cleanup command with appropriate flags
+            local cleanup_cmd="$SCRIPT_DIR/cleanup-orphaned-resources.sh --cont-sys $cont_sys --environment $ENVIRONMENT"
+            if [ "$DRY_RUN" = "true" ]; then
+                cleanup_cmd="$cleanup_cmd --dry-run"
+            fi
+            # Note: Don't use --force by default (cleanup should be safe)
+            if $cleanup_cmd; then
+                log_success "Phase 7: Step 7.1 - Step ${step_num}/${total_steps} PASSED: Cleanup completed"
+            else
+                log_warning "Phase 7: Step 7.1 - Step ${step_num}/${total_steps} had issues (deployment may still be successful)"
+                log_info "Check the cleanup output above for details"
+            fi
+        else
+            log_info "Skipping cleanup (only runs for full workflows: ecs-full, eks-full)"
+        fi
+    else
+        log_info "Skipping cleanup (--skip-cleanup flag set)"
     fi
 }
 

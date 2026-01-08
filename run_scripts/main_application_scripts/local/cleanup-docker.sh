@@ -1,12 +1,21 @@
 #!/bin/bash
 # Cleanup Docker images, containers, and volumes
 # Usage: ./cleanup-docker.sh [--all] [--images] [--containers] [--volumes] [--cache]
+#
+# This script helps clean up Docker resources for local development:
+# - Stopped containers
+# - Dangling images
+# - Unused volumes
+# - Build cache
+#
+# Safety: By default, shows current usage and prompts for confirmation
+#         Use --all to clean everything (with confirmation prompt)
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
-source "$SCRIPT_DIR/../../shared/logger.sh"
+source "$REPO_ROOT/run_scripts/shared/logger.sh"
 
 CLEAN_ALL=false
 CLEAN_IMAGES=false
@@ -61,10 +70,13 @@ fi
 # Ensure Docker is running
 if ! docker info >/dev/null 2>&1; then
     log_error "Docker daemon is not running"
+    log_info "Start Docker Desktop or Docker daemon and try again"
     exit 1
 fi
 
 log_step "Docker Cleanup"
+
+local cleanup_success=true
 
 if [ "$CLEAN_ALL" = true ]; then
     log_info "Cleaning all unused Docker resources..."
@@ -76,13 +88,17 @@ if [ "$CLEAN_ALL" = true ]; then
     echo ""
     read -p "Are you sure? (yes/no): " confirm
     if [ "$confirm" != "yes" ]; then
-        log_info "Cancelled"
+        log_info "Cleanup cancelled by user"
         exit 0
     fi
     
     log_info "Running docker system prune -a -f --volumes..."
-    docker system prune -a -f --volumes
-    log_success "Cleanup complete"
+    if docker system prune -a -f --volumes; then
+        log_success "Docker cleanup completed successfully"
+    else
+        log_error "Docker cleanup failed"
+        cleanup_success=false
+    fi
 else
     if [ "$CLEAN_IMAGES" = true ]; then
         log_info "Removing dangling images..."
@@ -96,8 +112,12 @@ else
     
     if [ "$CLEAN_CONTAINERS" = true ]; then
         log_info "Removing stopped containers..."
-        docker container prune -f
-        log_success "Stopped containers removed"
+        if docker container prune -f; then
+            log_success "Stopped containers removed"
+        else
+            log_warning "Failed to remove some stopped containers"
+            cleanup_success=false
+        fi
     fi
     
     if [ "$CLEAN_VOLUMES" = true ]; then
@@ -105,20 +125,36 @@ else
         log_warning "This may remove database data if volumes are not in use!"
         read -p "Continue? (yes/no): " confirm
         if [ "$confirm" = "yes" ]; then
-            docker volume prune -f
-            log_success "Unused volumes removed"
+            if docker volume prune -f; then
+                log_success "Unused volumes removed"
+            else
+                log_warning "Failed to remove some unused volumes"
+                cleanup_success=false
+            fi
         else
-            log_info "Cancelled"
+            log_info "Volume cleanup cancelled by user"
         fi
     fi
     
     if [ "$CLEAN_CACHE" = true ]; then
         log_info "Removing build cache..."
-        docker builder prune -f
-        log_success "Build cache removed"
+        if docker builder prune -f; then
+            log_success "Build cache removed"
+        else
+            log_warning "Failed to remove some build cache"
+            cleanup_success=false
+        fi
     fi
 fi
 
+echo ""
 log_info "Current Docker disk usage after cleanup:"
 docker system df
+
+if [ "$cleanup_success" = "true" ]; then
+    exit 0
+else
+    log_warning "Some cleanup operations had issues"
+    exit 1
+fi
 

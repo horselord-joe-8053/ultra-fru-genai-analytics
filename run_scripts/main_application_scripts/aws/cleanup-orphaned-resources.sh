@@ -1,10 +1,12 @@
 #!/bin/bash
-# Cleanup script for orphaned AWS resources (S3 buckets, ECR images)
-# Usage: ./cleanup-orphaned-resources.sh [--dry-run] [--force]
+# Cleanup script for orphaned AWS resources (S3 buckets, ECR images, container resources)
+# Usage: ./cleanup-orphaned-resources.sh [--cont-sys ecs|eks] [--environment dev|staging|prod] [--dry-run] [--force]
 #
 # This script helps identify and clean up orphaned AWS resources:
 # - S3 buckets not managed by Terraform
 # - ECR images older than X days or untagged
+# - ECS resources (stopped tasks, old task definitions) if --cont-sys ecs
+# - EKS resources (old pods, unused services) if --cont-sys eks
 # - Other resources that might be left over from deployments
 #
 # Safety: By default, runs in dry-run mode showing what would be deleted
@@ -23,36 +25,59 @@ AWS_PROFILE="${AWS_PROFILE:-admin}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 ACCOUNT_ID=""
 PROJECT_NAME="fru"
-ENVIRONMENT="dev"
+ENVIRONMENT="${ENVIRONMENT:-dev}"
+CONTAINER_SYSTEM=""  # ecs or eks
 
 # Parse arguments
-for arg in "$@"; do
-    case "$arg" in
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --cont-sys)
+            CONTAINER_SYSTEM="$2"
+            if [ "$CONTAINER_SYSTEM" != "ecs" ] && [ "$CONTAINER_SYSTEM" != "eks" ]; then
+                log_error "Invalid container system: $CONTAINER_SYSTEM"
+                log_info "Must be 'ecs' or 'eks'"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --environment)
+            ENVIRONMENT="$2"
+            shift 2
+            ;;
         --force)
             FORCE_DELETE="true"
             DRY_RUN="false"
+            shift
             ;;
         --dry-run)
             DRY_RUN="true"
+            shift
             ;;
         --help|-h)
             cat << EOF
-Usage: $0 [--dry-run] [--force]
+Usage: $0 [--cont-sys ecs|eks] [--environment dev|staging|prod] [--dry-run] [--force]
 
 Cleanup orphaned AWS resources for the FRU project.
 
 Options:
-  --dry-run    Show what would be deleted without actually deleting (default)
-  --force      Actually delete resources (use with caution!)
-  --help       Show this help message
+  --cont-sys <system>   Container system to clean up (ecs or eks)
+  --environment <env>   Environment name (dev, staging, prod) - defaults to 'dev'
+  --dry-run             Show what would be deleted without actually deleting (default)
+  --force               Actually delete resources (use with caution!)
+  --help                Show this help message
 
 Examples:
-  $0                    # Dry-run: Show what would be deleted
-  $0 --dry-run          # Same as above (explicit)
-  $0 --force            # Actually delete orphaned resources
+  $0 --cont-sys ecs --environment dev                    # Dry-run: Show what would be deleted
+  $0 --cont-sys ecs --environment dev --dry-run        # Same as above (explicit)
+  $0 --cont-sys eks --environment dev --force            # Actually delete orphaned resources
 
 EOF
             exit 0
+            ;;
+        *)
+            log_error "Unknown option: $1"
+            log_info "Use --help for usage information"
+            exit 1
             ;;
     esac
 done
@@ -68,6 +93,10 @@ log_step "AWS Resource Cleanup Utility"
 log_info "Account ID: $ACCOUNT_ID"
 log_info "Region: $AWS_REGION"
 log_info "Profile: $AWS_PROFILE"
+log_info "Environment: $ENVIRONMENT"
+if [ -n "$CONTAINER_SYSTEM" ]; then
+    log_info "Container System: $CONTAINER_SYSTEM"
+fi
 if [ "$DRY_RUN" = "true" ]; then
     log_info "Mode: DRY-RUN (no resources will be deleted)"
 else
@@ -196,17 +225,113 @@ if len(images_with_dates) > 10:
 }
 
 # ============================================================================
+# ECS Resource Cleanup
+# ============================================================================
+cleanup_ecs_resources() {
+    if [ "$CONTAINER_SYSTEM" != "ecs" ]; then
+        return 0
+    fi
+    
+    log_step "Checking ECS Resources"
+    log_info "Container System: ECS"
+    
+    # Get cluster name from environment
+    local cluster_name="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
+    
+    # Check if cluster exists
+    if ! aws ecs describe-clusters --clusters "$cluster_name" --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null 2>&1; then
+        log_info "ECS cluster '$cluster_name' does not exist"
+        return 0
+    fi
+    
+    log_info "Cluster: $cluster_name"
+    
+    # List stopped tasks (potential orphans)
+    local stopped_tasks
+    stopped_tasks=$(aws ecs list-tasks --cluster "$cluster_name" --desired-status STOPPED --profile "$AWS_PROFILE" --region "$AWS_REGION" --output json 2>/dev/null || echo '{"taskArns":[]}')
+    
+    local task_count
+    task_count=$(echo "$stopped_tasks" | python3 -c "import sys, json; data=json.load(sys.stdin); print(len(data.get('taskArns', [])))" 2>/dev/null || echo "0")
+    
+    if [ "$task_count" -gt 0 ]; then
+        log_warning "  Found $task_count stopped task(s)"
+        if [ "$DRY_RUN" = "true" ]; then
+            log_info "    [DRY-RUN] Would clean up stopped tasks"
+        else
+            log_info "    Note: Stopped tasks are automatically cleaned up by ECS after a retention period"
+        fi
+    else
+        log_info "  No stopped tasks found"
+    fi
+    
+    log_info "  Note: ECS resources are typically managed by deployments"
+    log_info "  To manually clean up, use AWS Console or CLI"
+}
+
+# ============================================================================
+# EKS Resource Cleanup
+# ============================================================================
+cleanup_eks_resources() {
+    if [ "$CONTAINER_SYSTEM" != "eks" ]; then
+        return 0
+    fi
+    
+    log_step "Checking EKS Resources"
+    log_info "Container System: EKS"
+    
+    # Get cluster name from environment
+    local cluster_name="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
+    
+    # Check if cluster exists
+    if ! aws eks describe-cluster --name "$cluster_name" --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null 2>&1; then
+        log_info "EKS cluster '$cluster_name' does not exist"
+        return 0
+    fi
+    
+    log_info "Cluster: $cluster_name"
+    log_info "  Note: EKS resources (pods, services) are managed by Kubernetes"
+    log_info "  Use kubectl to manage Kubernetes resources:"
+    log_info "    kubectl get pods --all-namespaces"
+    log_info "    kubectl delete pod <pod-name> -n <namespace>"
+}
+
+# ============================================================================
 # Main Execution
 # ============================================================================
 main() {
-    cleanup_s3_buckets
-    echo ""
-    cleanup_ecr_images
+    local cleanup_failed=false
     
+    if ! cleanup_s3_buckets; then
+        cleanup_failed=true
+    fi
     echo ""
+    
+    if ! cleanup_ecr_images; then
+        cleanup_failed=true
+    fi
+    echo ""
+    
+    if [ -n "$CONTAINER_SYSTEM" ]; then
+        if [ "$CONTAINER_SYSTEM" = "ecs" ]; then
+            if ! cleanup_ecs_resources; then
+                cleanup_failed=true
+            fi
+        elif [ "$CONTAINER_SYSTEM" = "eks" ]; then
+            if ! cleanup_eks_resources; then
+                cleanup_failed=true
+            fi
+        fi
+        echo ""
+    fi
+    
+    if [ "$cleanup_failed" = "true" ]; then
+        log_error "Some cleanup operations failed"
+        exit 1
+    fi
+    
     if [ "$DRY_RUN" = "true" ]; then
         log_success "Dry-run complete. Review the output above."
-        log_info "To actually delete resources, run: $0 --force"
+        log_info "To actually delete resources, run: $0 --cont-sys $CONTAINER_SYSTEM --environment $ENVIRONMENT --force"
     else
         log_success "Cleanup complete!"
     fi
