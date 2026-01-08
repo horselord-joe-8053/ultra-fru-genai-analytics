@@ -9,8 +9,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-source "$SCRIPT_DIR/../logger.sh"
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+source "$REPO_ROOT/run_scripts/shared/logger.sh"
 
 # Default Spark installation path
 DEFAULT_SPARK_HOME="$HOME/spark/spark-4.0.1-bin-hadoop3"
@@ -132,7 +132,7 @@ setup_spark_local() {
 }
 
 main() {
-    setup_spark
+    setup_spark_local "$@"
 }
 
 main "$@"

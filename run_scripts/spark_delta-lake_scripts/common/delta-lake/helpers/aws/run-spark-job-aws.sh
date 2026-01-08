@@ -27,7 +27,7 @@ if [ -z "$INPUT_PATH" ] || [ -z "$OUTPUT_PATH" ] || [ -z "$SPARK_PACKAGES" ] || 
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../../../logger.sh"
+source "$REPO_ROOT/run_scripts/shared/logger.sh"
 
 # Get task definition from service if not provided
 if [ -z "$TASK_DEF_ARN" ]; then
@@ -117,13 +117,17 @@ NETWORK_CONFIG_JSON=$(jq -n \
     }')
 
 # Prepare command override JSON
+# We need to override BOTH entrypoint and command because the default entrypoint
+# (docker-entrypoint.sh) will start Flask API and scheduler, ignoring our command override.
+# Override entrypoint to /bin/sh and command to execute our spark-submit command.
 COMMAND_OVERRIDE_JSON=$(jq -n \
     --arg cmd "$SPARK_CMD" \
     --arg container "$CONTAINER_NAME" \
     '{
         "containerOverrides": [{
             "name": $container,
-            "command": ["sh", "-c", $cmd]
+            "entryPoint": ["/bin/sh", "-c"],
+            "command": [$cmd]
         }]
     }')
 
@@ -256,5 +260,61 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
 done
 
 log_error "Task did not complete within timeout ($TIMEOUT seconds)"
+
+# Get final task status and logs even on timeout
+TASK_STATUS=$(aws ecs describe-tasks \
+    --cluster "$CLUSTER_NAME" \
+    --tasks "$TASK_ARN" \
+    --profile "$AWS_PROFILE" \
+    --region "$AWS_REGION" \
+    --query 'tasks[0].lastStatus' \
+    --output text 2>&1)
+
+log_error "Final task status: $TASK_STATUS"
+
+# Get stopped reason if available
+if [ "$TASK_STATUS" = "STOPPED" ]; then
+    STOPPED_REASON=$(aws ecs describe-tasks \
+        --cluster "$CLUSTER_NAME" \
+        --tasks "$TASK_ARN" \
+        --profile "$AWS_PROFILE" \
+        --region "$AWS_REGION" \
+        --query 'tasks[0].stoppedReason' \
+        --output text 2>&1)
+    log_error "Stopped reason: $STOPPED_REASON"
+    
+    EXIT_CODE=$(aws ecs describe-tasks \
+        --cluster "$CLUSTER_NAME" \
+        --tasks "$TASK_ARN" \
+        --profile "$AWS_PROFILE" \
+        --region "$AWS_REGION" \
+        --query 'tasks[0].containers[0].exitCode' \
+        --output text 2>&1)
+    log_error "Exit code: $EXIT_CODE"
+fi
+
+# Try to fetch logs
+ENV_FROM_CLUSTER=$(echo "$CLUSTER_NAME" | sed 's/.*-\([^-]*\)-cluster$/\1/')
+if [ -z "$ENV_FROM_CLUSTER" ] || [ "$ENV_FROM_CLUSTER" = "$CLUSTER_NAME" ]; then
+    LOG_GROUP="/ecs/fru-${ENV_FROM_CLUSTER:-dev}"
+else
+    LOG_GROUP="/ecs/fru-${ENV_FROM_CLUSTER}"
+fi
+
+LOG_STREAM=$(aws ecs describe-tasks \
+    --cluster "$CLUSTER_NAME" \
+    --tasks "$TASK_ARN" \
+    --profile "$AWS_PROFILE" \
+    --region "$AWS_REGION" \
+    --query 'tasks[0].containers[0].logStreamName' \
+    --output text 2>&1)
+
+if [ -n "$LOG_STREAM" ] && [ "$LOG_STREAM" != "None" ]; then
+    log_info "Fetching task logs from $LOG_GROUP/$LOG_STREAM..."
+    aws logs tail "$LOG_GROUP" --log-stream-names "$LOG_STREAM" --since 30m --profile "$AWS_PROFILE" --region "$AWS_REGION" 2>&1 | tail -50
+else
+    log_warning "No log stream available for task"
+fi
+
 exit 1
 

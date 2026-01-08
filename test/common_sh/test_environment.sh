@@ -12,12 +12,12 @@ setup_aws_environment() {
     
     # Source the same utilities as auto_verify_and_manual_hint.sh does
     # shellcheck source=/dev/null
-    source "$REPO_ROOT/run_scripts/common/logger.sh" 2>/dev/null || {
+    source "$REPO_ROOT/run_scripts/shared/logger.sh" 2>/dev/null || {
         echo "ERROR: Could not source logger.sh" >&2
         exit 1
     }
     # shellcheck source=/dev/null
-    source "$REPO_ROOT/run_scripts/common/load-env.sh" 2>/dev/null || {
+    source "$REPO_ROOT/run_scripts/shared/load-env.sh" 2>/dev/null || {
         echo "ERROR: Could not source load-env.sh" >&2
         exit 1
     }
@@ -230,8 +230,8 @@ setup_local_environment() {
     
     # Source load-env.sh to get LOCAL_SERVER_PORT
     # shellcheck source=/dev/null
-    if [ -f "$REPO_ROOT/run_scripts/common/load-env.sh" ]; then
-        source "$REPO_ROOT/run_scripts/common/load-env.sh" 2>/dev/null || true
+    if [ -f "$REPO_ROOT/run_scripts/shared/load-env.sh" ]; then
+        source "$REPO_ROOT/run_scripts/shared/load-env.sh" 2>/dev/null || true
         # Load .env file if it exists
         if [ -f "$REPO_ROOT/.env" ]; then
             load_env_file 2>/dev/null || true
@@ -279,8 +279,8 @@ setup_local_environment() {
     
     # Ensure Docker daemon is running
     # shellcheck source=/dev/null
-    if [ -f "$REPO_ROOT/run_scripts/common/docker_run.sh" ]; then
-        source "$REPO_ROOT/run_scripts/common/docker_run.sh" 2>/dev/null || true
+    if [ -f "$REPO_ROOT/run_scripts/main_application_scripts/common/docker_run.sh" ]; then
+        source "$REPO_ROOT/run_scripts/main_application_scripts/common/docker_run.sh" 2>/dev/null || true
         if command -v ensure_docker_running >/dev/null 2>&1; then
             if ! ensure_docker_running; then
                 echo "ERROR: Docker daemon is not running. Please start Docker Desktop." >&2
@@ -325,8 +325,8 @@ setup_local_environment() {
     
     # Wait for database
     # shellcheck source=/dev/null
-    if [ -f "$REPO_ROOT/run_scripts/common/wait-for-service.sh" ]; then
-        source "$REPO_ROOT/run_scripts/common/wait-for-service.sh" 2>/dev/null || true
+    if [ -f "$REPO_ROOT/run_scripts/main_application_scripts/common/wait-for-service.sh" ]; then
+        source "$REPO_ROOT/run_scripts/main_application_scripts/common/wait-for-service.sh" 2>/dev/null || true
         if command -v wait_for_port >/dev/null 2>&1; then
             wait_for_port "localhost" "55432" 30 2 || true
         fi

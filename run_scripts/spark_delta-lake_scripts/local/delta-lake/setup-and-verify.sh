@@ -2,9 +2,10 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
-source "$REPO_ROOT/run_scripts/common/logger.sh"
-source "$REPO_ROOT/run_scripts/common/load-env.sh"
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
+source "$REPO_ROOT/run_scripts/shared/logger.sh"
+source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (spark local delta setup)"
 
 # Setup and verify Delta Lake for local development
 # All operations are idempotent (safe to run multiple times)

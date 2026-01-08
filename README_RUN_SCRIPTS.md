@@ -319,7 +319,7 @@ You can provide AWS credentials in **three ways** (in order of preference):
 
 # 🛠️ 5. Common Utilities
 
-### Logger (`common/logger.sh`)
+### Logger (`run_scripts/shared/logger.sh`)
 
 Provides colored logging functions:
 - `log_info "message"` - Blue info messages
@@ -328,11 +328,11 @@ Provides colored logging functions:
 - `log_error "message"` - Red error messages
 - `log_step "message"` - Green step headers
 
-### Load Environment (`common/load-env.sh`)
+### Load Environment (`run_scripts/shared/load-env.sh`)
 
 Loads `.env` file and exports all variables:
 ```bash
-source common/load-env.sh
+source run_scripts/shared/load-env.sh
 ```
 
 ### Check Dependencies (`common/check-dependencies.sh`)

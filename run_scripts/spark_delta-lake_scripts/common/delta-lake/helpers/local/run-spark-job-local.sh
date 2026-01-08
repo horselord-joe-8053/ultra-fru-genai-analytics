@@ -24,7 +24,7 @@ if [ -z "$INPUT_PATH" ] || [ -z "$OUTPUT_PATH" ] || [ -z "$SPARK_PACKAGES" ]; th
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../../../logger.sh"
+source "$REPO_ROOT/run_scripts/shared/logger.sh"
 
 case "$EXECUTION_METHOD" in
     local)

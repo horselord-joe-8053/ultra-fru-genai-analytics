@@ -24,7 +24,7 @@ DRY_RUN="${DRY_RUN:-false}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$SCRIPT_DIR/../logger.sh"
+source "$REPO_ROOT/run_scripts/shared/logger.sh"
 
 if [ -z "$INPUT_PATH" ] || [ -z "$OUTPUT_PATH" ]; then
     log_error "INPUT_PATH and OUTPUT_PATH are required"

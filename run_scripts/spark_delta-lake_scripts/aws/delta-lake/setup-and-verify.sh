@@ -2,9 +2,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
-source "$SCRIPT_DIR/../../../../common/logger.sh"
-source "$SCRIPT_DIR/../../../../common/load-env.sh"
+source "$REPO_ROOT/run_scripts/shared/logger.sh"
+source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (spark aws delta setup)"
 
 # Setup and verify Delta Lake for AWS (S3)
 # All operations are idempotent (safe to run multiple times)

@@ -9,7 +9,7 @@
 #
 # Returns: 0 if exists, 1 if not
 
-set -e
+# Don't use set -e here because we need to handle exit codes explicitly
 
 PATH_TO_CHECK="$1"
 METHOD="${2:-filesystem}"
@@ -27,14 +27,43 @@ if [ "$METHOD" = "s3" ] && [ "$IS_ECS" = "false" ]; then
 fi
 
 # Use Python helper (single source of truth for verification logic)
+# Fall back to AWS CLI if Python/boto3 is not available
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../../.." && pwd)}"
-python3 -c "
-import sys
-sys.path.insert(0, '$REPO_ROOT')
-from spark_jobs.utils.verify_delta_table import verify_delta_table_exists
-is_ecs = '$IS_ECS'.lower() == 'true'
-is_eks = '$IS_EKS'.lower() == 'true'
-result = verify_delta_table_exists('$PATH_TO_CHECK', '$REPO_ROOT', is_ecs, is_eks)
-sys.exit(0 if result else 1)
-" 2>/dev/null
+
+# Try Python verification first using CLI function with enhanced error handling
+# Exit codes: 0 = exists, 1 = not exists, 2 = error (fallback needed)
+PYTHON_OUTPUT=$(python3 -m spark_jobs.utils.verify_delta_table \
+    "$PATH_TO_CHECK" \
+    "$REPO_ROOT" \
+    "$IS_ECS" \
+    "$IS_EKS" \
+    "INFO" 2>&1)
+PYTHON_EXIT_CODE=$?
+
+if [ $PYTHON_EXIT_CODE -eq 0 ]; then
+    # Python verification succeeded
+    exit 0
+elif [ $PYTHON_EXIT_CODE -eq 1 ]; then
+    # Python verification failed (table doesn't exist)
+    exit 1
+else
+    # Python verification failed due to missing dependencies, fall back to AWS CLI
+    if [ "$METHOD" = "s3" ]; then
+        # For S3 paths, check for _delta_log directory using AWS CLI
+        DELTA_LOG_PATH="${PATH_TO_CHECK%/}/_delta_log/"
+        if aws s3 ls "$DELTA_LOG_PATH" --profile "${AWS_PROFILE:-admin}" >/dev/null 2>&1; then
+            exit 0
+        else
+            exit 1
+        fi
+    else
+        # For local filesystem, check directly
+        DELTA_LOG_PATH="${PATH_TO_CHECK%/}/_delta_log"
+        if [ -d "$DELTA_LOG_PATH" ]; then
+            exit 0
+        else
+            exit 1
+        fi
+    fi
+fi
 
