@@ -13,15 +13,15 @@
 #   - Automatic: Setup if ENABLE_ANALYTICS_SCHEDULER=true in .env file
 #   - Flags override automatic detection (--setup-data-lake or --skip-data-lake)
 #   - Uses Docker Spark execution (Spark runs in Docker container)
-#   - Runs in Step 7.5/8 if enabled
+#   - Runs in Phase 4: Step 4.1 if enabled
 #
 # Practical Examples:
 #
 #   # Basic setup (all defaults)
 #   ./run.sh                               # Full setup including data-lake if analytics enabled
 #
-#   # With analytics enabled (in .env: ENABLE_ANALYTICS_SCHEDULER=true)
-#   ./run.sh                               # Delta-lake will be set up automatically in Step 7.5
+#     # With analytics enabled (in .env: ENABLE_ANALYTICS_SCHEDULER=true)
+  #   ./run.sh                               # Delta-lake will be set up automatically in Phase 4: Step 4.1
 #
 #   # Without analytics (in .env: ENABLE_ANALYTICS_SCHEDULER=false or unset)
 #   ./run.sh                               # Delta-lake setup will be skipped
@@ -106,53 +106,69 @@ should_setup_data_lake() {
 
 
 # Main setup function
+# Handles Phase 0-6: Prerequisites → Environment Preparation → Infrastructure Setup → Database Setup → Data Lake → Application Deployment → Verification
 main() {
     log_step "Starting local development environment setup"
     
-    # Step 1: Check prerequisites
-    log_step "Step 1/8: Checking prerequisites"
+    # ============================================================================
+    # Phase 0: Prerequisites and Setup
+    # ============================================================================
+    log_step "Phase 0: Step 0.1/9: Checking prerequisites"
     "$REPO_ROOT/run_scripts/main_application_scripts/common/check-dependencies.sh" || exit 1
     
-    # Step 2: Setup .env file
-    log_step "Step 2/8: Setting up environment file"
+    log_step "Phase 0: Step 0.2/9: Setting up environment file"
     "$SCRIPT_DIR/setup-env.sh" || exit 1
     
-    # Step 3: Setup Python environment
-    log_step "Step 3/8: Setting up Python environment"
+    # ============================================================================
+    # Phase 1: Environment Preparation
+    # ============================================================================
+    log_step "Phase 1: Step 1.1/9: Setting up Python environment"
     "$SCRIPT_DIR/setup-python.sh" || exit 1
     
-    # Step 4: Setup frontend dependencies
-    log_step "Step 4/8: Setting up frontend dependencies"
+    log_step "Phase 1: Step 1.2/9: Setting up frontend dependencies"
     "$SCRIPT_DIR/setup-frontend.sh" || exit 1
     
-    # Step 5: Start Docker services
+    # ============================================================================
+    # (Phase 1: Step 1.3 is for AWS deployments only)
+    # ============================================================================
+    
+    # ============================================================================
+    # Phase 2: Infrastructure Setup
+    # ============================================================================
+    log_step "Phase 2: Step 2.1/9: Starting Docker services"
     # Use --force to ensure containers are recreated with latest .env variables
-    log_step "Step 5/8: Starting Docker services"
     "$SCRIPT_DIR/start-services.sh" --force || exit 1
     
-    # Step 6: Initialize database
-    log_step "Step 6/8: Initializing database schema"
+    # ============================================================================
+    # (Phase 2: Steps 2.2, 2.3 are for AWS deployments only)
+    # ============================================================================
+    
+    # ============================================================================
+    # Phase 3: Database Setup
+    # ============================================================================
+    log_step "Phase 3: Step 3.1/9: Initializing database schema"
     "$REPO_ROOT/run_scripts/main_application_scripts/common/database/init_schema.sh" "local" || exit 1
     
-    # Step 7: Load data (optional)
+    # Phase 3: Database Setup - Step 3.2: Load data into database (optional)
     if [ "$SKIP_DATA_LOAD" = false ]; then
-        log_step "Step 7/8: Loading data into database"
+        log_step "Phase 3: Step 3.2/9: Loading data into database"
         "$REPO_ROOT/run_scripts/main_application_scripts/common/database/load_data.sh" "local" || exit 1
     else
         log_info "Skipping data load (--skip-data-load flag set)"
     fi
     
-    # Step 7.5: Setup data-lake (Delta table using Docker Spark)
-    # This step sets up Delta Lake tables using Spark running in Docker container
-    # 
-    # Delta Lake setup (conditional):
-    #   - Executes if ENABLE_ANALYTICS_SCHEDULER=true in .env → Setup automatically
-    #   - Or if --setup-data-lake flag → Force setup
-    #   - Or if --skip-data-lake flag → Force skip
-    #   - Uses Docker Spark execution (EXECUTION_METHOD="docker")
-    #   - Spark runs inside the fru_api Docker container
+    # ============================================================================
+    # (Phase 3: Steps 3.3, 3.4 are for AWS deployments only)
+    # ============================================================================
+    
+    # ============================================================================
+    # Phase 4: Data Lake Setup
+    # ============================================================================
+    # Step 4.1: Setup data-lake [CONDITIONAL]
+    # Delta Lake setup: ENABLE_ANALYTICS_SCHEDULER=true → auto-setup, or use --setup-data-lake/--skip-data-lake flags
+    # Uses Docker Spark execution (Spark runs inside fru_api container)
     if should_setup_data_lake; then
-        log_step "Step 7.5/8: Setting up data-lake (Delta table using Docker Spark)"
+        log_step "Phase 4: Step 4.1/9: Setting up data-lake (Delta table using Docker Spark)"
         log_info "Spark runs inside the Docker container (no local Spark installation needed)"
         if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/local/delta-lake/setup-and-verify.sh"; then
             log_warning "Delta-lake setup had issues (application may still work without Delta tables)"
@@ -162,20 +178,19 @@ main() {
         fi
     else
         log_info "Skipping Delta Lake setup (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"
-    fi 
-    # Summary
-    # Note: Environment variables (including LOCAL_SERVER_PORT) are already loaded at script startup
-    log_success "Local development environment is ready!"
-    echo ""
-    log_info "Services running:"
-    log_info "  - Database: localhost:5432"
-    local server_port="${LOCAL_SERVER_PORT:-5000}"
-    log_info "  - API: http://localhost:${server_port}"
-    echo ""
+    fi
     
-    # Step 8: Start frontend in background (optional)
+    # ============================================================================
+    # Phase 5: Application Deployment
+    # ============================================================================
+    # Step 5.2: Start frontend dev server (optional)
+    
+    # ============================================================================
+    # (Phase 5: Step 5.1 is for AWS deployments only)
+    # ============================================================================
+    
     if [ "$SKIP_FRONTEND" = false ]; then
-        log_step "Step 8/8: Starting frontend development server"
+        log_step "Phase 5: Step 5.2/9: Starting frontend development server"
         log_info "Starting frontend development server in background..."
         
         # Check if frontend is already running and kill it
@@ -215,7 +230,24 @@ main() {
         log_info "Or run: ./run_scripts/local/start-frontend.sh"
     fi
     
-    # Run verification and show manual test hints (after frontend starts)
+    # ============================================================================
+    # (Phase 5: Steps 5.1, 5.3 are for AWS deployments only)
+    # ============================================================================
+    
+    # ============================================================================
+    # Phase 6: Validation and Verification
+    # ============================================================================
+    # Step 6.1: Post-deployment verification
+    # Note: Environment variables (including LOCAL_SERVER_PORT) are already loaded at script startup
+    log_success "Local development environment is ready!"
+    echo ""
+    log_info "Services running:"
+    log_info "  - Database: localhost:5432"
+    local server_port="${LOCAL_SERVER_PORT:-5000}"
+    log_info "  - API: http://localhost:${server_port}"
+    echo ""
+    
+    log_step "Phase 6: Step 6.1/9: Running verification and generating test instructions"
     echo ""
     "$SCRIPT_DIR/verification/auto_verify_and_manual_hint.sh" "false"
 }
