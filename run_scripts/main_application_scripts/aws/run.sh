@@ -302,7 +302,6 @@ deploy_ecs_full() {
     log_step "Starting complete ECS deployment workflow"
     log_info "Environment: $ENVIRONMENT"
     
-
     # Step 1: Check/build container image (idempotent)
     log_step "Step 1/7: Checking container image availability"
     if ! check_or_build_image; then

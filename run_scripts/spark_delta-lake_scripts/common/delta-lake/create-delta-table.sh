@@ -7,11 +7,10 @@
 # Required Environment Variables:
 #   SPARK_PACKAGES - Maven coordinates for Spark packages
 #   PATH_CHECK_METHOD - "filesystem" or "s3"
-#   EXECUTION_METHOD - "local", "docker", or "ecs_task"
+#   EXECUTION_METHOD - "docker" or "ecs_task"
 #   REPO_ROOT - Repository root directory
 #
 # Optional Environment Variables:
-#   SPARK_SUBMIT_PATH - Path to spark-submit (default: spark-submit)
 #   CLUSTER_NAME - ECS cluster name (required for ecs_task)
 #   SERVICE_NAME - ECS service name (required for ecs_task)
 #   DRY_RUN - "true" to preview without creating
@@ -78,13 +77,11 @@ fi
 
 # Execute Spark job based on execution method
 case "$EXECUTION_METHOD" in
-    local|docker)
-        "$SCRIPT_DIR/helpers/local/run-spark-job-local.sh" \
+    docker)
+        "$SCRIPT_DIR/helpers/local/run-spark-job-docker.sh" \
             "$INPUT_PATH" \
             "$OUTPUT_PATH" \
-            "$SPARK_PACKAGES" \
-            "$EXECUTION_METHOD" \
-            "${SPARK_SUBMIT_PATH:-spark-submit}"
+            "$SPARK_PACKAGES"
         ;;
     ecs_task)
         if [ -z "$CLUSTER_NAME" ] || [ -z "$SERVICE_NAME" ]; then
@@ -100,7 +97,7 @@ case "$EXECUTION_METHOD" in
             "$SERVICE_NAME"
         ;;
     *)
-        log_error "Unknown execution method: $EXECUTION_METHOD"
+        log_error "Unknown execution method: $EXECUTION_METHOD (must be 'docker' or 'ecs_task')"
         exit 1
         ;;
 esac

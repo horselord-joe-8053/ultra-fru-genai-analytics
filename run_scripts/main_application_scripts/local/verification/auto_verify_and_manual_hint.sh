@@ -51,7 +51,7 @@ if [ "$DRY_RUN" != "true" ]; then
         log_info "Spark is not configured locally (this is optional)"
         log_info "  Spark 4.0.1 is already installed in the fru_api Docker container"
         log_info "  The analytics scheduler runs Spark jobs inside the container automatically"
-        log_info "  Use --setup-spark flag only if you need to run Spark jobs manually outside Docker"
+        log_info "  Spark runs inside Docker - no local installation needed"
     fi
     echo ""
 fi
