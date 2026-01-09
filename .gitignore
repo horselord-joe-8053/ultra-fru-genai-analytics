@@ -66,3 +66,5 @@ pgdata/
 
 # Test cache files (local, should not be committed)
 test/cache_files/
+.env.bak*
+data/raw/*.backup*
