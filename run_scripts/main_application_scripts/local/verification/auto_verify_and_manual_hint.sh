@@ -59,8 +59,15 @@ fi
 
 # Step 2: Display manual test hints
 log_step "Step 2/4: Displaying manual test hints..."
-source "$SCRIPT_DIR/manual_test_hint.sh"
-print_manual_test_hints "$DRY_RUN"
+# Use REPO_ROOT-based path for reliability (works regardless of how script is called)
+local_manual_hint_script="$REPO_ROOT/run_scripts/main_application_scripts/local/verification/manual_test_hint.sh"
+if [ -f "$local_manual_hint_script" ]; then
+    source "$local_manual_hint_script"
+    print_manual_test_hints "$DRY_RUN"
+else
+    log_warning "manual_test_hint.sh not found at $local_manual_hint_script"
+    log_info "Skipping manual test hints display"
+fi
 
 # Step 3: Validate endpoints (using common logic)
 if [ "$DRY_RUN" != "true" ]; then

@@ -6,7 +6,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../" && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 # Save SCRIPT_DIR before sourcing load-env.sh (which sets its own SCRIPT_DIR)
 BUILD_SCRIPT_DIR="$SCRIPT_DIR"

@@ -27,7 +27,13 @@ if [ -z "$INPUT_PATH" ] || [ -z "$OUTPUT_PATH" ] || [ -z "$SPARK_PACKAGES" ] || 
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
+# Load environment variables if available (for AWS credentials)
+if [ -f "$REPO_ROOT/.env" ]; then
+    source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+    load_env_file 2>/dev/null || true
+fi
 
 # Get task definition from service if not provided
 if [ -z "$TASK_DEF_ARN" ]; then
@@ -86,7 +92,8 @@ if [ -n "$SECURITY_GROUP_IDS" ]; then
 fi
 
 # Get S3A configuration from Python helper (single source of truth)
-REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../../.." && pwd)}"
+# REPO_ROOT already defined above, but ensure it's set if not already
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../.." && pwd)}"
 S3A_CONFIG=$(python3 -c "
 import sys
 sys.path.insert(0, '$REPO_ROOT')
@@ -117,17 +124,16 @@ NETWORK_CONFIG_JSON=$(jq -n \
     }')
 
 # Prepare command override JSON
-# We need to override BOTH entrypoint and command because the default entrypoint
-# (docker-entrypoint.sh) will start Flask API and scheduler, ignoring our command override.
-# Override entrypoint to /bin/sh and command to execute our spark-submit command.
+# ECS Fargate doesn't support overriding entryPoint, so we override command only.
+# The command will be executed by the container's default entrypoint.
+# We use /bin/sh -c to execute the spark-submit command as a shell command.
 COMMAND_OVERRIDE_JSON=$(jq -n \
     --arg cmd "$SPARK_CMD" \
     --arg container "$CONTAINER_NAME" \
     '{
         "containerOverrides": [{
             "name": $container,
-            "entryPoint": ["/bin/sh", "-c"],
-            "command": [$cmd]
+            "command": ["/bin/sh", "-c", $cmd]
         }]
     }')
 
@@ -135,7 +141,9 @@ COMMAND_OVERRIDE_JSON=$(jq -n \
 log_info "Starting one-time ECS task to create Delta table..."
 log_info "This may take a few minutes..."
 
-TASK_ARN=$(aws ecs run-task \
+# Capture both stdout and stderr, and exit code
+set +e  # Temporarily disable exit on error to capture the full response
+TASK_RUN_OUTPUT=$(aws ecs run-task \
     --cluster "$CLUSTER_NAME" \
     --task-definition "$TASK_DEF_ARN" \
     --launch-type FARGATE \
@@ -143,12 +151,45 @@ TASK_ARN=$(aws ecs run-task \
     --overrides "$COMMAND_OVERRIDE_JSON" \
     --profile "$AWS_PROFILE" \
     --region "$AWS_REGION" \
-    --query 'tasks[0].taskArn' \
-    --output text 2>&1)
+    2>&1)
+TASK_RUN_EXIT_CODE=$?
+set -e  # Re-enable exit on error
 
-if [ -z "$TASK_ARN" ] || [ "$TASK_ARN" = "None" ]; then
-    log_error "Failed to start ECS task"
+if [ $TASK_RUN_EXIT_CODE -ne 0 ]; then
+    log_error "Failed to start ECS task (exit code: $TASK_RUN_EXIT_CODE)"
+    log_error "AWS CLI output:"
+    echo "$TASK_RUN_OUTPUT" | while IFS= read -r line; do
+        log_error "  $line"
+    done
     exit 1
+fi
+
+# Try to extract task ARN using jq if available, otherwise use grep/sed
+if command -v jq >/dev/null 2>&1; then
+    TASK_ARN=$(echo "$TASK_RUN_OUTPUT" | jq -r '.tasks[0].taskArn' 2>/dev/null)
+    FAILURES=$(echo "$TASK_RUN_OUTPUT" | jq -r '.failures[]?.reason' 2>/dev/null | head -1)
+else
+    # Fallback: extract task ARN using grep/sed
+    TASK_ARN=$(echo "$TASK_RUN_OUTPUT" | grep -o '"taskArn"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"taskArn"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1)
+    FAILURES=$(echo "$TASK_RUN_OUTPUT" | grep -o '"reason"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1)
+fi
+
+if [ -z "$TASK_ARN" ] || [ "$TASK_ARN" = "None" ] || [ "$TASK_ARN" = "null" ]; then
+    log_error "Failed to get task ARN from ECS run-task response"
+    log_error "AWS CLI output:"
+    echo "$TASK_RUN_OUTPUT" | while IFS= read -r line; do
+        log_error "  $line"
+    done
+    # Check for failures in the response
+    if [ -n "$FAILURES" ]; then
+        log_error "ECS task failures: $FAILURES"
+    fi
+    exit 1
+fi
+
+# Check for failures even if we got a task ARN (partial success)
+if [ -n "$FAILURES" ]; then
+    log_warning "ECS task started but there were failures: $FAILURES"
 fi
 
 log_info "Task started: $TASK_ARN"

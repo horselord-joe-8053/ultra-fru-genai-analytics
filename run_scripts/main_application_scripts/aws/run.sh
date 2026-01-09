@@ -377,8 +377,18 @@ deploy_ecs_full() {
             fi
             if ! $setup_cmd; then
                 elapsed=$(( $(date +%s) - step_start_time ))
-                log_warning "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} had issues (application may still work without Delta tables) (took $(format_elapsed_time $elapsed))"
-                log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
+                # If analytics scheduler is enabled, Delta table is REQUIRED - fail fast
+                if [ "${ENABLE_ANALYTICS_SCHEDULER:-false}" = "true" ]; then
+                    log_error "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} FAILED: Delta-lake setup failed (took $(format_elapsed_time $elapsed))"
+                    log_error "Reason: Delta table creation failed, but ENABLE_ANALYTICS_SCHEDULER=true requires Delta tables"
+                    log_error "Analytics scheduler will not work without Delta tables - deployment cannot proceed"
+                    log_info "Fix Delta table setup issues before continuing, or set ENABLE_ANALYTICS_SCHEDULER=false to skip"
+                    log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
+                    exit 1
+                else
+                    log_warning "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} had issues (application may still work without Delta tables) (took $(format_elapsed_time $elapsed))"
+                    log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
+                fi
             else
                 elapsed=$(( $(date +%s) - step_start_time ))
                 log_success "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} PASSED: Delta-lake ready (took $(format_elapsed_time $elapsed))"
@@ -516,8 +526,18 @@ deploy_eks_full() {
             fi
             if ! $setup_cmd; then
                 elapsed=$(( $(date +%s) - step_start_time ))
-                log_warning "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} had issues (application may still work without Delta tables) (took $(format_elapsed_time $elapsed))"
-                log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
+                # If analytics scheduler is enabled, Delta table is REQUIRED - fail fast
+                if [ "${ENABLE_ANALYTICS_SCHEDULER:-false}" = "true" ]; then
+                    log_error "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} FAILED: Delta-lake setup failed (took $(format_elapsed_time $elapsed))"
+                    log_error "Reason: Delta table creation failed, but ENABLE_ANALYTICS_SCHEDULER=true requires Delta tables"
+                    log_error "Analytics scheduler will not work without Delta tables - deployment cannot proceed"
+                    log_info "Fix Delta table setup issues before continuing, or set ENABLE_ANALYTICS_SCHEDULER=false to skip"
+                    log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
+                    exit 1
+                else
+                    log_warning "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} had issues (application may still work without Delta tables) (took $(format_elapsed_time $elapsed))"
+                    log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
+                fi
             else
                 elapsed=$(( $(date +%s) - step_start_time ))
                 log_success "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} PASSED: Delta-lake ready (took $(format_elapsed_time $elapsed))"

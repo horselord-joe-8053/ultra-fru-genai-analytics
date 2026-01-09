@@ -41,7 +41,9 @@ cursor_gen/
 study/
 tmp/
 data/analytics/backup_analytics_summary.json
+# Delta Lake tables (ignore directory and all subdirectories/contents)
 data/delta/
+data/delta/**
 
 # Logs
 *.log

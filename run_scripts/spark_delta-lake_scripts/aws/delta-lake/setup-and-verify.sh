@@ -2,7 +2,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../" && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 # Source CSV upload helper
@@ -94,8 +94,8 @@ else
     export CSV_WAS_UPLOADED="false"
     
     # Determine CSV path (support both local and S3 paths)
-    local local_csv_path="${CSV_PATH:-$REPO_ROOT/data/raw/fridge_sales_with_rating.csv}"
-    local s3_csv_path="s3://${S3_BUCKET_ID}/raw/fridge_sales_with_rating.csv"
+    local_csv_path="${CSV_PATH:-$REPO_ROOT/data/raw/fridge_sales_with_rating.csv}"
+    s3_csv_path="s3://${S3_BUCKET_ID}/raw/fridge_sales_with_rating.csv"
     
     # Check if CSV_PATH is already an S3 path
     if [[ "$local_csv_path" =~ ^s3:// ]]; then
@@ -152,6 +152,9 @@ print(f'{get_spark_packages(is_aws_deployment=True)}|{to_spark_path(csv_path)}|{
     export SPARK_PACKAGES
     export CLUSTER_NAME="fru-${ENVIRONMENT}-cluster"
     export SERVICE_NAME="fru-${ENVIRONMENT}-api-service"
+    # Export AWS credentials for ECS task execution
+    export AWS_PROFILE="${AWS_PROFILE:-admin}"
+    export AWS_REGION="${AWS_REGION:-us-east-1}"
     if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/create-delta-table.sh" "$CSV_PATH" "$DELTA_TABLE_PATH"; then
         log_error "Step 2/3 FAILED: Delta table creation failed"
         exit 1

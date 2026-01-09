@@ -33,6 +33,13 @@ else
     echo "[entrypoint] ENABLE_ANALYTICS_SCHEDULER is not \"true\" → scheduler will NOT run."
 fi
 
+# Check if command arguments were provided (e.g., from ECS task override)
+# If so, execute them instead of starting Flask
+if [ $# -gt 0 ]; then
+    echo "[entrypoint] Command arguments provided, executing: $@"
+    exec "$@"
+fi
+
 # Finally, start the Flask API (foreground).
 # This replaces the shell with the Python process (PID 1 in the container).
 echo "[entrypoint] Starting Flask API server..."
