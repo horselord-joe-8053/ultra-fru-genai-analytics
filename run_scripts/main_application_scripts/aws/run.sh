@@ -23,6 +23,12 @@
 #   --setup-data-lake        → Force setup of data-lake (S3 + Delta table) even if analytics disabled
 #   --skip-data-lake         → Skip data-lake setup even if analytics scheduler is enabled
 #   --skip-cleanup           → Skip cleanup phase (Phase 7)
+#   --preempt                → Destroy all AWS infrastructure before deployment (complete teardown and fresh rebuild)
+#                              Executes Phase 0: Step 0.4 - calls teardown-resources.sh to:
+#                              - Stop ECS/EKS services (scale to 0)
+#                              - Empty S3 buckets
+#                              - Destroy Terraform infrastructure
+#                              - Clean up orphaned resources
 #
 # Data-Lake Setup Behavior:
 #   - Automatic: Setup if ENABLE_ANALYTICS_SCHEDULER=true in .env file
