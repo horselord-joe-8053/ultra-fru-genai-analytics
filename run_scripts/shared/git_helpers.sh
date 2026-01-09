@@ -3,8 +3,8 @@
 # Provides consistent tag generation across all deployment scripts
 
 # Generate image tag from git commit SHA
-# Format: fru-<env>-<date>-<sha>-#<commit-slug># (clean) or fru-<env>-<date>-<sha>-dirty (dirty)
-# Example: fru-dev-20260108-999a986-#feat-add-logging# or fru-dev-20260108-999a986-dirty
+# Format: fru-<env>-<date>-<sha>-<commit-slug> (clean) or fru-<env>-<date>-<sha>-dirty (dirty)
+# Example: fru-dev-20260108-999a986-fix-teardown-script-path or fru-dev-20260108-999a986-dirty
 # 
 # This format is:
 # - Comprehensible: Easy to understand at a glance
@@ -90,8 +90,9 @@ generate_image_tag() {
     commit_msg=$(git log -1 --format=%s HEAD 2>/dev/null || echo "unknown")
     
     # Create a slug from commit message:
+    # Docker tag rules: lowercase letters, digits, underscores, periods, and hyphens only
     # 1. Convert to lowercase
-    # 2. Remove special characters (keep alphanumeric, spaces, hyphens)
+    # 2. Remove all invalid characters (keep only alphanumeric, spaces, hyphens, underscores, periods)
     # 3. Replace spaces with hyphens using tr (more reliable than sed)
     # 4. Replace multiple hyphens with single hyphen
     # 5. Remove leading/trailing hyphens
@@ -99,7 +100,7 @@ generate_image_tag() {
     local commit_slug
     commit_slug=$(echo "$commit_msg" | \
         tr '[:upper:]' '[:lower:]' | \
-        sed 's/[^a-z0-9 -]//g' | \
+        sed 's/[^a-z0-9._ -]//g' | \
         tr ' ' '-' | \
         sed 's/-\+/-/g' | \
         sed 's/^-\|-$//g' | \
@@ -110,7 +111,8 @@ generate_image_tag() {
         commit_slug="commit"
     fi
     
-    # Clean format: fru-<env>-<date>-<sha>-#<commit-slug>#
-    echo "fru-${environment}-${commit_date}-${base_sha}-#${commit_slug}#"
+    # Clean format: fru-<env>-<date>-<sha>-<commit-slug>
+    # Note: Removed # wrappers as Docker tags cannot contain # characters
+    echo "fru-${environment}-${commit_date}-${base_sha}-${commit_slug}"
 }
 
