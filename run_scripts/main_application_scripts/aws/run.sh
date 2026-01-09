@@ -9,9 +9,6 @@
 #   ecs-full        → Complete ECS deployment (build image → setup infra → deploy app + verification)
 #   eks-full        → Complete EKS deployment (build image → setup infra → deploy app + verification)
 #   infrastructure  → Infrastructure only (via terraform/deploy.sh infrastructure: VPC, networking, DB, S3, ECS/EKS infra; no app rollout)
-#   ecs             → ECS-only deployment (legacy: ecs/deploy.sh → update ECS task definition/service only; no infra/Terraform orchestration)
-#   eks             → EKS-only deployment (legacy: eks/deploy.sh → apply/update Kubernetes manifests/Helm charts only; no infra/Terraform orchestration)
-#   terraform       → Terraform-only driver (legacy: terraform/deploy.sh → manual plan/apply for chosen stacks; no image build or app-level orchestration)
 #
 # Environment:
 #   dev             → Development environment (default)
@@ -20,7 +17,6 @@
 #
 # Options:
 #   --dry-run                → Preview changes without modifying AWS resources
-#   --setup-data-lake        → Force setup of data-lake (S3 + Delta table) even if analytics disabled
 #   --skip-data-lake         → Skip data-lake setup even if analytics scheduler is enabled
 #   --skip-cleanup           → Skip cleanup phase (Phase 7)
 #   --preempt                → Destroy all AWS infrastructure before deployment (complete teardown and fresh rebuild)
@@ -32,40 +28,7 @@
 #
 # Data-Lake Setup Behavior:
 #   - Automatic: Setup if ENABLE_ANALYTICS_SCHEDULER=true in .env file
-#   - Flags override automatic detection (--setup-data-lake or --skip-data-lake)
 #   - Idempotent: Setup scripts are safe to run multiple times (create-if-missing)
-#   - See DATA_LAKE_USAGE_GUIDE.md for detailed scenarios
-#
-# Practical Examples:
-#
-#   # Basic deployment (defaults to dev environment)
-#   ./run.sh ecs-full                                    # Deploy to dev (same as below)
-#   ./run.sh ecs-full dev                                # Deploy to dev environment
-#   ./run.sh ecs-full prod                               # Deploy to prod environment
-#
-#   # With data-lake flags
-#   ./run.sh ecs-full dev --setup-data-lake              # Force data-lake setup (even if analytics disabled)
-#   ./run.sh ecs-full dev --skip-data-lake               # Skip data-lake setup (even if analytics enabled)
-#   ./run.sh ecs-full dev --dry-run --setup-data-lake    # Preview deployment including data-lake
-#
-#   # First-time deployment with analytics enabled
-#   # In .env file: ENABLE_ANALYTICS_SCHEDULER=true
-#   ./run.sh ecs-full dev                                # Delta-lake will be set up automatically in Step 3.7
-#
-#   # Deployment without analytics
-#   # In .env file: ENABLE_ANALYTICS_SCHEDULER=false (or unset)
-#   ./run.sh ecs-full dev                                # Delta-lake setup will be skipped
-#
-#   # EKS deployment
-#   ./run.sh eks-full dev                                # Complete EKS deployment to dev
-#   ./run.sh eks-full prod --setup-data-lake             # EKS deployment to prod with data-lake
-#
-#   # Infrastructure only
-#   ./run.sh infrastructure dev                          # Deploy infrastructure layer only
-#   ./run.sh infrastructure prod                         # Deploy infrastructure to production
-#
-# See DATA_LAKE_USAGE_GUIDE.md for detailed data-lake scenarios and ENVIRONMENT_PARAMETER_EXPLAINED.md
-# for information about the environment parameter.
 
 set -e
 
@@ -95,7 +58,6 @@ DEFAULT_IMAGE_TAG="latest"
 # Initialize variables
 DRY_RUN=false
 SKIP_DATA_LAKE=false
-SETUP_DATA_LAKE=false
 SKIP_CLEANUP=false
 PREEMPT=false
 REMAINING_ARGS=()
@@ -107,8 +69,6 @@ for arg in "$@"; do
         DRY_RUN=true
     elif [ "$arg" = "--skip-data-lake" ]; then
         SKIP_DATA_LAKE=true
-    elif [ "$arg" = "--setup-data-lake" ]; then
-        SETUP_DATA_LAKE=true
     elif [ "$arg" = "--skip-cleanup" ]; then
         SKIP_CLEANUP=true
     elif [ "$arg" = "--preempt" ]; then
@@ -122,7 +82,7 @@ done
 if [ ${#ARGS_TO_PARSE[@]} -eq 0 ]; then
     DEPLOYMENT_TYPE="$DEFAULT_DEPLOYMENT_TYPE"
     ENVIRONMENT="$DEFAULT_ENVIRONMENT"
-elif [[ "${ARGS_TO_PARSE[0]}" =~ ^(ecs-full|eks-full|infrastructure|ecs|eks|terraform|help|-h|--help)$ ]]; then
+elif [[ "${ARGS_TO_PARSE[0]}" =~ ^(ecs-full|eks-full|infrastructure|help|-h|--help)$ ]]; then
     DEPLOYMENT_TYPE="${ARGS_TO_PARSE[0]}"
     ENVIRONMENT="${ARGS_TO_PARSE[1]:-$DEFAULT_ENVIRONMENT}"
     REMAINING_ARGS=("${ARGS_TO_PARSE[@]:2}")
@@ -134,7 +94,7 @@ else
 fi
 
 # Export flags for sub-scripts
-export DRY_RUN SKIP_DATA_LAKE SETUP_DATA_LAKE SKIP_CLEANUP PREEMPT
+export DRY_RUN SKIP_DATA_LAKE SKIP_CLEANUP PREEMPT
 
 # Show usage information
 show_usage() {
@@ -151,30 +111,18 @@ ${BLUE}Workflows:${NC}
                               → Deploy infrastructure (VPC, Aurora, IAM, Secrets)
                               → Deploy application (ECS, ALB, Frontend)
 
-         ${GREEN}eks-full${NC}        Complete EKS deployment
-                                   → Build container image
-                                   → Setup Terraform state bucket
-                                   → Deploy infrastructure (VPC, Aurora, IAM, Secrets)
-                                   → Deploy EKS layer (EKS cluster, node groups, OIDC)
-                                   → Configure kubectl
-                                   → Deploy Kubernetes manifests
+        ${GREEN}eks-full${NC}        Complete EKS deployment
+                                → Build container image
+                                → Setup Terraform state bucket
+                                → Deploy infrastructure (VPC, Aurora, IAM, Secrets)
+                                → Deploy EKS layer (EKS cluster, node groups, OIDC)
+                                → Configure kubectl
+                                → Deploy Kubernetes manifests
 
   ${GREEN}infrastructure${NC}  Infrastructure only
                               → Setup Terraform state bucket
                               → Deploy infrastructure (VPC, Aurora, IAM, Secrets)
                               → No application deployment
-
-  ${GREEN}ecs${NC}             ECS-specific steps only (legacy)
-                              → Build container image
-                              → Deploy frontend
-                              → Reminds about infrastructure setup
-
-  ${GREEN}eks${NC}             EKS-specific steps only (legacy)
-                              → EKS deployment (not fully implemented)
-
-  ${GREEN}terraform${NC}       Terraform-specific (legacy)
-                              → Manual Terraform deployment control
-                              → Usage: $0 terraform [dev|prod] [infrastructure|application|all]
 
 ${BLUE}Environments:${NC}
   dev     Development environment (default: $DEFAULT_ENVIRONMENT)
@@ -183,7 +131,6 @@ ${BLUE}Environments:${NC}
   ${BLUE}Options:${NC}
   ${GREEN}--dry-run${NC}          Preview changes without modifying AWS resources
   ${GREEN}--preempt${NC}          Destroy existing infrastructure before deployment (clean slate)
-  ${GREEN}--setup-data-lake${NC}  Force setup of data-lake (S3 + Delta table) even if analytics disabled
   ${GREEN}--skip-data-lake${NC}   Skip data-lake setup even if analytics scheduler is enabled
   ${GREEN}--skip-cleanup${NC}     Skip cleanup phase (Phase 7)
 
@@ -201,18 +148,14 @@ ${BLUE}Examples:${NC}
 
   # With analytics disabled in .env (ENABLE_ANALYTICS_SCHEDULER=false)
   $0 ecs-full dev                      # Delta-lake setup skipped
-  $0 ecs-full dev --setup-data-lake    # Force data-lake setup anyway
   $0 ecs-full dev --skip-data-lake     # Force skip (even if analytics enabled)
 
   ${GREEN}Other Options:${NC}
   $0 ecs-full dev --dry-run            # Preview changes without deploying
-  $0 ecs-full dev --dry-run --setup-data-lake  # Preview including data-lake
-  $0 terraform dev all                 # Terraform manual control
 
 ${BLUE}Data-Lake Setup:${NC}
   The data-lake (S3 + Delta table) is automatically set up when:
   - ENABLE_ANALYTICS_SCHEDULER=true in .env file (default behavior)
-  - Or --setup-data-lake flag is used (forces setup)
   
   It is skipped when:
   - ENABLE_ANALYTICS_SCHEDULER=false or unset (default behavior)
@@ -233,18 +176,13 @@ EOF
 
 # Determine if data-lake setup is needed (same rules as local run.sh)
 # Priority order:
-#   1. Explicit flags (--skip-data-lake or --setup-data-lake) - highest priority
+#   1. Explicit flag (--skip-data-lake) - highest priority, overrides auto-detection
 #   2. Environment variable (ENABLE_ANALYTICS_SCHEDULER) - auto-detection
 #   3. Default: Skip (analytics scheduler disabled)
 should_setup_data_lake() {
     # If explicitly skipped, don't setup
     if [ "$SKIP_DATA_LAKE" = "true" ]; then
         return 1
-    fi
-    
-    # If explicitly requested, do it
-    if [ "$SETUP_DATA_LAKE" = "true" ]; then
-        return 0
     fi
     
     # Auto-detect: Check if analytics scheduler is enabled
@@ -887,22 +825,7 @@ main() {
             deploy_infrastructure
             echo ""
             ;;
-        ecs)
-            log_info "Starting ECS-specific deployment (legacy mode)..."
-            "$SCRIPT_DIR/ecs/deploy.sh" "${REMAINING_ARGS[@]}"
-            echo ""
-                ;;
-            eks)
-            log_info "Starting EKS-specific deployment (legacy mode)..."
-            "$SCRIPT_DIR/eks/deploy.sh" "${REMAINING_ARGS[@]}"
-            echo ""
-                ;;
-            terraform)
-            log_info "Starting Terraform deployment (legacy mode)..."
-            "$SCRIPT_DIR/terraform/deploy.sh" "${REMAINING_ARGS[@]}"
-            echo ""
-                ;;
-            *)
+        *)
             log_error "Unknown deployment type: $DEPLOYMENT_TYPE"
             echo ""
             show_usage

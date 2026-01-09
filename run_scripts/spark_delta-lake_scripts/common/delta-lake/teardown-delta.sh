@@ -182,7 +182,8 @@ find_delta_tables_aws() {
 # Find Delta Tables (Local)
 # ============================================================================
 find_delta_tables_local() {
-    load_env_file || true
+    # Load env file but redirect log output to stderr to avoid capturing it
+    load_env_file >&2 || true
     local delta_base_path="${DELTA_TABLE_PATH:-data/delta}"
     
     # Resolve absolute path
@@ -193,25 +194,25 @@ find_delta_tables_local() {
     fi
     
     if [ ! -d "$delta_dir" ]; then
-        log_info "Delta directory does not exist: $delta_dir"
-        log_info "No Delta tables to delete"
-        echo ""
+        log_info "Delta directory does not exist: $delta_dir" >&2
+        log_info "No Delta tables to delete" >&2
+        echo "" >&2
         return 1
     fi
     
-    log_info "Delta directory: $delta_dir"
+    log_info "Delta directory: $delta_dir" >&2
     
     # Find all Delta tables (directories with _delta_log)
     local delta_tables
     delta_tables=$(find "$delta_dir" -type d -name "_delta_log" -exec dirname {} \; 2>/dev/null | sort -u || echo "")
     
     if [ -z "$delta_tables" ]; then
-        log_info "No Delta tables found in $delta_dir"
-        echo ""
+        log_info "No Delta tables found in $delta_dir" >&2
+        echo "" >&2
         return 1
     fi
     
-    # Output table paths (one per line)
+    # Output table paths (one per line) - only actual paths, no log messages
     echo "$delta_tables"
     return 0
 }
@@ -228,7 +229,13 @@ delete_delta_table() {
     if [ "$deployment_type" = "aws" ]; then
         table_name=$(echo "$table_path" | sed 's|.*/||')
     else
-        table_name=$(basename "$table_path")
+        # Use basename but handle edge cases (paths with special chars, empty strings)
+        if [ -z "$table_path" ] || [[ "$table_path" =~ ^[[:space:]]*$ ]]; then
+            table_name="(empty)"
+        else
+            # Use -- to prevent basename from interpreting leading dashes as options
+            table_name=$(basename -- "$table_path" 2>/dev/null || echo "$table_path")
+        fi
     fi
     
     if [ "$DRY_RUN" = "true" ]; then

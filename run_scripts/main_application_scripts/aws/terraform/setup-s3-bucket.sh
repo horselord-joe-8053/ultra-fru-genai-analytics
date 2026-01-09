@@ -94,7 +94,7 @@ main() {
     log_step "Setting up Terraform state bucket"
     
     # Check AWS credentials
-    "$SCRIPT_DIR/../check-aws-credentials.sh" || exit 1
+    "$REPO_ROOT/run_scripts/main_application_scripts/aws/check-aws-credentials.sh" || exit 1
     
     # Check if TF_STATE_BUCKET is set
     if [ -z "$TF_STATE_BUCKET" ]; then

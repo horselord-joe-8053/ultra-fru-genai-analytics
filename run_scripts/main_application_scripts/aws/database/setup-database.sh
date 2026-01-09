@@ -24,13 +24,13 @@ setup_database() {
     
     # Step 2: Initialize database schema
     log_info "Step 2/3: Initializing database schema..."
-    "$SCRIPT_DIR/../../common/database/init_schema.sh" "aws" "$env" || {
+    "$REPO_ROOT/run_scripts/main_application_scripts/common/database/init_schema.sh" "aws" "$env" || {
         log_warning "Schema initialization had issues (tables may already exist)"
     }
     
     # Step 3: Load data
     log_info "Step 3/3: Loading data..."
-    "$SCRIPT_DIR/../../common/database/load_data.sh" "aws" "$env" || {
+    "$REPO_ROOT/run_scripts/main_application_scripts/common/database/load_data.sh" "aws" "$env" || {
         log_warning "Data loading had issues (data may already exist)"
     }
     

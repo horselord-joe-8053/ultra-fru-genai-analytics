@@ -28,7 +28,7 @@ deploy_frontend() {
     log_step "Deploying frontend to S3"
     
     # Check AWS credentials
-    "$SCRIPT_DIR/../check-aws-credentials.sh" || exit 1
+    "$REPO_ROOT/run_scripts/main_application_scripts/aws/check-aws-credentials.sh" || exit 1
     
     # Load environment variables
     load_env_file

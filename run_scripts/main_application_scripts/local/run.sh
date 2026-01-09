@@ -6,7 +6,6 @@
 # Options:
 #   --skip-frontend         → Skip frontend development server startup
 #   --skip-data-load        → Skip loading data into database
-#   --setup-data-lake       → Force setup of data-lake (Delta table) even if analytics disabled
 #   --skip-data-lake        → Skip data-lake setup even if analytics scheduler is enabled
 #   --skip-cleanup          → Skip cleanup phase (Phase 7)
 #   --preempt               → Destroy all local resources before setup (complete teardown and fresh rebuild)
@@ -18,38 +17,16 @@
 #
 # Data-Lake Setup Behavior:
 #   - Automatic: Setup if ENABLE_ANALYTICS_SCHEDULER=true in .env file
-#   - Flags override automatic detection (--setup-data-lake or --skip-data-lake)
+#   - Use --skip-data-lake to override and skip setup even if analytics enabled
 #   - Uses Docker Spark execution (Spark runs in Docker container)
 #   - Runs in Phase 4: Step 4.1 if enabled
-#
-# Practical Examples:
-#
-#   # Basic setup (all defaults)
-#   ./run.sh                               # Full setup including data-lake if analytics enabled
-#
-#     # With analytics enabled (in .env: ENABLE_ANALYTICS_SCHEDULER=true)
-  #   ./run.sh                               # Delta-lake will be set up automatically in Phase 4: Step 4.1
-#
-#   # Without analytics (in .env: ENABLE_ANALYTICS_SCHEDULER=false or unset)
-#   ./run.sh                               # Delta-lake setup will be skipped
-#
-#   # Force data-lake setup (even if analytics disabled)
-#   ./run.sh --setup-data-lake             # Force setup of data-lake
-#
-#   # Skip data-lake setup (even if analytics enabled)
-#   ./run.sh --skip-data-lake              # Skip data-lake setup
-#
-#   # Combine flags
-#   ./run.sh --skip-frontend --setup-data-lake    # Skip frontend, but include data-lake
-#   ./run.sh --skip-data-load --skip-data-lake    # Skip data load and data-lake
-#
-# See DATA_LAKE_USAGE_GUIDE.md for detailed data-lake scenarios.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../../shared/logger.sh"
-source "$SCRIPT_DIR/../../shared/load-env.sh"
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+source "$REPO_ROOT/run_scripts/shared/logger.sh"
+source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 load_env_file || true
 log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (local/run.sh)"
 
@@ -57,7 +34,6 @@ log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (local/run.sh)"
 SKIP_FRONTEND=false
 SKIP_DATA_LOAD=false
 SKIP_DATA_LAKE=false
-SETUP_DATA_LAKE=false
 SKIP_CLEANUP=false
 PREEMPT=false
 
@@ -69,10 +45,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-data-load)
             SKIP_DATA_LOAD=true
-            shift
-            ;;
-        --setup-data-lake)
-            SETUP_DATA_LAKE=true
             shift
             ;;
         --skip-data-lake)
@@ -89,7 +61,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             log_error "Unknown option: $1"
-            log_info "Usage: $0 [--skip-frontend] [--skip-data-load] [--setup-data-lake] [--skip-data-lake] [--skip-cleanup] [--preempt]"
+            log_info "Usage: $0 [--skip-frontend] [--skip-data-load] [--skip-data-lake] [--skip-cleanup] [--preempt]"
             exit 1
             ;;
     esac
@@ -97,18 +69,13 @@ done
 
 # Determine if data-lake setup is needed (consistent with AWS)
 # Priority order:
-#   1. Explicit flags (--skip-data-lake or --setup-data-lake) - highest priority
+#   1. Explicit flag (--skip-data-lake) - highest priority, overrides auto-detection
 #   2. Environment variable (ENABLE_ANALYTICS_SCHEDULER) - auto-detection
 #   3. Default: Skip (analytics scheduler disabled)
 should_setup_data_lake() {
     # If explicitly skipped, don't setup
     if [ "$SKIP_DATA_LAKE" = "true" ]; then
         return 1
-    fi
-    
-    # If explicitly requested, do it
-    if [ "$SETUP_DATA_LAKE" = "true" ]; then
-        return 0
     fi
     
     # Auto-detect: Check if analytics scheduler is enabled
@@ -206,12 +173,12 @@ main() {
         
         local teardown_cmd="$SCRIPT_DIR/shared/resources_cleanup/teardown-resources.sh"
         if [ "${DRY_RUN:-false}" = "true" ]; then
-            teardown_cmd="$teardown_cmd --dry-run"
+            teardown_cmd="$teardown_cmd --clean-all --dry-run"
         else
-            teardown_cmd="$teardown_cmd --force"
+            teardown_cmd="$teardown_cmd --clean-all --force"
         fi
-        # Note: Database is preserved by default (safer for developers)
-        # Use --reset-db in teardown script if full reset is needed
+        # Note: --clean-all ensures a full reset of local resources for preempt runs
+        # (database data, Docker volumes, images, and build cache)
         
         if $teardown_cmd; then
             elapsed=$(( $(date +%s) - step_start_time ))
@@ -325,7 +292,7 @@ main() {
     # Phase 4: Data Lake Setup
     # ============================================================================
     # Step 4.1: Setup data-lake [CONDITIONAL]
-    # Delta Lake setup: ENABLE_ANALYTICS_SCHEDULER=true → auto-setup, or use --setup-data-lake/--skip-data-lake flags
+    # Delta Lake setup: ENABLE_ANALYTICS_SCHEDULER=true → auto-setup, or use --skip-data-lake to override
     # Uses Docker Spark execution (Spark runs inside fru_api container)
     if should_setup_data_lake; then
         step_start_time=$(date +%s)

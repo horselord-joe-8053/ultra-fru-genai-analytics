@@ -67,7 +67,7 @@ fetch_terraform_outputs() {
     TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT"
     
     # Fetch ECS/ALB outputs
-    if [ "$DEPLOYMENT_TYPE" = "ecs-full" ] || [ "$DEPLOYMENT_TYPE" = "ecs" ]; then
+    if [ "$DEPLOYMENT_TYPE" = "ecs-full" ]; then
         APP_DIR="$TERRAFORM_DIR/application"
         if [ -d "$APP_DIR" ] && command_exists terragrunt; then
             ORIG_DIR=$(pwd)
@@ -194,7 +194,7 @@ fetch_terraform_outputs() {
     fi
     
     # Fetch EKS outputs
-    if [ "$DEPLOYMENT_TYPE" = "eks-full" ] || [ "$DEPLOYMENT_TYPE" = "eks" ]; then
+    if [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
         EKS_DIR="$TERRAFORM_DIR/eks"
         if [ -d "$EKS_DIR" ] && command_exists terragrunt; then
             ORIG_DIR=$(pwd)

@@ -481,7 +481,7 @@ deploy_terragrunt() {
     }
     
     # Check AWS credentials
-    "$SCRIPT_DIR/../check-aws-credentials.sh" || exit 1
+    "$REPO_ROOT/run_scripts/main_application_scripts/aws/check-aws-credentials.sh" || exit 1
     
     # Check if Terragrunt is installed
     if ! command_exists terragrunt; then

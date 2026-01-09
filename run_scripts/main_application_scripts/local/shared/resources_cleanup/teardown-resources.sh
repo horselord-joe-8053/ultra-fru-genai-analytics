@@ -62,9 +62,17 @@ while [[ $# -gt 0 ]]; do
             CLEAN_CACHE="true"
             shift
             ;;
+        --clean-all)
+            # Full cleanup: reset DB, remove volumes, images, and build cache
+            RESET_DB="true"
+            CLEAN_VOLUMES="true"
+            CLEAN_IMAGES="true"
+            CLEAN_CACHE="true"
+            shift
+            ;;
         --help|-h)
             cat << EOF
-Usage: $0 [--force] [--skip-confirmation] [--dry-run] [--reset-db] [--keep-db] [--clean-volumes] [--clean-images] [--clean-cache]
+Usage: $0 [--force] [--skip-confirmation] [--dry-run] [--reset-db] [--keep-db] [--clean-volumes] [--clean-images] [--clean-cache] [--clean-all]
 
 Complete local environment destruction - leaves blank slate for fresh setup.
 
@@ -79,6 +87,7 @@ Options:
   --clean-volumes       Remove Docker volumes (default: keep unless --reset-db)
   --clean-images        Remove unused Docker images (default: keep)
   --clean-cache         Remove Docker build cache (default: keep)
+  --clean-all           Remove database data, Docker volumes, images, and build cache (equivalent to --reset-db --clean-volumes --clean-images --clean-cache)
   --help                Show this help message
 
 Examples:

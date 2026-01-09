@@ -3,6 +3,9 @@
 # Used by both AWS and local verification scripts
 # Usage: source verify-endpoints.sh
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+
 # Helper function to check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1

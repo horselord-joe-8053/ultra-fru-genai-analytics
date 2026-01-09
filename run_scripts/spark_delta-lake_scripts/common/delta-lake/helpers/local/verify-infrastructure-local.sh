@@ -26,7 +26,7 @@ if [ ! -d "$DELTA_DIR" ]; then
 fi
 
 # Verify Delta table exists (uses Python helper for consistency)
-if ! "$SCRIPT_DIR/../check-delta-table-exists.sh" "$DELTA_DIR" "filesystem" "false" "false" 2>/dev/null; then
+if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/helpers/check-delta-table-exists.sh" "$DELTA_DIR" "filesystem" "false" "false" 2>/dev/null; then
     log_error "Delta table does not exist at: $DELTA_DIR"
     exit 1
 fi

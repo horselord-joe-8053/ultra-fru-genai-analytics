@@ -43,7 +43,7 @@ def main(input_path, output_path):
     
     # Write as Delta table (overwrite mode)
     df.write.format("delta").mode("overwrite").save(output_path)
-    print(f"✓ Delta table created at: {output_path}")
+    # Note: Success message is logged by the wrapper script with the host path for consistency
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:

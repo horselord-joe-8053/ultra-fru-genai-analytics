@@ -50,7 +50,7 @@ build_and_push_ecr() {
     log_step "Building and pushing Docker image to ECR"
     
     # Check AWS credentials
-    "$SCRIPT_DIR/../check-aws-credentials.sh" || exit 1
+    "$REPO_ROOT/run_scripts/main_application_scripts/aws/check-aws-credentials.sh" || exit 1
     
     # Load environment variables
     load_env_file
@@ -160,7 +160,7 @@ build_and_push_ecr() {
     fi
     
     # Ensure Docker daemon is running
-    source "$SCRIPT_DIR/../../common/docker_run.sh"
+    source "$REPO_ROOT/run_scripts/main_application_scripts/common/docker_run.sh"
     if ! ensure_docker_running; then
         log_error "Failed to start Docker daemon"
         exit 1

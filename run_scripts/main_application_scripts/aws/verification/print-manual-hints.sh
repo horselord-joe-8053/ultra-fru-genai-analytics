@@ -23,7 +23,7 @@ print_manual_test_hints() {
     log_step "How to Verify and Use Your AWS Deployment"
     echo ""
     
-    if [ "$DEPLOYMENT_TYPE" = "ecs-full" ] || [ "$DEPLOYMENT_TYPE" = "ecs" ]; then
+    if [ "$DEPLOYMENT_TYPE" = "ecs-full" ]; then
         log_info "${GREEN}1. Get Deployment URLs:${NC}"
         if [ "$DRY_RUN" = "true" ]; then
             log_info "   ${GREEN}cd $REPO_ROOT/infra/terraform/environments/$ENVIRONMENT/application${NC}"
@@ -62,7 +62,7 @@ print_manual_test_hints() {
         echo ""
     fi
     
-    if [ "$DEPLOYMENT_TYPE" = "eks-full" ] || [ "$DEPLOYMENT_TYPE" = "eks" ]; then
+    if [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
         log_info "${GREEN}1. Check Pod Status:${NC}"
         log_info "   ${GREEN}kubectl get pods -l app=fru-api${NC}"
         log_info "   ${GREEN}kubectl get svc fru-api${NC}"

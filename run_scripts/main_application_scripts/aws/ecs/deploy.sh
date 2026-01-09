@@ -37,12 +37,12 @@ main() {
     
     # Step 1: Check AWS credentials
     log_step "Step 1/4: Checking AWS credentials"
-    "$SCRIPT_DIR/../check-aws-credentials.sh" || exit 1
+    "$REPO_ROOT/run_scripts/main_application_scripts/aws/check-aws-credentials.sh" || exit 1
     
     # Step 2: Build and push to ECR
     if [ "$SKIP_BUILD" = false ]; then
         log_step "Step 2/4: Building and pushing Docker image to ECR"
-        "$SCRIPT_DIR/../shared/build-push-ecr.sh" || exit 1
+        "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/build-push-ecr.sh" || exit 1
     else
         log_info "Step 2/4: Skipping ECR build/push (--skip-build flag set)"
     fi
@@ -59,7 +59,7 @@ main() {
             fi
             npm run build
         fi
-        "$SCRIPT_DIR/../shared/deploy-frontend.sh" || exit 1
+        "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/deploy-frontend.sh" || exit 1
     else
         log_info "Step 3/4: Skipping frontend deployment (--skip-frontend flag set)"
     fi

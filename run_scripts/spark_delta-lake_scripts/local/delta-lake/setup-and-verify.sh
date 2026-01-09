@@ -2,7 +2,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (spark local delta setup)"
@@ -86,7 +86,7 @@ else
     export CSV_WAS_UPLOADED="false"
     
     # Determine CSV path (support relative and absolute paths)
-    local csv_source="${CSV_PATH:-$REPO_ROOT/data/raw/fridge_sales_with_rating.csv}"
+    csv_source="${CSV_PATH:-$REPO_ROOT/data/raw/fridge_sales_with_rating.csv}"
     if [[ ! "$csv_source" = /* ]]; then
         # Relative path - resolve to absolute
         CSV_PATH="$REPO_ROOT/$csv_source"
@@ -105,7 +105,6 @@ else
     
     # Get file info for logging
     if command -v stat >/dev/null 2>&1; then
-        local csv_size
         csv_size=$(stat -f%z "$CSV_PATH" 2>/dev/null || stat -c%s "$CSV_PATH" 2>/dev/null || echo "unknown")
         log_info "  File size: ${csv_size} bytes"
     fi

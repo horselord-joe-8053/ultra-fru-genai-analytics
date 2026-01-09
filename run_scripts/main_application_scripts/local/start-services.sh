@@ -5,9 +5,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
-source "$SCRIPT_DIR/../../shared/logger.sh"
-source "$SCRIPT_DIR/../../shared/load-env.sh"
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+source "$REPO_ROOT/run_scripts/shared/logger.sh"
+source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 
 DOCKER_DIR="$REPO_ROOT/infra/docker"
 
@@ -66,7 +66,7 @@ start_services() {
     cd "$DOCKER_DIR"
     
     # Ensure Docker daemon is running
-    source "$SCRIPT_DIR/../common/docker_run.sh"
+    source "$REPO_ROOT/run_scripts/main_application_scripts/common/docker_run.sh"
     if ! ensure_docker_running; then
         log_error "Failed to start Docker daemon"
         exit 1
@@ -84,7 +84,7 @@ start_services() {
             
             # Still wait for health checks to ensure they're ready
             load_env_file || true
-            source "$SCRIPT_DIR/../common/wait-for-service.sh"
+            source "$REPO_ROOT/run_scripts/main_application_scripts/common/wait-for-service.sh"
             wait_for_port "localhost" "55432" 10 1 || true
             local server_port="${LOCAL_SERVER_PORT:-5000}"
             wait_for_service "http://localhost:${server_port}/health" 10 1 || true
@@ -115,7 +115,7 @@ start_services() {
     load_env_file || true
     
     # Wait for database to be ready (database is exposed on port 55432 on host)
-    source "$SCRIPT_DIR/../common/wait-for-service.sh"
+    source "$REPO_ROOT/run_scripts/main_application_scripts/common/wait-for-service.sh"
     wait_for_port "localhost" "55432" 30 2
     
     # Wait for API health check (use LOCAL_SERVER_PORT from .env, default 5000)

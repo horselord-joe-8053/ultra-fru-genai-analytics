@@ -6,7 +6,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../../shared/logger.sh"
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../" && pwd)}"
+source "$REPO_ROOT/run_scripts/shared/logger.sh"
 
 # Check if Docker is already running
 check_docker_running() {

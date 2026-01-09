@@ -39,19 +39,20 @@ fi
 # Step 1.5: Check Spark setup (optional)
 log_step "Step 1.5/4: Checking Spark setup (optional)..."
 if [ "$DRY_RUN" != "true" ]; then
-    if command -v spark-submit >/dev/null 2>&1; then
-        if spark-submit --version 2>&1 | grep -qE "version 4\.0"; then
-            log_success "Spark 4.0.1 is configured and available"
-            SPARK_VERSION=$(spark-submit --version 2>&1 | grep -i "version" | head -1 || echo "Spark 4.0.1")
+    # Check Spark version inside the Docker container (fru_api),
+    # since all analytics and Delta jobs run there.
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^fru_api$'; then
+        SPARK_VERSION_OUTPUT=$(docker exec fru_api spark-submit --version 2>&1 || echo "")
+        if printf '%s' "$SPARK_VERSION_OUTPUT" | grep -qE 'version 4\.0'; then
+            log_success "Spark 4.0.x is configured in Docker (fru_api container)"
+            SPARK_VERSION=$(printf '%s' "$SPARK_VERSION_OUTPUT" | grep -i 'version' | head -1 || echo 'Spark 4.0.x')
             log_info "  $SPARK_VERSION"
         else
-            log_warning "Spark is installed but not version 4.0"
+            log_warning "Spark inside Docker (fru_api) is not version 4.0.x"
         fi
     else
-        log_info "Spark is not configured locally (this is optional)"
-        log_info "  Spark 4.0.1 is already installed in the fru_api Docker container"
-        log_info "  The analytics scheduler runs Spark jobs inside the container automatically"
-        log_info "  Spark runs inside Docker - no local installation needed"
+        log_info "Docker container fru_api is not running; skipping Spark check (optional)"
+        log_info "  Analytics jobs and Delta table creation run inside this container when available."
     fi
     echo ""
 fi

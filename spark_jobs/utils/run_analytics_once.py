@@ -16,6 +16,15 @@ Environment Variables:
 """
 import os
 import sys
+
+# Add /app to Python path if not already present (needed for imports when run directly)
+# This file is at /app/spark_jobs/utils/run_analytics_once.py
+# So we need /app in the path to import spark_jobs
+script_dir = os.path.dirname(os.path.abspath(__file__))
+app_dir = os.path.dirname(os.path.dirname(script_dir))  # /app/spark_jobs/utils -> /app
+if app_dir not in sys.path:
+    sys.path.insert(0, app_dir)
+
 import logging
 from spark_jobs.scheduler import run_spark_analytics
 

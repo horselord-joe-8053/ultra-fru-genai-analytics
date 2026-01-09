@@ -38,16 +38,76 @@ if ! docker exec fru_api test -f "$SPARK_SUBMIT_PATH" 2>/dev/null; then
     exit 1
 fi
 
+# Convert host paths to container paths
+# The data directory is mounted at /app/data in the container
+CONTAINER_DATA_DIR="/app/data"
+HOST_DATA_DIR="$REPO_ROOT/data"
+
+# Convert INPUT_PATH to container path
+if [[ "$INPUT_PATH" == "$HOST_DATA_DIR"/* ]]; then
+    # Path is within the data directory, convert to container path
+    CONTAINER_INPUT_PATH="${INPUT_PATH#$HOST_DATA_DIR}"
+    CONTAINER_INPUT_PATH="$CONTAINER_DATA_DIR$CONTAINER_INPUT_PATH"
+elif [[ "$INPUT_PATH" == "$REPO_ROOT"/* ]]; then
+    # Path is within repo but not in data, try to find relative path
+    RELATIVE_PATH="${INPUT_PATH#$REPO_ROOT/}"
+    if [[ "$RELATIVE_PATH" == data/* ]]; then
+        CONTAINER_INPUT_PATH="/app/$RELATIVE_PATH"
+    else
+        log_error "Input path must be within the data directory: $INPUT_PATH"
+        exit 1
+    fi
+else
+    # Assume it's already a container path or relative path
+    if [[ "$INPUT_PATH" == /app/data/* ]]; then
+        CONTAINER_INPUT_PATH="$INPUT_PATH"
+    elif [[ "$INPUT_PATH" == data/* ]]; then
+        CONTAINER_INPUT_PATH="/app/$INPUT_PATH"
+    else
+        log_error "Cannot determine container path for: $INPUT_PATH"
+        exit 1
+    fi
+fi
+
+# Convert OUTPUT_PATH to container path
+if [[ "$OUTPUT_PATH" == "$HOST_DATA_DIR"/* ]]; then
+    # Path is within the data directory, convert to container path
+    CONTAINER_OUTPUT_PATH="${OUTPUT_PATH#$HOST_DATA_DIR}"
+    CONTAINER_OUTPUT_PATH="$CONTAINER_DATA_DIR$CONTAINER_OUTPUT_PATH"
+elif [[ "$OUTPUT_PATH" == "$REPO_ROOT"/* ]]; then
+    # Path is within repo but not in data, try to find relative path
+    RELATIVE_PATH="${OUTPUT_PATH#$REPO_ROOT/}"
+    if [[ "$RELATIVE_PATH" == data/* ]]; then
+        CONTAINER_OUTPUT_PATH="/app/$RELATIVE_PATH"
+    else
+        log_error "Output path must be within the data directory: $OUTPUT_PATH"
+        exit 1
+    fi
+else
+    # Assume it's already a container path or relative path
+    if [[ "$OUTPUT_PATH" == /app/data/* ]]; then
+        CONTAINER_OUTPUT_PATH="$OUTPUT_PATH"
+    elif [[ "$OUTPUT_PATH" == data/* ]]; then
+        CONTAINER_OUTPUT_PATH="/app/$OUTPUT_PATH"
+    else
+        log_error "Cannot determine container path for: $OUTPUT_PATH"
+        exit 1
+    fi
+fi
+
+log_info "Host input path: $INPUT_PATH -> Container path: $CONTAINER_INPUT_PATH"
+log_info "Host output path: $OUTPUT_PATH -> Container path: $CONTAINER_OUTPUT_PATH"
+
 # Execute Spark job inside Docker container
 docker exec -w /app -e DELTA_LAKE_PACKAGE="$SPARK_PACKAGES" fru_api \
     "$SPARK_SUBMIT_PATH" \
     --packages "$SPARK_PACKAGES" \
     /app/spark_jobs/ingest_delta.py \
-    "$INPUT_PATH" \
-    "$OUTPUT_PATH" || {
+    "$CONTAINER_INPUT_PATH" \
+    "$CONTAINER_OUTPUT_PATH" || {
     log_error "Failed to create Delta table using Docker Spark"
     exit 1
 }
 
-log_success "Delta table created successfully using Docker Spark"
+log_success "Delta table created successfully at: $OUTPUT_PATH"
 

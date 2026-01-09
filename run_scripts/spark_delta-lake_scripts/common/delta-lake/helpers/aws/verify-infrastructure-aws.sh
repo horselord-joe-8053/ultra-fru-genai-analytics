@@ -38,7 +38,7 @@ if [ -n "$S3_DELTA_PATH" ]; then
     DELTA_TABLE_NAME="${DELTA_TABLE_NAME:-fru_sales}"
     DELTA_TABLE_PATH="$S3_DELTA_PATH/$DELTA_TABLE_NAME"
     
-    if ! "$SCRIPT_DIR/../check-delta-table-exists.sh" "$DELTA_TABLE_PATH" "s3" "true" "false" 2>/dev/null; then
+    if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/helpers/check-delta-table-exists.sh" "$DELTA_TABLE_PATH" "s3" "true" "false" 2>/dev/null; then
         log_error "Delta table does not exist at: $DELTA_TABLE_PATH"
         exit 1
     fi

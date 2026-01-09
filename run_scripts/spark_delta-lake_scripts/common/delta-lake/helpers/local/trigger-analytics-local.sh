@@ -22,8 +22,9 @@ fi
 log_info "Triggering analytics job in Docker container..."
 
 # Call Python module directly via docker exec
+# Set PYTHONPATH to ensure spark_jobs module can be imported
 # Run in background (non-blocking) to avoid delaying setup script
-docker exec fru_api python /app/spark_jobs/utils/run_analytics_once.py &
+docker exec -e PYTHONPATH=/app fru_api python /app/spark_jobs/utils/run_analytics_once.py &
 ANALYTICS_PID=$!
 
 log_info "Analytics job started in background (PID: $ANALYTICS_PID)"
