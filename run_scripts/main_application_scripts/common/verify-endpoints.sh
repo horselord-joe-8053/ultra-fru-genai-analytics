@@ -223,7 +223,8 @@ validate_query_stream_endpoint() {
             
             # Get actual response body (everything except last 2 lines)
             local response_body
-            response_body=$(echo "$stream_response" | head -n -2)
+            # Use sed to remove last 2 lines (more portable than head -n -2)
+            response_body=$(echo "$stream_response" | sed -e '$d' -e '$d')
             
             # Verify Content-Type is correct for SSE
             local content_type_ok=false

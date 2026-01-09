@@ -238,10 +238,16 @@ terraform_destroy() {
         log_info "[DRY-RUN] This would destroy all Terraform-managed infrastructure"
     else
         log_info "Calling Terraform teardown..."
-        if "$SCRIPT_DIR/terraform/teardown.sh" "$ENVIRONMENT" "all"; then
-            log_success "Terraform infrastructure destroyed"
+        local terraform_teardown_script="$REPO_ROOT/run_scripts/main_application_scripts/aws/terraform/teardown.sh"
+        if [ -f "$terraform_teardown_script" ]; then
+            if "$terraform_teardown_script" "$ENVIRONMENT" "all"; then
+                log_success "Terraform infrastructure destroyed"
+            else
+                log_warning "Terraform teardown had issues (may have been partially destroyed)"
+            fi
         else
-            log_warning "Terraform teardown had issues (may have been partially destroyed)"
+            log_warning "Terraform teardown script not found at: $terraform_teardown_script"
+            log_info "Skipping Terraform teardown (infrastructure may need manual cleanup)"
         fi
     fi
     echo ""

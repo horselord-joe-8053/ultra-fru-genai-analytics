@@ -769,9 +769,14 @@ main() {
             fi
             
             local destroy_cmd="$SCRIPT_DIR/shared/resources_cleanup/teardown-resources.sh $ENVIRONMENT"
+            # --dry-run and --force are NOT mutually exclusive
+            # --dry-run: preview what would be destroyed
+            # --force: skip confirmation prompts
             if [ "$DRY_RUN" = "true" ]; then
                 destroy_cmd="$destroy_cmd --dry-run"
-            else
+            fi
+            if [ "$PREEMPT" = "true" ]; then
+                # PREEMPT mode: skip confirmation and force destruction
                 destroy_cmd="$destroy_cmd --force"
             fi
             
