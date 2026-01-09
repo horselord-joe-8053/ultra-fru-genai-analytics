@@ -45,23 +45,36 @@ deploy_frontend() {
     if [ -d "$APP_DIR" ] && command_exists terragrunt; then
         ORIG_DIR=$(pwd)
         cd "$APP_DIR" 2>/dev/null || {
-            log_warning "Could not access Terraform application directory, using default bucket name"
-            s3_bucket_name="${S3_BUCKET_NAME:-fru-frontend-bucket}"
+            log_error "Could not access Terraform application directory: $APP_DIR"
+            log_error "Terraform application layer must be deployed first"
+            log_info "Deploy infrastructure with: ./run_scripts/main_application_scripts/aws/run.sh infrastructure $ENVIRONMENT"
+            exit 1
         }
-        if [ -z "$s3_bucket_name" ]; then
-            s3_bucket_name=$(terragrunt output -raw s3_bucket_id 2>/dev/null || echo "")
-        fi
+        s3_bucket_name=$(terragrunt output -raw s3_bucket_id 2>/dev/null || echo "")
         cd "$ORIG_DIR" 2>/dev/null || true
+    else
+        if [ ! -d "$APP_DIR" ]; then
+            log_error "Terraform application directory not found: $APP_DIR"
+        fi
+        if ! command_exists terragrunt; then
+            log_error "Terragrunt is not installed or not in PATH"
+        fi
+        log_error "Cannot get S3 bucket name from Terraform"
+        log_info "Terraform application layer must be deployed first"
+        log_info "Deploy infrastructure with: ./run_scripts/main_application_scripts/aws/run.sh infrastructure $ENVIRONMENT"
+        exit 1
     fi
     
-    # Fallback to default if Terraform output not available
+    # Require Terraform output - fail if not available
     if [ -z "$s3_bucket_name" ]; then
-        s3_bucket_name="${S3_BUCKET_NAME:-fru-frontend-bucket}"
-        log_warning "Could not get S3 bucket name from Terraform, using default: $s3_bucket_name"
-        log_info "To use the correct bucket, ensure Terraform application layer is deployed first"
-    else
-        log_info "Using S3 bucket from Terraform: $s3_bucket_name"
+        log_error "Failed to get S3 bucket name from Terraform output"
+        log_error "Terraform application layer may not be deployed, or s3_bucket_id output is missing"
+        log_info "Deploy infrastructure with: ./run_scripts/main_application_scripts/aws/run.sh infrastructure $ENVIRONMENT"
+        log_info "Then deploy application with: ./run_scripts/main_application_scripts/aws/run.sh application $ENVIRONMENT"
+        exit 1
     fi
+    
+    log_info "Using S3 bucket from Terraform: $s3_bucket_name"
     
     S3_BUCKET_NAME="$s3_bucket_name"
     

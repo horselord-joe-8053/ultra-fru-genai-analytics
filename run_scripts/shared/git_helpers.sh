@@ -3,27 +3,44 @@
 # Provides consistent tag generation across all deployment scripts
 
 # Generate image tag from git commit SHA
-# Detects uncommitted changes and includes working tree hash when dirty
+# Format: fru-<env>-<date>-<sha>-#<commit-slug># (clean) or fru-<env>-<date>-<sha>-dirty (dirty)
+# Example: fru-dev-20260108-999a986-#feat-add-logging# or fru-dev-20260108-999a986-dirty
+# 
+# This format is:
+# - Comprehensible: Easy to understand at a glance
+# - Simple: Clear structure with meaningful parts
+# - Searchable: Can search by date, environment, or commit message keywords
+#
 # For production deployments, blocks uncommitted changes (fail-fast)
 # Usage: IMAGE_TAG=$(generate_image_tag)
 generate_image_tag() {
     # Check if git is available and we're in a git repository
     if ! command -v git >/dev/null 2>&1 || ! git rev-parse --git-dir >/dev/null 2>&1; then
         # Not in git repository: use timestamp as fallback
-        echo "build-$(date +%Y%m%d-%H%M%S)"
+        local environment="${ENVIRONMENT:-dev}"
+        environment=$(echo "$environment" | sed 's/[^a-zA-Z0-9]//g' | tr '[:upper:]' '[:lower:]')
+        if [ -z "$environment" ]; then
+            environment="dev"
+        fi
+        echo "fru-${environment}-$(date +%Y%m%d)-build-$(date +%H%M%S)"
         return
     fi
     
-    local base_sha
-    base_sha=$(git rev-parse --short HEAD)
-    
-    # Get environment for suffix (default to dev)
+    # Get environment (default to dev)
     local environment="${ENVIRONMENT:-dev}"
-    # Sanitize environment name (only alphanumeric and underscore)
-    environment=$(echo "$environment" | sed 's/[^a-zA-Z0-9_]//g')
+    # Sanitize environment name (only alphanumeric, lowercase)
+    environment=$(echo "$environment" | sed 's/[^a-zA-Z0-9]//g' | tr '[:upper:]' '[:lower:]')
     if [ -z "$environment" ]; then
         environment="dev"  # Fallback if sanitization removed everything
     fi
+    
+    # Get commit date (YYYYMMDD format for searchability)
+    local commit_date
+    commit_date=$(git log -1 --format=%cd --date=format:%Y%m%d HEAD 2>/dev/null || date +%Y%m%d)
+    
+    # Get commit SHA (short, 7 characters)
+    local base_sha
+    base_sha=$(git rev-parse --short HEAD)
     
     # Check if working tree is clean (no uncommitted changes)
     local has_uncommitted=false
@@ -31,53 +48,69 @@ generate_image_tag() {
         has_uncommitted=true
     fi
     
-    if [ "$has_uncommitted" = false ]; then
-        # Clean working tree: use commit SHA with environment suffix
-        echo "git-${base_sha}_${environment}"
+    # Dirty working tree detected
+    if [ "$has_uncommitted" = true ]; then
+        local allow_dirty="${ALLOW_DIRTY_DEPLOYMENT:-false}"
+        
+        # For production: block dirty deployments unless explicitly allowed
+        if [ "$environment" = "prod" ] && [ "$allow_dirty" != "true" ]; then
+            # Source logger if available
+            if [ -n "${log_error:-}" ]; then
+                log_error "Uncommitted changes detected in PRODUCTION deployment!"
+                log_error "All changes must be committed before production deployment."
+                log_error "To override (NOT RECOMMENDED), set ALLOW_DIRTY_DEPLOYMENT=true"
+                log_info "Current uncommitted changes:"
+                git status --short | head -10
+            else
+                echo "ERROR: Uncommitted changes detected in PRODUCTION deployment!" >&2
+                echo "All changes must be committed before production deployment." >&2
+            fi
+            exit 1
+        fi
+        
+        # For dev/staging: allow with warning
+        if [ -n "${log_warning:-}" ]; then
+            log_warning "Uncommitted changes detected! Tagging as 'dirty'."
+            if [ "$environment" != "prod" ]; then
+                log_info "This is allowed in $environment environment for development/testing."
+            fi
+            log_info "For production deployments, commit your changes first."
+        else
+            echo "WARNING: Uncommitted changes detected! Tagging as 'dirty'." >&2
+        fi
+        
+        # Dirty format: fru-<env>-<date>-<sha>-dirty
+        echo "fru-${environment}-${commit_date}-${base_sha}-dirty"
         return
     fi
     
-    # Dirty working tree detected
-    local allow_dirty="${ALLOW_DIRTY_DEPLOYMENT:-false}"
+    # Clean working tree: include commit message slug for context
+    # Get first line of commit message, sanitize it, and create a slug
+    local commit_msg
+    commit_msg=$(git log -1 --format=%s HEAD 2>/dev/null || echo "unknown")
     
-    # For production: block dirty deployments unless explicitly allowed
-    if [ "$environment" = "prod" ] && [ "$allow_dirty" != "true" ]; then
-        # Source logger if available
-        if [ -n "${log_error:-}" ]; then
-            log_error "Uncommitted changes detected in PRODUCTION deployment!"
-            log_error "All changes must be committed before production deployment."
-            log_error "To override (NOT RECOMMENDED), set ALLOW_DIRTY_DEPLOYMENT=true"
-            log_info "Current uncommitted changes:"
-            git status --short | head -10
-        else
-            echo "ERROR: Uncommitted changes detected in PRODUCTION deployment!" >&2
-            echo "All changes must be committed before production deployment." >&2
-        fi
-        exit 1
+    # Create a slug from commit message:
+    # 1. Convert to lowercase
+    # 2. Remove special characters (keep alphanumeric, spaces, hyphens)
+    # 3. Replace spaces with hyphens using tr (more reliable than sed)
+    # 4. Replace multiple hyphens with single hyphen
+    # 5. Remove leading/trailing hyphens
+    # 6. Limit to 30 characters
+    local commit_slug
+    commit_slug=$(echo "$commit_msg" | \
+        tr '[:upper:]' '[:lower:]' | \
+        sed 's/[^a-z0-9 -]//g' | \
+        tr ' ' '-' | \
+        sed 's/-\+/-/g' | \
+        sed 's/^-\|-$//g' | \
+        cut -c1-30)
+    
+    # If slug is empty after sanitization, use a default
+    if [ -z "$commit_slug" ]; then
+        commit_slug="commit"
     fi
     
-    # For dev/staging: allow with warning
-    if [ -n "${log_warning:-}" ]; then
-        log_warning "Uncommitted changes detected! Using working tree hash to ensure unique tag."
-        if [ "$environment" != "prod" ]; then
-            log_info "This is allowed in $environment environment for development/testing."
-        fi
-        log_info "For production deployments, commit your changes first."
-    else
-        echo "WARNING: Uncommitted changes detected! Using working tree hash." >&2
-    fi
-    
-    # Generate hash from working tree changes
-    # Use shasum on macOS, sha256sum on Linux
-    local worktree_hash
-    if command -v sha256sum >/dev/null 2>&1; then
-        worktree_hash=$(git diff HEAD 2>/dev/null | sha256sum | cut -c1-7 2>/dev/null || echo "unknown")
-    elif command -v shasum >/dev/null 2>&1; then
-        worktree_hash=$(git diff HEAD 2>/dev/null | shasum -a 256 | cut -c1-7 2>/dev/null || echo "unknown")
-    else
-        # Fallback: use timestamp-based hash
-        worktree_hash=$(date +%s | shasum -a 256 2>/dev/null | cut -c1-7 || echo "unknown")
-    fi
-    echo "git-${base_sha}-dirty-${worktree_hash}_${environment}"
+    # Clean format: fru-<env>-<date>-<sha>-#<commit-slug>#
+    echo "fru-${environment}-${commit_date}-${base_sha}-#${commit_slug}#"
 }
 

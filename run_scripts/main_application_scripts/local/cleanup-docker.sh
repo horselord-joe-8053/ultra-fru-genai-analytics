@@ -76,7 +76,7 @@ fi
 
 log_step "Docker Cleanup"
 
-local cleanup_success=true
+cleanup_success=true
 
 if [ "$CLEAN_ALL" = true ]; then
     log_info "Cleaning all unused Docker resources..."
@@ -102,7 +102,7 @@ if [ "$CLEAN_ALL" = true ]; then
 else
     if [ "$CLEAN_IMAGES" = true ]; then
         log_info "Removing dangling images..."
-        local pruned=$(docker image prune -f 2>/dev/null | grep -oP 'Total reclaimed space: \K[0-9.]+[KMGT]?i?B?' || echo "0B")
+        pruned=$(docker image prune -f 2>/dev/null | grep -oE 'Total reclaimed space: [0-9.]+[KMGT]?i?B?' | grep -oE '[0-9.]+[KMGT]?i?B?' || echo "0B")
         if [ "$pruned" != "0B" ]; then
             log_success "Cleaned up $pruned of dangling images"
         else

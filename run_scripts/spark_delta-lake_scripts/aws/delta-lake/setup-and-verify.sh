@@ -2,16 +2,66 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+# Source CSV upload helper
+source "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/helpers/local_to_s3_data_upload.sh"
 log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (spark aws delta setup)"
 
 # Setup and verify Delta Lake for AWS (S3)
 # All operations are idempotent (safe to run multiple times)
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 DRY_RUN="${DRY_RUN:-false}"
+PREEMPT="${PREEMPT:-false}"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --preempt)
+            PREEMPT="true"
+            shift
+            ;;
+        --dry-run)
+            DRY_RUN="true"
+            shift
+            ;;
+        --environment|-e)
+            ENVIRONMENT="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
 export ENVIRONMENT
 export DRY_RUN
+export PREEMPT
+
+# If --preempt flag is set, teardown existing Delta tables first
+if [ "$PREEMPT" = "true" ]; then
+    log_step "Preempt: Tearing down existing Delta tables"
+    log_warning "════════════════════════════════════════════════════════════════"
+    log_warning "PREEMPT MODE: Deleting all existing Delta tables"
+    log_warning "════════════════════════════════════════════════════════════════"
+    
+    teardown_cmd="$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/teardown-delta.sh --environment $ENVIRONMENT"
+    if [ "$DRY_RUN" = "true" ]; then
+        teardown_cmd="$teardown_cmd --dry-run"
+    else
+        teardown_cmd="$teardown_cmd --force"
+    fi
+    
+    if $teardown_cmd; then
+        log_success "Preempt teardown completed"
+        echo ""
+    else
+        log_warning "Preempt teardown had issues (continuing with setup anyway)"
+        echo ""
+    fi
+fi
 
 log_step "Setting up and verifying data-lake infrastructure"
 
@@ -38,7 +88,43 @@ if [ "$DRY_RUN" = "true" ]; then
     log_info "[DRY-RUN] Would run create-delta-table.sh"
 else
     load_env_file || true
-    CSV_PATH="${CSV_PATH:-s3://$S3_BUCKET_ID/raw/fridge_sales_with_rating.csv}"
+    
+    # Always initialize CSV_WAS_UPLOADED to false (will be set by upload function if needed)
+    # This prevents persistence issues from previous runs
+    export CSV_WAS_UPLOADED="false"
+    
+    # Determine CSV path (support both local and S3 paths)
+    local local_csv_path="${CSV_PATH:-$REPO_ROOT/data/raw/fridge_sales_with_rating.csv}"
+    local s3_csv_path="s3://${S3_BUCKET_ID}/raw/fridge_sales_with_rating.csv"
+    
+    # Check if CSV_PATH is already an S3 path
+    if [[ "$local_csv_path" =~ ^s3:// ]]; then
+        # Already S3 path, use it directly
+        CSV_PATH="$local_csv_path"
+        log_info "Using CSV from S3: $CSV_PATH"
+        # CSV is already in S3 - assume unchanged (no local file to compare)
+        # This ensures CSV_WAS_UPLOADED="false" so idempotent check will run
+        export CSV_WAS_UPLOADED="false"
+    else
+        # Local path detected - resolve absolute path if relative
+        if [[ ! "$local_csv_path" = /* ]]; then
+            local_csv_path="$REPO_ROOT/$local_csv_path"
+        fi
+        
+        log_info "Local CSV path detected: $local_csv_path"
+        
+        # Upload CSV to S3 (with change detection, or force if --preempt)
+        # --preempt flag bypasses change detection and forces upload
+        if ! upload_csv_to_s3 "$local_csv_path" "$s3_csv_path" "$PREEMPT" "$DRY_RUN"; then
+            log_error "Failed to upload CSV to S3"
+            exit 1
+        fi
+        
+        # Use S3 path for Delta table creation
+        CSV_PATH="$s3_csv_path"
+        log_info "Using CSV from S3: $CSV_PATH"
+    fi
+    
     DELTA_TABLE_PATH="${S3_DELTA_PATH:-s3://$S3_BUCKET_ID/delta}/fru_sales"
     
     # Get Spark packages and convert paths using Python helpers
@@ -85,4 +171,18 @@ else
 fi
 log_success "Step 3/3 PASSED: Delta-lake verification complete"
 
-log_success "Delta-lake setup and verification completed successfully!"
+log_info ""
+log_info "════════════════════════════════════════════════════════════════"
+log_info "Delta-lake setup completed successfully!"
+log_info "════════════════════════════════════════════════════════════════"
+log_info ""
+log_info "Next steps:"
+log_info "  • Batch analytics will be computed automatically by the analytics scheduler"
+log_info "    (if ENABLE_ANALYTICS_SCHEDULER=true in your .env file)"
+log_info ""
+log_info "  • The scheduler runs every ${ANALYTICS_SCHEDULER_INTERVAL_SECONDS:-300} seconds by default"
+log_info "    and reads from the Delta table at: ${S3_DELTA_PATH:-s3://$S3_BUCKET_ID/delta}/fru_sales"
+log_info ""
+log_info "  • Analytics results are saved to PostgreSQL batch_analytics table"
+log_info "    and displayed in the frontend Batch Analytics panel"
+log_info ""

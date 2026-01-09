@@ -9,6 +9,7 @@
 #   --setup-data-lake       → Force setup of data-lake (Delta table) even if analytics disabled
 #   --skip-data-lake        → Skip data-lake setup even if analytics scheduler is enabled
 #   --skip-cleanup          → Skip cleanup phase (Phase 7)
+#   --preempt               → Delete existing Delta tables before setup (clean rebuild)
 #
 # Data-Lake Setup Behavior:
 #   - Automatic: Setup if ENABLE_ANALYTICS_SCHEDULER=true in .env file
@@ -53,6 +54,7 @@ SKIP_DATA_LOAD=false
 SKIP_DATA_LAKE=false
 SETUP_DATA_LAKE=false
 SKIP_CLEANUP=false
+PREEMPT=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -76,9 +78,13 @@ while [[ $# -gt 0 ]]; do
             SKIP_CLEANUP=true
             shift
             ;;
+        --preempt)
+            PREEMPT=true
+            shift
+            ;;
         *)
             log_error "Unknown option: $1"
-            log_info "Usage: $0 [--skip-frontend] [--skip-data-load] [--setup-data-lake] [--skip-data-lake] [--skip-cleanup]"
+            log_info "Usage: $0 [--skip-frontend] [--skip-data-load] [--setup-data-lake] [--skip-data-lake] [--skip-cleanup] [--preempt]"
             exit 1
             ;;
     esac
@@ -111,44 +117,75 @@ should_setup_data_lake() {
 }
 
 
+# Helper function to format elapsed time
+format_elapsed_time() {
+    local seconds=$1
+    if [ "$seconds" -lt 60 ]; then
+        echo "${seconds}s"
+    elif [ "$seconds" -lt 3600 ]; then
+        local mins=$((seconds / 60))
+        local secs=$((seconds % 60))
+        echo "${mins}m ${secs}s"
+    else
+        local hours=$((seconds / 3600))
+        local mins=$(((seconds % 3600) / 60))
+        local secs=$((seconds % 60))
+        echo "${hours}h ${mins}m ${secs}s"
+    fi
+}
+
 # Main setup function
 # Handles Phase 0-7: Prerequisites → Environment Preparation → Infrastructure Setup → Database Setup → Data Lake → Application Deployment → Verification → Cleanup
 main() {
+    # Record script start time
+    local script_start_time=$(date +%s)
     log_step "Starting local development environment setup"
     
     # ============================================================================
     # Phase 0: Prerequisites and Setup
     # ============================================================================
+    local step_start_time=$(date +%s)
     log_step "Phase 0: Step 0.1 - Step 1/11: Checking prerequisites"
     if ! "$REPO_ROOT/run_scripts/main_application_scripts/common/check-dependencies.sh"; then
-        log_error "Phase 0: Step 0.1 - Step 1/11 FAILED: Prerequisites check failed"
+        local elapsed=$(( $(date +%s) - step_start_time ))
+        log_error "Phase 0: Step 0.1 - Step 1/11 FAILED: Prerequisites check failed (took $(format_elapsed_time $elapsed))"
         exit 1
     fi
-    log_success "Phase 0: Step 0.1 - Step 1/11 PASSED: Prerequisites check completed"
+    local elapsed=$(( $(date +%s) - step_start_time ))
+    log_success "Phase 0: Step 0.1 - Step 1/11 PASSED: Prerequisites check completed (took $(format_elapsed_time $elapsed))"
     
+    step_start_time=$(date +%s)
     log_step "Phase 0: Step 0.2 - Step 2/11: Setting up environment file"
     if ! "$SCRIPT_DIR/setup-env.sh"; then
-        log_error "Phase 0: Step 0.2 - Step 2/11 FAILED: Environment file setup failed"
+        elapsed=$(( $(date +%s) - step_start_time ))
+        log_error "Phase 0: Step 0.2 - Step 2/11 FAILED: Environment file setup failed (took $(format_elapsed_time $elapsed))"
         exit 1
     fi
-    log_success "Phase 0: Step 0.2 - Step 2/11 PASSED: Environment file ready"
+    elapsed=$(( $(date +%s) - step_start_time ))
+    log_success "Phase 0: Step 0.2 - Step 2/11 PASSED: Environment file ready (took $(format_elapsed_time $elapsed))"
     
     # ============================================================================
     # Phase 1: Environment Preparation
     # ============================================================================
+    step_start_time=$(date +%s)
     log_step "Phase 1: Step 1.1 - Step 3/11: Setting up Python environment"
     if ! "$SCRIPT_DIR/setup-python.sh"; then
-        log_error "Phase 1: Step 1.1 - Step 3/11 FAILED: Python environment setup failed"
+        elapsed=$(( $(date +%s) - step_start_time ))
+        log_error "Phase 1: Step 1.1 - Step 3/11 FAILED: Python environment setup failed (took $(format_elapsed_time $elapsed))"
         exit 1
     fi
-    log_success "Phase 1: Step 1.1 - Step 3/11 PASSED: Python environment ready"
+    elapsed=$(( $(date +%s) - step_start_time ))
+    log_success "Phase 1: Step 1.1 - Step 3/11 PASSED: Python environment ready (took $(format_elapsed_time $elapsed))"
     
+    step_start_time=$(date +%s)
     log_step "Phase 1: Step 1.2 - Step 4/11: Setting up frontend dependencies"
     if ! "$SCRIPT_DIR/setup-frontend.sh"; then
-        log_error "Phase 1: Step 1.2 - Step 4/11 FAILED: Frontend dependencies setup failed"
+        elapsed=$(( $(date +%s) - step_start_time ))
+        log_error "Phase 1: Step 1.2 - Step 4/11 FAILED: Frontend dependencies setup failed (took $(format_elapsed_time $elapsed))"
         exit 1
     fi
-    log_success "Phase 1: Step 1.2 - Step 4/11 PASSED: Frontend dependencies ready"
+    elapsed=$(( $(date +%s) - step_start_time ))
+    log_success "Phase 1: Step 1.2 - Step 4/11 PASSED: Frontend dependencies ready (took $(format_elapsed_time $elapsed))"
     
     # ============================================================================
     # (Phase 1: Step 1.3 is for AWS deployments only)
@@ -157,13 +194,16 @@ main() {
     # ============================================================================
     # Phase 2: Infrastructure Setup
     # ============================================================================
+    step_start_time=$(date +%s)
     log_step "Phase 2: Step 2.1 - Step 5/11: Starting Docker services"
     # Use --force to ensure containers are recreated with latest .env variables
     if ! "$SCRIPT_DIR/start-services.sh" --force; then
-        log_error "Phase 2: Step 2.1 - Step 5/11 FAILED: Docker services startup failed"
+        elapsed=$(( $(date +%s) - step_start_time ))
+        log_error "Phase 2: Step 2.1 - Step 5/11 FAILED: Docker services startup failed (took $(format_elapsed_time $elapsed))"
         exit 1
     fi
-    log_success "Phase 2: Step 2.1 - Step 5/11 PASSED: Docker services running"
+    elapsed=$(( $(date +%s) - step_start_time ))
+    log_success "Phase 2: Step 2.1 - Step 5/11 PASSED: Docker services running (took $(format_elapsed_time $elapsed))"
     
     # ============================================================================
     # (Phase 2: Steps 2.2, 2.3 are for AWS deployments only)
@@ -172,21 +212,27 @@ main() {
     # ============================================================================
     # Phase 3: Database Setup
     # ============================================================================
+    step_start_time=$(date +%s)
     log_step "Phase 3: Step 3.1 - Step 6/11: Initializing database schema"
     if ! "$REPO_ROOT/run_scripts/main_application_scripts/common/database/init_schema.sh" "local"; then
-        log_error "Phase 3: Step 3.1 - Step 6/11 FAILED: Database schema initialization failed"
+        elapsed=$(( $(date +%s) - step_start_time ))
+        log_error "Phase 3: Step 3.1 - Step 6/11 FAILED: Database schema initialization failed (took $(format_elapsed_time $elapsed))"
         exit 1
     fi
-    log_success "Phase 3: Step 3.1 - Step 6/11 PASSED: Database schema initialized"
+    elapsed=$(( $(date +%s) - step_start_time ))
+    log_success "Phase 3: Step 3.1 - Step 6/11 PASSED: Database schema initialized (took $(format_elapsed_time $elapsed))"
     
     # Phase 3: Database Setup - Step 3.2: Load data into database (optional)
     if [ "$SKIP_DATA_LOAD" = false ]; then
+        step_start_time=$(date +%s)
         log_step "Phase 3: Step 3.2 - Step 7/11: Loading data into database"
         if ! "$REPO_ROOT/run_scripts/main_application_scripts/common/database/load_data.sh" "local"; then
-            log_error "Phase 3: Step 3.2 - Step 7/11 FAILED: Data load failed"
+            elapsed=$(( $(date +%s) - step_start_time ))
+            log_error "Phase 3: Step 3.2 - Step 7/11 FAILED: Data load failed (took $(format_elapsed_time $elapsed))"
             exit 1
         fi
-        log_success "Phase 3: Step 3.2 - Step 7/11 PASSED: Data loaded into database"
+        elapsed=$(( $(date +%s) - step_start_time ))
+        log_success "Phase 3: Step 3.2 - Step 7/11 PASSED: Data loaded into database (took $(format_elapsed_time $elapsed))"
     else
         log_info "Skipping data load (--skip-data-load flag set)"
     fi
@@ -202,13 +248,20 @@ main() {
     # Delta Lake setup: ENABLE_ANALYTICS_SCHEDULER=true → auto-setup, or use --setup-data-lake/--skip-data-lake flags
     # Uses Docker Spark execution (Spark runs inside fru_api container)
     if should_setup_data_lake; then
+        step_start_time=$(date +%s)
         log_step "Phase 4: Step 4.1 - Step 8/11: Setting up data-lake (Delta table using Docker Spark)"
         log_info "Spark runs inside the Docker container (no local Spark installation needed)"
-        if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/local/delta-lake/setup-and-verify.sh"; then
-            log_warning "Phase 4: Step 4.1 - Step 8/11 had issues (application may still work without Delta tables)"
+        local setup_cmd="$REPO_ROOT/run_scripts/spark_delta-lake_scripts/local/delta-lake/setup-and-verify.sh"
+        if [ "$PREEMPT" = "true" ]; then
+            setup_cmd="$setup_cmd --preempt"
+        fi
+        if ! $setup_cmd; then
+            elapsed=$(( $(date +%s) - step_start_time ))
+            log_warning "Phase 4: Step 4.1 - Step 8/11 had issues (application may still work without Delta tables) (took $(format_elapsed_time $elapsed))"
             log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/local/delta-lake/setup-and-verify.sh"
         else
-            log_success "Phase 4: Step 4.1 - Step 8/11 PASSED: Delta-lake ready"
+            elapsed=$(( $(date +%s) - step_start_time ))
+            log_success "Phase 4: Step 4.1 - Step 8/11 PASSED: Delta-lake ready (took $(format_elapsed_time $elapsed))"
         fi
     else
         log_info "Skipping Delta Lake setup (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"
@@ -224,6 +277,7 @@ main() {
     
     # Step 5.2: Start frontend dev server (optional)
     if [ "$SKIP_FRONTEND" = false ]; then
+        step_start_time=$(date +%s)
         log_step "Phase 5: Step 5.2 - Step 9/11: Starting frontend development server"
         log_info "Starting frontend development server in background..."
         
@@ -257,7 +311,8 @@ main() {
         log_info "Waiting for frontend to start..."
         sleep 5
         echo ""
-        log_success "Phase 5: Step 5.2 - Step 9/11 PASSED: Frontend development server started"
+        elapsed=$(( $(date +%s) - step_start_time ))
+        log_success "Phase 5: Step 5.2 - Step 9/11 PASSED: Frontend development server started (took $(format_elapsed_time $elapsed))"
     else
         log_info "To start the frontend, run:"
         log_info "  cd $REPO_ROOT/frontend && npm run dev"
@@ -269,12 +324,17 @@ main() {
     # Phase 6: Validation and Verification
     # ============================================================================
     # Step 6.1: Post-deployment verification
+    step_start_time=$(date +%s)
     log_step "Phase 6: Step 6.1 - Step 10/11: Verifying deployment and generating test instructions"
     echo ""
-    "$SCRIPT_DIR/verification/auto_verify_and_manual_hint.sh" "false" || {
-        log_warning "Phase 6: Step 6.1 - Step 10/11 had issues (deployment may still be successful)"
+    if "$SCRIPT_DIR/verification/auto_verify_and_manual_hint.sh" "false"; then
+        elapsed=$(( $(date +%s) - step_start_time ))
+        log_success "Phase 6: Step 6.1 - Step 10/11 PASSED: Verification completed (took $(format_elapsed_time $elapsed))"
+    else
+        elapsed=$(( $(date +%s) - step_start_time ))
+        log_warning "Phase 6: Step 6.1 - Step 10/11 had issues (deployment may still be successful) (took $(format_elapsed_time $elapsed))"
         log_info "Check the verification output above for details"
-    }
+    fi
     
     # ============================================================================
     # Phase 7: Cleanup
@@ -283,22 +343,35 @@ main() {
     # Note: Cleanup is optional and can be skipped
     # Use --skip-cleanup flag to skip this phase
     if [ "$SKIP_CLEANUP" != "true" ]; then
+        step_start_time=$(date +%s)
         log_step "Phase 7: Step 7.1 - Step 11/11: Cleaning up Docker resources"
         echo ""
-        # Note: cleanup-docker.sh doesn't accept --dry-run flag, but we can skip it if DRY_RUN=true
+        # Note: cleanup-docker.sh requires user confirmation for --all
+        # For automated runs, we'll do a safe cleanup (containers and images only, no volumes)
         if [ "${DRY_RUN:-false}" = "true" ]; then
-            log_info "[DRY-RUN] Would run: $SCRIPT_DIR/cleanup-docker.sh --all"
+            log_info "[DRY-RUN] Would run: $SCRIPT_DIR/cleanup-docker.sh --containers --images"
         else
-            if "$SCRIPT_DIR/cleanup-docker.sh" --all; then
-                log_success "Phase 7: Step 7.1 - Step 11/11 PASSED: Cleanup completed"
+            # Run safe cleanup (no user confirmation needed)
+            if "$SCRIPT_DIR/cleanup-docker.sh" --containers --images; then
+                elapsed=$(( $(date +%s) - step_start_time ))
+                log_success "Phase 7: Step 7.1 - Step 11/11 PASSED: Cleanup completed (took $(format_elapsed_time $elapsed))"
             else
-                log_warning "Phase 7: Step 7.1 - Step 11/11 had issues (deployment may still be successful)"
+                elapsed=$(( $(date +%s) - step_start_time ))
+                log_warning "Phase 7: Step 7.1 - Step 11/11 had issues (deployment may still be successful) (took $(format_elapsed_time $elapsed))"
                 log_info "Check the cleanup output above for details"
             fi
         fi
     else
         log_info "Skipping cleanup (--skip-cleanup flag set)"
     fi
+    
+    # Log total script execution time
+    local total_elapsed=$(( $(date +%s) - script_start_time ))
+    echo ""
+    log_success "═══════════════════════════════════════════════════════════════════════════════"
+    log_success "Local development environment setup completed successfully!"
+    log_success "Total execution time: $(format_elapsed_time $total_elapsed)"
+    log_success "═══════════════════════════════════════════════════════════════════════════════"
 }
 
 # Run main function
