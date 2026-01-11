@@ -111,14 +111,57 @@ else
     # Default: show dry-run first, then ask for confirmation before actual cleanup
     log_info "Previewing what would be cleaned up (dry-run)..."
     echo ""
-    if ! $cleanup_cmd --dry-run; then
+    
+    # Capture dry-run output to check if there are any resources to delete
+    dry_run_output=""
+    if ! dry_run_output=$($cleanup_cmd --dry-run 2>&1); then
         log_error "Cleanup check failed"
         exit 1
     fi
+    
+    # Parse eligible deletion counts from the output (before displaying):
+    # - "Eligible for deletion: X" (ECR images, ECS task definitions)
+    # - "Would delete (dry-run): X" (S3 buckets - when eligible)
+    total_eligible=0
+    
+    # Extract counts from "Eligible for deletion: X" lines
+    # Use sed to extract only the number immediately following "Eligible for deletion:"
+    eligible_lines=""
+    eligible_lines=$(echo "$dry_run_output" | grep -i "Eligible for deletion:" || true)
+    if [ -n "$eligible_lines" ]; then
+        eligible_sum=0
+        eligible_sum=$(echo "$eligible_lines" | sed -E 's/.*[Ee]ligible for deletion:[[:space:]]*([0-9]+).*/\1/' | awk '{sum+=$1} END {print sum+0}')
+        total_eligible=$((total_eligible + eligible_sum))
+    fi
+    
+    # Extract counts from "Would delete (dry-run): X" lines (S3 buckets)
+    would_delete_line=""
+    would_delete_line=$(echo "$dry_run_output" | grep -i "Would delete (dry-run):" | head -1 || true)
+    if [ -n "$would_delete_line" ]; then
+        would_delete_count=0
+        would_delete_count=$(echo "$would_delete_line" | sed -E 's/.*[Ww]ould delete \(dry-run\):[[:space:]]*([0-9]+).*/\1/' || echo "0")
+        total_eligible=$((total_eligible + would_delete_count))
+    fi
+    
+    if [ "${total_eligible:-0}" -eq 0 ]; then
+        # Filter out the "Final Summary" section when there are no eligible resources
+        # Display everything except from "Final Summary" onwards (accounting for ANSI color codes)
+        echo "$dry_run_output" | sed '/Final Summary/,$d'
+        echo ""
+        log_success "No resources eligible for deletion"
+        log_info "All resources are either in use, protected, or within retention period"
+        exit 0
+    fi
+    
+    # Display the full dry-run output (including Final Summary) when there are eligible resources
+    echo "$dry_run_output"
     echo ""
+    
+    # Only prompt if there are resources to delete
     log_warning "════════════════════════════════════════════════════════════════"
     log_warning "CONFIRMATION REQUIRED"
     log_warning "════════════════════════════════════════════════════════════════"
+    log_warning "Found $total_eligible resource(s) eligible for deletion."
     log_warning "The above resources will be PERMANENTLY DELETED."
     log_warning "This action cannot be undone!"
     echo ""
