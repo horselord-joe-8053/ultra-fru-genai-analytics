@@ -119,14 +119,14 @@ main() {
     # Phase 0: Prerequisites and Setup
     # ============================================================================
     local step_start_time=$(date +%s)
-    log_step "Phase 0: Step 0.1 - Step ${current_step}/${total_steps}: Checking prerequisites"
-    if ! "$REPO_ROOT/run_scripts/main_application_scripts/common/check-dependencies.sh"; then
+    log_step "Phase 0: Step 0.1 - Step ${current_step}/${total_steps}: Checking and installing prerequisites"
+    if ! "$REPO_ROOT/run_scripts/main_application_scripts/common/prerequisites/check-and-install.sh" "local"; then
         local elapsed=$(( $(date +%s) - step_start_time ))
-        log_error "Phase 0: Step 0.1 - Step ${current_step}/${total_steps} FAILED: Prerequisites check failed (took $(format_elapsed_time $elapsed))"
+        log_error "Phase 0: Step 0.1 - Step ${current_step}/${total_steps} FAILED: Prerequisites check/installation failed (took $(format_elapsed_time $elapsed))"
         exit 1
     fi
     local elapsed=$(( $(date +%s) - step_start_time ))
-    log_success "Phase 0: Step 0.1 - Step ${current_step}/${total_steps} PASSED: Prerequisites check completed (took $(format_elapsed_time $elapsed))"
+    log_success "Phase 0: Step 0.1 - Step ${current_step}/${total_steps} PASSED: Prerequisites check/installation completed (took $(format_elapsed_time $elapsed))"
     current_step=$((current_step + 1))
     echo ""
     

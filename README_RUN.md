@@ -8,8 +8,11 @@ This guide provides quick instructions for running FRU locally and on AWS.
    - [1.1 Set Up Environment Variables](#-11-set-up-environment-variables)
    - [1.2 Local Development](#-12-local-development)
    - [1.3 AWS Deployment](#-13-aws-deployment)
-2. [Frontend Overview](#-2-frontend-overview)
-3. [Additional Resources](#-3-additional-resources)
+2. [Prerequisites](#-2-prerequisites)
+   - [2.1 Automatic Installation](#-21-automatic-installation)
+   - [2.2 Manual Installation](#-22-manual-installation)
+3. [Frontend Overview](#-3-frontend-overview)
+4. [Additional Resources](#-4-additional-resources)
 
 ---
 
@@ -69,10 +72,11 @@ cp .env.example .env
 ```
 
 This script will:
-- ✅ Check prerequisites (Python, Node.js, Docker)
+- ✅ **Check and install prerequisites** (Python 3.10+, Node.js 18+, Docker) - automatic installation on macOS/Ubuntu
 - ✅ Create `.env` file from template (if missing)
 - ✅ Set up Python virtual environment
-- ✅ Install dependencies
+- ✅ Install Python dependencies from `requirements.txt`
+- ✅ Install frontend dependencies (React, Vite, etc.)
 - ✅ Start Docker services (Postgres + API)
 - ✅ Initialize database schema
 - ✅ Load CSV data
@@ -189,7 +193,94 @@ The `--preempt` flag performs a complete cleanup before deployment:
 
 ---
 
-# 🖥️ 2. Frontend Overview
+# 🔧 2. Prerequisites
+
+## 2.1 Automatic Installation
+
+The `run.sh` scripts **automatically check and install** missing prerequisites when you run them. No manual setup required!
+
+**Supported Operating Systems:**
+- ✅ **macOS** (via Homebrew)
+- ✅ **Ubuntu/Debian** (via apt or official installers)
+
+**Installation Behavior:**
+- **Interactive mode** (terminal): Prompts for confirmation before installing
+- **Non-interactive mode** (CI/CD): Automatically installs without prompts
+
+**Local Development Prerequisites:**
+- **Python 3.10+** (installs 3.11 if missing)
+- **Node.js 18+ LTS** (installs LTS version if missing)
+- **Docker** (guides to Docker Desktop on macOS, apt install on Ubuntu)
+
+**AWS Deployment Prerequisites:**
+- **Python 3.10+** (required for Terraform scripts)
+- **AWS CLI 2.x** (installs latest 2.x version if missing)
+- **Terraform >= 1.5.0** (installs via Homebrew/apt if missing)
+- **Terragrunt >= 0.50.0** (installs via Homebrew/GitHub releases if missing)
+- **Docker** (required for building container images)
+
+**Version Validation:**
+- Scripts verify minimum versions are met
+- Warns if installed version is too old (doesn't auto-upgrade)
+- Provides clear error messages if installation fails
+
+## 2.2 Manual Installation
+
+If you prefer to install prerequisites manually or need custom versions:
+
+**macOS:**
+```bash
+# Install Homebrew (if not already installed)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install prerequisites
+brew install python@3.11
+brew install node@18
+brew install terraform terragrunt awscli
+
+# Install Docker Desktop from: https://www.docker.com/products/docker-desktop
+```
+
+**Ubuntu:**
+```bash
+# Update package list
+sudo apt-get update
+
+# Install Python 3.11 (via deadsnakes PPA)
+sudo apt-get install -y software-properties-common
+sudo add-apt-repository -y ppa:deadsnakes/ppa
+sudo apt-get install -y python3.11 python3.11-venv python3.11-pip
+
+# Install Node.js 18 LTS (via NodeSource)
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Install Terraform (via Hashicorp repository)
+wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt-get update && sudo apt-get install -y terraform
+
+# Install Terragrunt (manual download)
+# See: https://github.com/gruntwork-io/terragrunt/releases
+
+# Install AWS CLI 2.x (official installer)
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+
+# Install Docker
+sudo apt-get install -y ca-certificates curl gnupg lsb-release
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+```
+
+**Note:** The automatic installation system uses the same methods as above but handles everything for you.
+
+---
+
+# 🖥️ 3. Frontend Overview
 
 The FRU frontend displays **3 vertical panels** (left, middle, right) that occupy the full vertical space, providing different views of the analytics system:
 
@@ -292,7 +383,7 @@ Batch Analytics Panel (Right Panel - Auto-refresh via VITE_FRONTEND_POLL_FREQUEN
 
 ---
 
-# 📚 3. Additional Resources
+# 📚 4. Additional Resources
 
 **Main Documentation:**
 - **[`README.md`](README.md)** - Project overview and architecture
