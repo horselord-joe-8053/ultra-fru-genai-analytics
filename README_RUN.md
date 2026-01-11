@@ -4,15 +4,15 @@ This guide provides quick instructions for running FRU locally and on AWS.
 
 ## 📋 Table of Contents
 
-1. [Quick Start](#-1-quick-start)
-   - [1.1 Set Up Environment Variables](#-11-set-up-environment-variables)
-   - [1.2 Local Development](#-12-local-development)
-   - [1.3 AWS Deployment](#-13-aws-deployment)
-2. [Prerequisites](#-2-prerequisites)
-   - [2.1 Automatic Installation](#-21-automatic-installation)
-   - [2.2 Manual Installation](#-22-manual-installation)
-3. [Frontend Overview](#-3-frontend-overview)
-4. [Additional Resources](#-4-additional-resources)
+1. [🎯 1. Quick Start](#1-quick-start)
+   - [1.1 Set Up Environment Variables](#11-set-up-environment-variables)
+   - [1.2 Local Development](#12-local-development)
+   - [1.3 AWS Deployment](#13-aws-deployment)
+2. [🔧 2. Prerequisites](#2-prerequisites)
+   - [2.1 Automatic Installation](#21-automatic-installation)
+   - [2.2 Manual Installation](#22-manual-installation)
+3. [🖥️ 3. Frontend Overview](#3-frontend-overview)
+4. [📚 4. Additional Resources](#4-additional-resources)
 
 ---
 
@@ -30,13 +30,13 @@ cp .env.example .env
 **Required values to fill in:**
 
 1. **Database credentials:**
-   ```bash
+```bash
    PGPASSWORD=your-database-password
    DB_PASSWORD=your-database-password
    ```
 
 2. **OpenAI API Key:**
-   ```bash
+```bash
    OPENAI_API_KEY=sk-your-openai-api-key-here
    ```
 
