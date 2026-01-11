@@ -58,9 +58,9 @@ cp .env.example .env
    TF_STATE_BUCKET=fru-terraform-state-your-account-id
    ```
 
-> **Note:** After creating `.env`, run `./run_scripts/main_application_scripts/aws/setup-aws-profiles.sh` to sync AWS credentials to `~/.aws/credentials` profiles.
-
 > **Security:** The `.env` file is already in `.gitignore`. Never commit actual credentials to the repository.
+
+> **Note:** The `run.sh` script automatically syncs AWS credentials to `~/.aws/credentials` profiles when you run AWS deployment workflows.
 
 ---
 

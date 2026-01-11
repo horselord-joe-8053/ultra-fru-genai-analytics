@@ -38,7 +38,7 @@ const Chat: React.FC<ChatProps> = ({ messages, onSend, loading }) => {
           <div className="text-sm text-gray-500 mt-4">
             Try:{" "}
             <span className="italic">
-              "Why are Samsung customers unhappy in São Paulo?"
+              "What is the overall average customer rating?"
             </span>
           </div>
         )}
