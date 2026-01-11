@@ -4,20 +4,20 @@ This document provides comprehensive documentation for deploying FRU infrastruct
 
 ## 📋 Table of Contents
 
-1. [📖 1. Overview](#1-overview)
-2. [💡 2. Why Terraform IaC? Necessity and Benefits](#2-why-terraform-iac-necessity-and-benefits)
-3. [📁 3. Structure](#3-structure)
-   - [3.1. Why `terragrunt.hcl` at Each Level?](#31-why-terragrunthcl-at-each-level)
-   - [3.2. Terraform Lock Files (`.terraform.lock.hcl`)](#32-terraform-lock-files-terraformlockhcl)
-4. [🔒 4. Security Best Practices](#4-security-best-practices)
-5. [✅ 5. Prerequisites](#5-prerequisites)
-6. [🚀 6. Usage](#6-usage)
-7. [📚 7. Module Documentation](#7-module-documentation)
-8. [🌍 8. Environment-Specific Configuration](#8-environment-specific-configuration)
-9. [🎯 9. After Deployment](#9-after-deployment)
-10. [🐛 10. Troubleshooting](#10-troubleshooting)
-11. [🗑️ 11. Destroying Infrastructure](#11-destroying-infrastructure)
-12. [🐳 12. Local Development (Docker)](#12-local-development-docker)
+1. [📖 1. Overview](#-1-overview)
+2. [💡 2. Why Terraform IaC? Necessity and Benefits](#-2-why-terraform-iac-necessity-and-benefits)
+3. [📁 3. Structure](#-3-structure)
+   - [3.1. Why `terragrunt.hcl` at Each Level?](#-31-why-terragrunthcl-at-each-level)
+   - [3.2. Terraform Lock Files (`.terraform.lock.hcl`)](#-32-terraform-lock-files-terraformlockhcl)
+4. [🔒 4. Security Best Practices](#-4-security-best-practices)
+5. [✅ 5. Prerequisites](#-5-prerequisites)
+6. [🚀 6. Usage](#-6-usage)
+7. [📚 7. Module Documentation](#-7-module-documentation)
+8. [🌍 8. Environment-Specific Configuration](#-8-environment-specific-configuration)
+9. [🎯 9. After Deployment](#-9-after-deployment)
+10. [🐛 10. Troubleshooting](#-10-troubleshooting)
+11. [🗑️ 11. Destroying Infrastructure](#-11-destroying-infrastructure)
+12. [🐳 12. Local Development (Docker)](#-12-local-development-docker)
 
 ---
 
