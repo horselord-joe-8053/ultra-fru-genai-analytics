@@ -89,7 +89,7 @@ variable "aurora_database_name" {
 variable "aurora_engine_version" {
   type        = string
   description = "Aurora engine version"
-  default     = "16.3"
+  default     = "16.4"
 }
 
 variable "aurora_instance_class" {

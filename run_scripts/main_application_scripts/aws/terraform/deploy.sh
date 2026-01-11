@@ -283,11 +283,9 @@ deploy_terragrunt() {
         
         # Stream output to both terminal and temp file using tee
         # Capture actual exit code using PIPESTATUS
-        if "${cmd[@]}" 2>&1 | tee "$tmp_out"; then
-            exit_code=0
-        else
-            exit_code=${PIPESTATUS[0]}  # Get actual command exit code (not tee's)
-        fi
+        # Note: We must check PIPESTATUS[0] because pipe makes 'if' check tee's exit code, not the command's
+        "${cmd[@]}" 2>&1 | tee "$tmp_out"
+        exit_code=${PIPESTATUS[0]}  # Get actual command exit code (not tee's)
         
         # If command succeeded, return success
         if [ $exit_code -eq 0 ]; then
@@ -535,8 +533,14 @@ deploy_terragrunt() {
         
         cd "$ENV_DIR/infrastructure"
         
+        # Refresh state before planning to ensure we have latest state (especially after imports)
+        log_info "Refreshing Terraform state to ensure latest state..."
+        if ! run_with_lock_retry "refresh (infrastructure)" terragrunt refresh -lock-timeout=30s; then
+            log_warning "State refresh failed, continuing with plan (this may use stale state)"
+        fi
+        
         log_info "Running terragrunt plan..."
-        if ! run_with_lock_retry "plan (infrastructure)" terragrunt plan -lock-timeout=30s; then
+        if ! run_with_lock_retry "plan (infrastructure)" terragrunt plan -lock-timeout=30s -refresh=true; then
             log_error "Terraform plan failed for infrastructure layer"
             log_info "Check the plan output above for errors"
             exit 1
@@ -580,8 +584,14 @@ deploy_terragrunt() {
         
         cd "$ENV_DIR/application"
         
+        # Refresh state before planning to ensure we have latest state
+        log_info "Refreshing Terraform state to ensure latest state..."
+        if ! run_with_lock_retry "refresh (application)" terragrunt refresh -lock-timeout=30s; then
+            log_warning "State refresh failed, continuing with plan (this may use stale state)"
+        fi
+        
         log_info "Running terragrunt plan for application layer..."
-        if ! run_with_lock_retry "plan (application)" terragrunt plan -lock-timeout=30s; then
+        if ! run_with_lock_retry "plan (application)" terragrunt plan -lock-timeout=30s -refresh=true; then
             log_error "Terraform plan failed for application layer"
             log_info "Check the plan output above for errors"
             exit 1

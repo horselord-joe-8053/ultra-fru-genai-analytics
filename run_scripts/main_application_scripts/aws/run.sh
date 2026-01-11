@@ -107,13 +107,13 @@ ${BLUE}Workflows:${NC}
                               → Deploy infrastructure (VPC, Aurora, IAM, Secrets)
                               → Deploy application (ECS, ALB, Frontend)
 
-        ${GREEN}eks-full${NC}        Complete EKS deployment
-                                → Build container image
-                                → Setup Terraform state bucket
-                                → Deploy infrastructure (VPC, Aurora, IAM, Secrets)
-                                → Deploy EKS layer (EKS cluster, node groups, OIDC)
-                                → Configure kubectl
-                                → Deploy Kubernetes manifests
+         ${GREEN}eks-full${NC}        Complete EKS deployment
+                                   → Build container image
+                                   → Setup Terraform state bucket
+                                   → Deploy infrastructure (VPC, Aurora, IAM, Secrets)
+                                   → Deploy EKS layer (EKS cluster, node groups, OIDC)
+                                   → Configure kubectl
+                                   → Deploy Kubernetes manifests
 
   ${GREEN}infrastructure${NC}  Infrastructure only
                               → Setup Terraform state bucket
@@ -139,7 +139,7 @@ ${BLUE}Examples:${NC}
 
   ${GREEN}Data-Lake Scenarios:${NC}
   # With analytics enabled in .env (ENABLE_ANALYTICS_SCHEDULER=true)
-  $0 ecs-full dev                      # Delta-lake set up automatically in Phase 4: Step 4.1
+  $0 ecs-full dev                      # Delta-lake set up automatically in Phase 5: Step 5.1
 
   # With analytics disabled in .env (ENABLE_ANALYTICS_SCHEDULER=false)
   $0 ecs-full dev                      # Delta-lake setup skipped
@@ -258,7 +258,7 @@ format_elapsed_time() {
 }
 
 # Complete ECS deployment workflow
-# Handles Phase 1-7: Environment Preparation → Infrastructure Setup → Database Setup → Data Lake → Application Deployment → Verification → Cleanup
+# Handles Phase 1-7: Environment Preparation → Infrastructure Setup → Database Setup → Application Infrastructure → Data Lake → Frontend Deployment → Verification
 # (Phase 0 is handled in main() above)
 deploy_ecs_full() {
     local deploy_start_time=$(date +%s)
@@ -352,12 +352,29 @@ deploy_ecs_full() {
     step_num=$((step_num + 1))
     
     # ============================================================================
-    # Phase 4: Data Lake Setup
+    # Phase 4: Application Infrastructure Deployment
     # ============================================================================
-    # Step 4.1: Setup data-lake [CONDITIONAL]
+    step_start_time=$(date +%s)
+    log_step "Phase 4: Step 4.1 - Step ${step_num}/${total_steps}: Deploying application infrastructure (ECS, ALB, CloudFront)"
+    log_info "Using container image: $CONTAINER_IMAGE"
+    if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" application; then
+        elapsed=$(( $(date +%s) - step_start_time ))
+        log_error "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} FAILED: Application infrastructure deployment failed (took $(format_elapsed_time $elapsed))"
+        log_info "Reason: Terraform plan or apply failed for application layer"
+        log_info "Check Terraform configuration, AWS permissions, CONTAINER_IMAGE, and plan output above"
+        exit 1
+    fi
+    elapsed=$(( $(date +%s) - step_start_time ))
+    log_success "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} PASSED: Application infrastructure deployed (took $(format_elapsed_time $elapsed))"
+    step_num=$((step_num + 1))
+    
+    # ============================================================================
+    # Phase 5: Data Lake Setup
+    # ============================================================================
+    # Step 5.1: Setup data-lake [CONDITIONAL]
     if should_setup_data_lake; then
         step_start_time=$(date +%s)
-        log_step "Phase 4: Step 4.1 - Step ${step_num}/${total_steps}: Setting up data-lake (S3 + Delta table)"
+        log_step "Phase 5: Step 5.1 - Step ${step_num}/${total_steps}: Setting up data-lake (S3 + Delta table)"
         if [ "$DRY_RUN" = "true" ]; then
             log_info "[DRY-RUN] Would run: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
             if [ "$PREEMPT" = "true" ]; then
@@ -374,19 +391,19 @@ deploy_ecs_full() {
                 elapsed=$(( $(date +%s) - step_start_time ))
                 # If analytics scheduler is enabled, Delta table is REQUIRED - fail fast
                 if [ "${ENABLE_ANALYTICS_SCHEDULER:-false}" = "true" ]; then
-                    log_error "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} FAILED: Delta-lake setup failed (took $(format_elapsed_time $elapsed))"
+                    log_error "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} FAILED: Delta-lake setup failed (took $(format_elapsed_time $elapsed))"
                     log_error "Reason: Delta table creation failed, but ENABLE_ANALYTICS_SCHEDULER=true requires Delta tables"
                     log_error "Analytics scheduler will not work without Delta tables - deployment cannot proceed"
                     log_info "Fix Delta table setup issues before continuing, or set ENABLE_ANALYTICS_SCHEDULER=false to skip"
                     log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
                     exit 1
                 else
-                    log_warning "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} had issues (application may still work without Delta tables) (took $(format_elapsed_time $elapsed))"
-                    log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
+                log_warning "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} had issues (application may still work without Delta tables) (took $(format_elapsed_time $elapsed))"
+                log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
                 fi
             else
                 elapsed=$(( $(date +%s) - step_start_time ))
-                log_success "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} PASSED: Delta-lake ready (took $(format_elapsed_time $elapsed))"
+                log_success "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} PASSED: Delta-lake ready (took $(format_elapsed_time $elapsed))"
             fi
             step_num=$((step_num + 1))
         fi
@@ -395,39 +412,22 @@ deploy_ecs_full() {
     fi
     
     # ============================================================================
-    # Phase 5: Application Deployment
+    # Phase 6: Frontend Deployment
     # ============================================================================
     step_start_time=$(date +%s)
-    log_step "Phase 5: Step 5.1 - Step ${step_num}/${total_steps}: Deploying application layer (ECS, ALB, CloudFront)"
-    log_info "Using container image: $CONTAINER_IMAGE"
-    if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" application; then
-        elapsed=$(( $(date +%s) - step_start_time ))
-        log_error "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} FAILED: Application deployment failed (took $(format_elapsed_time $elapsed))"
-        log_info "Reason: Terraform plan or apply failed for application layer"
-        log_info "Check Terraform configuration, AWS permissions, CONTAINER_IMAGE, and plan output above"
-        exit 1
-    fi
-    elapsed=$(( $(date +%s) - step_start_time ))
-    log_success "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} PASSED: Application layer deployed (took $(format_elapsed_time $elapsed))"
-    step_num=$((step_num + 1))
-    
-    # ============================================================================
-    # Phase 5: Application Deployment - Step 5.2: Deploy frontend to S3
-    # ============================================================================
-    step_start_time=$(date +%s)
-    log_step "Phase 5: Step 5.2 - Step ${step_num}/${total_steps}: Deploying frontend to S3"
+    log_step "Phase 6: Step 6.1 - Step ${step_num}/${total_steps}: Deploying frontend to S3"
     export ENVIRONMENT="$ENVIRONMENT"
     if ! "$SCRIPT_DIR/shared/deploy-frontend.sh"; then
         elapsed=$(( $(date +%s) - step_start_time ))
-        log_error "Phase 5: Step 5.2 - Step ${step_num}/${total_steps} FAILED: Frontend deployment failed (took $(format_elapsed_time $elapsed))"
+        log_error "Phase 6: Step 6.1 - Step ${step_num}/${total_steps} FAILED: Frontend deployment failed (took $(format_elapsed_time $elapsed))"
         log_info "Reason: Failed to build frontend or sync to S3"
         log_info "Check frontend build, AWS credentials, S3 permissions, and Terraform outputs"
         exit 1
     fi
     elapsed=$(( $(date +%s) - step_start_time ))
-    log_success "Phase 5: Step 5.2 - Step ${step_num}/${total_steps} PASSED: Frontend deployed to S3 (took $(format_elapsed_time $elapsed))"
+    log_success "Phase 6: Step 6.1 - Step ${step_num}/${total_steps} PASSED: Frontend deployed to S3 (took $(format_elapsed_time $elapsed))"
     
-    # Export updated step number for Phase 6 in main()
+    # Export updated step number for Phase 7 in main()
     export CURRENT_STEP=$((step_num + 1))
     
     local total_elapsed=$(( $(date +%s) - deploy_start_time ))
@@ -530,8 +530,8 @@ deploy_eks_full() {
                     log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
                     exit 1
                 else
-                    log_warning "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} had issues (application may still work without Delta tables) (took $(format_elapsed_time $elapsed))"
-                    log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
+                log_warning "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} had issues (application may still work without Delta tables) (took $(format_elapsed_time $elapsed))"
+                log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
                 fi
             else
                 elapsed=$(( $(date +%s) - step_start_time ))
@@ -613,7 +613,7 @@ deploy_eks_full() {
     elapsed=$(( $(date +%s) - step_start_time ))
     log_success "Phase 5: Step 5.3 - Step ${step_num}/${total_steps} PASSED: Kubernetes manifests deployed (took $(format_elapsed_time $elapsed))"
     
-    # Export updated step number for Phase 6 in main()
+    # Export updated step number for Phase 7 in main()
     export CURRENT_STEP=$((step_num + 1))
     
     local total_elapsed=$(( $(date +%s) - deploy_start_time ))
@@ -693,12 +693,12 @@ main() {
     local script_start_time=$(date +%s)
     
     # Calculate total steps based on deployment type
-    # Base steps: 3 (Phase 0.1-0.3) + deployment steps + 1 (Phase 6)
-    local total_steps=12  # Default for ecs-full: 3 (Phase 0) + 8 (deploy) + 1 (Phase 6)
+    # Base steps: 3 (Phase 0.1-0.3) + deployment steps + 1 (Phase 7)
+    local total_steps=12  # Default for ecs-full: 3 (Phase 0) + 8 (deploy) + 1 (Phase 7)
     local current_step=1  # Start at step 1
     
     if [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
-        total_steps=10  # 3 (Phase 0) + 6 (deploy) + 1 (Phase 6)
+        total_steps=10  # 3 (Phase 0) + 6 (deploy) + 1 (Phase 7)
     elif [ "$DEPLOYMENT_TYPE" = "infrastructure" ]; then
         total_steps=5  # 3 (Phase 0) + 2 (infrastructure only)
     fi
@@ -844,8 +844,8 @@ main() {
         infrastructure)
             deploy_infrastructure
             echo ""
-            ;;
-        *)
+                ;;
+            *)
             log_error "Unknown deployment type: $DEPLOYMENT_TYPE"
             echo ""
             show_usage
@@ -854,10 +854,10 @@ main() {
         esac
     
     # ============================================================================
-    # Phase 6: Validation and Verification
+    # Phase 7: Validation and Verification
     # ============================================================================
-    # Step 6.1: Post-deployment verification (full workflows only)
-    # Note: Phase 6 only runs for full deployment workflows (ecs-full, eks-full)
+    # Step 7.1: Post-deployment verification (full workflows only)
+    # Note: Phase 7 only runs for full deployment workflows (ecs-full, eks-full)
     # Infrastructure-only and legacy workflows skip this phase
     if [ "$DEPLOYMENT_TYPE" = "ecs-full" ] || [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
         # Use step number from deployment function (accounts for Phase 0 and preempt)
@@ -869,14 +869,14 @@ main() {
             total_steps="${TOTAL_STEPS:-10}"  # Default for eks-full
         fi
         step_start_time=$(date +%s)
-        log_step "Phase 6: Step 6.1 - Step ${step_num}/${total_steps}: Verifying deployment and generating test instructions"
+        log_step "Phase 7: Step 7.1 - Step ${step_num}/${total_steps}: Verifying deployment and generating test instructions"
         echo ""
         if "$SCRIPT_DIR/verification/auto_verify_and_manual_hint.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "$DRY_RUN"; then
             elapsed=$(( $(date +%s) - step_start_time ))
-            log_success "Phase 6: Step 6.1 - Step ${step_num}/${total_steps} PASSED: Verification completed (took $(format_elapsed_time $elapsed))"
+            log_success "Phase 7: Step 7.1 - Step ${step_num}/${total_steps} PASSED: Verification completed (took $(format_elapsed_time $elapsed))"
         else
             elapsed=$(( $(date +%s) - step_start_time ))
-            log_warning "Phase 6: Step 6.1 - Step ${step_num}/${total_steps} had issues (deployment may still be successful) (took $(format_elapsed_time $elapsed))"
+            log_warning "Phase 7: Step 7.1 - Step ${step_num}/${total_steps} had issues (deployment may still be successful) (took $(format_elapsed_time $elapsed))"
             log_info "Check the verification output above for details"
         fi
     fi

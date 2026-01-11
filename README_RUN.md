@@ -133,12 +133,22 @@ The `ecs-full` workflow performs a complete ECS deployment:
    - AWS Secrets Manager for sensitive credentials
    - Security groups and networking
 
-5. **Phase 4: Deploy application layer**
+5. **Phase 4: Deploy application infrastructure**
    - ECS Fargate cluster and service
    - Application Load Balancer (ALB)
-   - Frontend (S3 + CloudFront distribution)
+   - Frontend infrastructure (S3 + CloudFront distribution)
 
-6. **Phase 5: Post-deployment verification**
+6. **Phase 5: Setup data-lake** (conditional, if analytics enabled)
+   - Create Delta table in S3
+   - Setup Spark Delta Lake infrastructure
+   - Verify Delta table creation
+
+7. **Phase 6: Deploy frontend application**
+   - Build React frontend application
+   - Sync frontend to S3 bucket
+   - Invalidate CloudFront cache
+
+8. **Phase 7: Post-deployment verification**
    - Verify services are running
    - Test endpoints
    - Display access URLs (API, Frontend)

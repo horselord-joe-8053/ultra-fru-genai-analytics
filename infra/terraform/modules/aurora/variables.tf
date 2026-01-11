@@ -44,7 +44,7 @@ variable "master_password" {
 variable "engine_version" {
   type        = string
   description = "Aurora PostgreSQL engine version"
-  default     = "16.3"
+  default     = "16.4"
 }
 
 variable "instance_class" {

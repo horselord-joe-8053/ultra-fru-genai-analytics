@@ -9,6 +9,13 @@ resource "aws_secretsmanager_secret" "openai_key" {
       Name = "${var.project_name}-${var.environment}-openai-key"
     }
   )
+
+  # Prevent deletion during terraform destroy
+  # Secrets contain user-configured credentials that should be preserved
+  # Deleting secrets causes 30-day recovery window issues on redeploy
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # OpenAI API Key Secret Version (JSON format - kept for backward compatibility)
@@ -31,6 +38,11 @@ resource "aws_secretsmanager_secret" "openai_key_plain" {
       Name = "${var.project_name}-${var.environment}-openai-key-plain"
     }
   )
+
+  # Prevent deletion during terraform destroy
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # OpenAI API Key Secret Version (Plain String)
@@ -51,6 +63,11 @@ resource "aws_secretsmanager_secret" "db_password" {
       Name = "${var.project_name}-${var.environment}-db-password"
     }
   )
+
+  # Prevent deletion during terraform destroy
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Database Password Secret Version
@@ -76,6 +93,11 @@ resource "aws_secretsmanager_secret" "db_password_plain" {
       Name = "${var.project_name}-${var.environment}-db-password-plain"
     }
   )
+
+  # Prevent deletion during terraform destroy
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Database Password Secret Version (Plain String)
@@ -97,6 +119,11 @@ resource "aws_secretsmanager_secret" "db_username" {
       Name = "${var.project_name}-${var.environment}-db-username"
     }
   )
+
+  # Prevent deletion during terraform destroy
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Database Username Secret Version
