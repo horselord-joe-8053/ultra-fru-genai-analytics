@@ -1,14 +1,102 @@
 #!/bin/bash
 # Complete infrastructure destruction - leaves blank slate for fresh Terraform apply
-# Usage: ./teardown-resources.sh [dev|prod] [--force] [--skip-confirmation] [--dry-run]
 #
-# This script:
-# 1. Stops ECS/EKS services (to release resources)
-# 2. Empties S3 buckets (before Terraform destroy)
-# 3. Destroys Terraform infrastructure
-# 4. Cleans up orphaned resources
+# SYNOPSIS:
+#   ./teardown-resources.sh [ENVIRONMENT] [OPTIONS]
 #
-# WARNING: This will DESTROY ALL infrastructure for the specified environment!
+# DESCRIPTION:
+#   This script completely destroys AWS infrastructure for a specified environment,
+#   handling dependencies and resource deletion in the correct order to prevent
+#   timeouts and ensure clean teardown. It also optionally cleans up local Docker
+#   images that were built for ECR push.
+#
+# ARGUMENTS:
+#   ENVIRONMENT          Environment name (dev, staging, prod) - defaults to 'dev'
+#
+# OPTIONS:
+#   --force              Skip confirmation prompts and actually destroy resources
+#                       (default: requires confirmation before destroying)
+#
+#   --skip-confirmation  Alias for --force
+#
+#   --dry-run            Show what would be destroyed without actually destroying
+#                       (default: false, performs actual destruction)
+#
+#   --clean-local-only   Only clean up local Docker images (skip all AWS teardown steps)
+#                       Useful for freeing disk space without affecting AWS infrastructure
+#                       (default: false, performs full AWS teardown)
+#
+#   --help, -h           Display this help message and exit
+#
+# EXECUTION STEPS (in order):
+#   1. Stop ECS/EKS Services
+#      - Scales all services to desired count 0
+#      - Stops all running tasks (including one-off tasks via run-task)
+#      - Waits for all tasks to fully stop (up to 5 minutes)
+#
+#   2. Empty S3 Buckets
+#      - Empties analytics data and frontend buckets
+#      - Handles both regular and versioned objects
+#      - Speeds up Terraform destroy (Terraform cannot delete non-empty buckets)
+#
+#   2.5.1. Wait for VPC Endpoints
+#      - Waits for VPC endpoints to fully delete (up to 5 minutes)
+#      - Waits for network interfaces (ENIs) in private subnets to clean up (up to 3 minutes)
+#      - Prevents subnet deletion timeouts from lingering ENIs
+#
+#   2.5.2. Wait for Aurora Cluster
+#      - Waits for Aurora cluster and instances to fully delete (up to 25 minutes)
+#      - Aurora deletion can take 10-20+ minutes (normal AWS behavior)
+#      - Prevents Terraform timeout on subnet deletion (subnets blocked by DB subnet group)
+#
+#   3. Destroy Terraform Infrastructure
+#      - Destroys application layer (ECS/EKS, ALB, Frontend)
+#      - Destroys infrastructure layer (VPC, Aurora, IAM, Secrets Manager)
+#      - Handles dependency ordering within each layer
+#
+#   4. Clean Up Local Docker Images
+#      - Removes images matching pattern: fru-api:*
+#      - Removes images matching ECR URI pattern: *.dkr.ecr.*.amazonaws.com/fru-api:*
+#      - Images built locally and pushed to ECR (no longer needed locally)
+#      - Non-critical step (skipped if Docker is not running)
+#
+#   5. Clean Up Orphaned AWS Resources
+#      - Cleans up orphaned S3 buckets (not managed by Terraform)
+#      - Cleans up unused ECR images (old versions not in use)
+#      - Cleans up old ECS task definitions (beyond safety threshold)
+#      - Uses cleanup-orphaned-resources.sh helper script
+#
+# SPECIAL MODES:
+#   --clean-local-only: Skips all AWS teardown steps (Steps 1-3, 5) and only
+#                       executes Step 4 (local Docker image cleanup). Useful when
+#                       you want to free up disk space without affecting AWS resources.
+#
+# EXAMPLES:
+#   # Preview what would be destroyed (dry-run)
+#   ./teardown-resources.sh dev --dry-run
+#
+#   # Destroy with confirmation prompt (default behavior)
+#   ./teardown-resources.sh dev
+#
+#   # Destroy without confirmation (skip prompts)
+#   ./teardown-resources.sh dev --force
+#
+#   # Only clean local Docker images (skip AWS teardown)
+#   ./teardown-resources.sh dev --force --clean-local-only
+#
+#   # Destroy production environment (use with caution!)
+#   ./teardown-resources.sh prod --force
+#
+# EXIT STATUS:
+#   0  Success - All resources destroyed (or dry-run completed successfully)
+#   1  Failure - Error during teardown or invalid arguments
+#
+# WARNING:
+#   This script will DESTROY ALL infrastructure for the specified environment!
+#   - All AWS resources (VPC, Aurora, ECS/EKS, ALB, S3, etc.) will be permanently deleted
+#   - This action cannot be undone
+#   - Use --dry-run to preview changes before actual destruction
+#   - Use --clean-local-only to skip AWS destruction and only clean local images
 
 set -e
 
@@ -20,10 +108,12 @@ source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 DRY_RUN="false"
 FORCE_DELETE="false"
 SKIP_CONFIRMATION="false"
+CLEAN_LOCAL_ONLY="false"
 AWS_PROFILE="${AWS_PROFILE:-admin}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 ENVIRONMENT="${1:-dev}"
 PROJECT_NAME="fru"
+ECR_REPO_NAME="fru-api"
 
 # Parse arguments (skip first arg which is environment)
 shift 1 2>/dev/null || true
@@ -42,11 +132,24 @@ while [[ $# -gt 0 ]]; do
             DRY_RUN="true"
             shift
             ;;
+        --clean-local-only)
+            CLEAN_LOCAL_ONLY="true"
+            shift
+            ;;
         --help|-h)
             cat << EOF
-Usage: $0 [dev|prod] [--force] [--skip-confirmation] [--dry-run]
+Usage: $0 [dev|prod] [--force] [--skip-confirmation] [--dry-run] [--clean-local-only]
 
 Complete infrastructure destruction - leaves blank slate for fresh Terraform apply.
+
+This script destroys AWS infrastructure in the correct dependency order:
+1. Stops ECS/EKS services and all running tasks
+2. Empties S3 buckets (before Terraform destroy)
+3. Waits for VPC endpoints and network interfaces to delete
+4. Waits for Aurora cluster to fully delete (can take 10-20+ minutes)
+5. Destroys Terraform infrastructure (VPC, Aurora, ECS/EKS, ALB, etc.)
+6. Cleans up local Docker images (built locally and pushed to ECR)
+7. Cleans up orphaned AWS resources (S3, ECR, ECS task definitions)
 
 WARNING: This will DESTROY ALL infrastructure for the specified environment!
 
@@ -55,15 +158,21 @@ Options:
   --dry-run             Show what would be destroyed without actually destroying (default: false)
   --force               Skip confirmation prompts and actually destroy (default: requires confirmation)
   --skip-confirmation   Alias for --force
+  --clean-local-only    Only clean up local Docker images (skip all AWS teardown steps)
   --help                Show this help message
 
 Examples:
   $0 dev --dry-run                    # Preview what would be destroyed
   $0 dev                              # Destroy with confirmation prompt
   $0 dev --force                      # Destroy without confirmation
+  $0 dev --force --clean-local-only   # Only clean local Docker images (skip AWS teardown)
 
-Note: By default, this script requires confirmation before destroying.
-      Use --force to skip confirmation prompts.
+Notes:
+  - By default, this script requires confirmation before destroying and cleans AWS resources.
+  - Use --force to skip confirmation prompts.
+  - Use --clean-local-only to skip AWS teardown and only clean local Docker images.
+  - Aurora deletion can take 10-20+ minutes (this is normal AWS behavior).
+  - The script waits for dependencies (VPC endpoints, Aurora) before proceeding to prevent timeouts.
 
 EOF
             exit 0
@@ -119,10 +228,20 @@ if [ "$DRY_RUN" = "false" ] && [ "$SKIP_CONFIRMATION" = "false" ]; then
 fi
 
 # ============================================================================
-# Step 1: Stop Services
+# Step 1: Stop ECS/EKS Services and Tasks
 # ============================================================================
+# This step stops all ECS/EKS services and tasks before Terraform destroy because:
+# - Running tasks prevent cluster deletion
+# - Service tasks must be stopped (desired count set to 0)
+# - One-off tasks (e.g., Spark jobs via run-task) must be explicitly stopped
+# - Security groups cannot be deleted while still referenced by running tasks
+#
+# Process:
+# 1.1. Scale down all ECS services to desired count 0
+# 1.2. Stop all running tasks (including one-off tasks, retry up to 30 times)
+# 1.3. Wait for all tasks to fully stop (up to 5 minutes for RUNNING/STOPPING tasks)
 stop_services() {
-    log_step "Step 1: Stopping Services"
+    log_step "Step 1: Stopping ECS/EKS Services and Tasks"
     
     # Try to detect container system
     local cluster_name="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
@@ -265,6 +384,15 @@ stop_services() {
 # ============================================================================
 # Step 2: Empty S3 Buckets
 # ============================================================================
+# This step empties S3 buckets before Terraform destroy because:
+# - Terraform cannot delete non-empty S3 buckets
+# - Emptying buckets first speeds up Terraform destroy
+# - Handles both regular objects and versioned objects (delete markers)
+#
+# Buckets emptied:
+# - Analytics data bucket (Delta tables, raw data)
+# - Frontend bucket (static website files)
+# - Note: Terraform state bucket is NOT emptied (preserved for state management)
 empty_s3_buckets() {
     log_step "Step 2: Emptying S3 Buckets"
     
@@ -313,12 +441,18 @@ if objects:
 }
 
 # ============================================================================
-# Step 2.5: Wait for VPC Endpoints and Network Interfaces to Delete
+# Step 2.5.1: Wait for VPC Endpoints and Network Interfaces to Delete
 # ============================================================================
-# This step handles VPC endpoint deletion because:
-# - Interface VPC endpoints create network interfaces (ENIs) in private subnets
+# This step handles VPC endpoint deletion BEFORE Terraform destroy because:
+# - Interface VPC endpoints (e.g., Bedrock endpoint) create network interfaces (ENIs) in private subnets
 # - Network interfaces must be fully deleted before subnets can be deleted
-# - ENIs can take a few minutes to fully delete after endpoint deletion
+# - ENIs can take 1-3 minutes to fully delete after endpoint deletion completes
+# - Terraform destroy will timeout on subnet deletion if ENIs still exist
+#
+# This step:
+# - Checks for VPC endpoints in the VPC (waits up to 5 minutes for deletion)
+# - Checks for network interfaces in private subnets (waits up to 3 minutes for cleanup)
+# - Prevents subnet deletion timeouts by ensuring ENIs are cleaned up first
 wait_for_vpc_endpoints_deletion() {
     log_step "Step 2.5.1: Checking VPC Endpoints and Network Interfaces"
     
@@ -445,14 +579,15 @@ wait_for_vpc_endpoints_deletion() {
 }
 
 # ============================================================================
-# Step 2.5: Wait for Aurora to Delete (if it exists)
+# Step 2.5.2: Wait for Aurora to Delete (if it exists)
 # ============================================================================
 # This step handles Aurora deletion BEFORE Terraform destroy because:
-# - Aurora instances take 10-20+ minutes to delete
-# - DB subnet groups block private subnet deletion
-# - Terraform destroy will timeout if Aurora is still deleting
+# - Aurora instances take 10-20+ minutes to delete (normal AWS behavior)
+# - DB subnet groups block private subnet deletion until Aurora is fully deleted
+# - Terraform destroy will timeout on subnet deletion if Aurora is still deleting
+# - This step waits up to 25 minutes for Aurora cluster and instances to fully delete
 wait_for_aurora_deletion() {
-    log_step "Step 2.5: Checking Aurora Cluster Status"
+    log_step "Step 2.5.2: Checking Aurora Cluster Status"
     
     local cluster_name="${PROJECT_NAME}-${ENVIRONMENT}-aurora-cluster"
     
@@ -565,6 +700,16 @@ wait_for_aurora_deletion() {
 # ============================================================================
 # Step 3: Terraform Destroy
 # ============================================================================
+# This step destroys all Terraform-managed infrastructure using Terragrunt.
+#
+# Infrastructure destroyed:
+# - Application layer (ECS/EKS, ALB, Frontend) - destroyed first
+# - Infrastructure layer (VPC, Aurora, IAM, Secrets Manager) - destroyed second
+#
+# Dependencies handled:
+# - Steps 1-2 ensure services/tasks are stopped and S3 buckets are empty
+# - Steps 2.5.1-2.5.2 ensure VPC endpoints and Aurora are deleted first
+# - Terraform handles dependency ordering within each layer
 terraform_destroy() {
     log_step "Step 3: Destroying Terraform Infrastructure"
     
@@ -589,10 +734,124 @@ terraform_destroy() {
 }
 
 # ============================================================================
-# Step 4: Clean Up Orphaned Resources
+# Step 4: Clean Up Local Docker Images
 # ============================================================================
+# This step cleans up Docker images that were built locally and pushed to ECR.
+# These images accumulate in local Docker cache after each build/push operation.
+#
+# Images cleaned:
+# - Images matching pattern: fru-api:* (e.g., fru-api:fru-dev-20260109-abc123)
+# - Images matching ECR URI pattern: *.dkr.ecr.*.amazonaws.com/fru-api:*
+#
+# Note: This step is non-critical - it only cleans local images and doesn't
+# affect AWS resources. If Docker is not running, this step is skipped.
+cleanup_local_images() {
+    log_step "Step 4: Cleaning Up Local Docker Images"
+    
+    if [ "$DRY_RUN" = "true" ]; then
+        log_info "[DRY-RUN] Would clean up local Docker images:"
+        log_info "[DRY-RUN]   - Remove images matching pattern: ${ECR_REPO_NAME}:*"
+        log_info "[DRY-RUN]   - Remove images matching ECR repository URI pattern"
+        echo ""
+        return 0
+    fi
+    
+    # Ensure Docker is running
+    if ! docker info >/dev/null 2>&1; then
+        log_warning "Docker daemon is not running (skipping local image cleanup)"
+        echo ""
+        return 0
+    fi
+    
+    log_info "Cleaning up local Docker images built for ECR push..."
+    log_info "This removes images that were built locally and pushed to ECR"
+    echo ""
+    
+    local images_found=false
+    local images_removed=0
+    
+    # Find images matching the ECR repository name pattern (fru-api:*)
+    log_info "Searching for images matching pattern: ${ECR_REPO_NAME}:*"
+    local image_list
+    image_list=$(docker images "${ECR_REPO_NAME}" --format "{{.ID}} {{.Repository}}:{{.Tag}}" 2>/dev/null || echo "")
+    
+    if [ -n "$image_list" ]; then
+        images_found=true
+        # Process each line (image_id image_tag) - use process substitution to avoid subshell
+        while IFS=' ' read -r image_id image_tag; do
+            if [ -z "$image_id" ] || [ "$image_id" = "None" ] || [ -z "$image_tag" ]; then
+                continue
+            fi
+            
+            log_info "  Removing image: $image_tag ($image_id)"
+            
+            if docker rmi -f "$image_id" >/dev/null 2>&1; then
+                images_removed=$((images_removed + 1))
+                log_success "    ✓ Image removed: $image_tag"
+            else
+                log_warning "    ✗ Failed to remove image: $image_tag (may be in use)"
+            fi
+        done <<< "$image_list"
+    fi
+    
+    # Also check for images with ECR repository URI pattern (account.dkr.ecr.region.amazonaws.com/fru-api:*)
+    # These are images that were tagged with the full ECR URI before push
+    log_info "Searching for images matching ECR URI pattern (*.dkr.ecr.*.amazonaws.com/${ECR_REPO_NAME}:*)..."
+    local all_images
+    all_images=$(docker images --format "{{.Repository}}:{{.Tag}} {{.ID}}" 2>/dev/null || echo "")
+    
+    if [ -n "$all_images" ]; then
+        local ecr_images
+        ecr_images=$(echo "$all_images" | grep -E "\.dkr\.ecr\..*\.amazonaws\.com/${ECR_REPO_NAME}:" || echo "")
+        
+        if [ -n "$ecr_images" ]; then
+            images_found=true
+            while IFS=' ' read -r image_tag image_id; do
+                if [ -z "$image_id" ] || [ "$image_id" = "None" ] || [ -z "$image_tag" ]; then
+                    continue
+                fi
+                
+                log_info "  Removing ECR-tagged image: $image_tag ($image_id)"
+                
+                if docker rmi -f "$image_id" >/dev/null 2>&1; then
+                    images_removed=$((images_removed + 1))
+                    log_success "    ✓ Image removed: $image_tag"
+                else
+                    log_warning "    ✗ Failed to remove image: $image_tag (may be in use)"
+                fi
+            done <<< "$ecr_images"
+        fi
+    fi
+    
+    if [ "$images_found" = false ]; then
+        log_info "No local Docker images found matching ECR repository pattern"
+        log_info "Images may have been cleaned up already or never built locally"
+    else
+        if [ "$images_removed" -gt 0 ]; then
+            log_success "Local Docker images cleaned up ($images_removed image(s) removed)"
+        else
+            log_warning "No images were removed (images may be in use or already removed)"
+        fi
+    fi
+    
+    echo ""
+}
+
+# ============================================================================
+# Step 5: Clean Up Orphaned AWS Resources
+# ============================================================================
+# This step cleans up orphaned AWS resources that Terraform might have missed
+# or that were created outside of Terraform (e.g., manually or by other scripts).
+#
+# Resources cleaned (via cleanup-orphaned-resources.sh):
+# - Orphaned S3 buckets (not managed by Terraform, empty or with old data)
+# - Unused ECR images (old image versions not in use)
+# - Old ECS task definitions (not in use, beyond safety threshold)
+#
+# This step uses the cleanup-orphaned-resources.sh helper script which provides
+# safe cleanup with retention policies and protection for in-use resources.
 cleanup_orphaned() {
-    log_step "Step 4: Cleaning Up Orphaned Resources"
+    log_step "Step 5: Cleaning Up Orphaned AWS Resources"
     
     # Detect container system for cleanup
     local cluster_name="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
@@ -634,6 +893,27 @@ cleanup_orphaned() {
 main() {
     local failed=false
     
+    # If --clean-local-only flag is set, skip all AWS steps and only clean local images
+    # This mode is useful when you want to free up disk space by removing local Docker
+    # images without affecting AWS infrastructure
+    if [ "$CLEAN_LOCAL_ONLY" = "true" ]; then
+        log_step "Local Docker Image Cleanup (AWS Steps Skipped)"
+        log_info "Using --clean-local-only flag: skipping all AWS teardown steps"
+        log_info "This will only clean up local Docker images built for ECR push"
+        log_info "AWS resources will NOT be affected"
+        echo ""
+        
+        if ! cleanup_local_images; then
+            log_error "Local image cleanup failed"
+            exit 1
+        fi
+        
+        log_success "Local Docker image cleanup completed!"
+        log_info "Only local Docker images were cleaned (AWS resources were not touched)"
+        return 0
+    fi
+    
+    # Normal AWS teardown flow
     if ! stop_services; then
         failed=true
     fi
@@ -663,6 +943,11 @@ main() {
     
     if ! cleanup_orphaned; then
         failed=true
+    fi
+    
+    # Step 4: Clean up local Docker images (images built locally and pushed to ECR)
+    if ! cleanup_local_images; then
+        log_warning "Local image cleanup had issues (non-critical)"
     fi
     
     echo ""

@@ -18,7 +18,6 @@
 # Options:
 #   --dry-run                → Preview changes without modifying AWS resources
 #   --skip-data-lake         → Skip data-lake setup even if analytics scheduler is enabled
-#   --skip-cleanup           → Skip cleanup phase (Phase 7)
 #   --preempt                → Destroy all AWS infrastructure before deployment (complete teardown and fresh rebuild)
 #                              Executes Phase 0: Step 0.4 - calls teardown-resources.sh to:
 #                              - Stop ECS/EKS services (scale to 0)
@@ -58,7 +57,6 @@ DEFAULT_IMAGE_TAG="latest"
 # Initialize variables
 DRY_RUN=false
 SKIP_DATA_LAKE=false
-SKIP_CLEANUP=false
 PREEMPT=false
 REMAINING_ARGS=()
 
@@ -69,8 +67,6 @@ for arg in "$@"; do
         DRY_RUN=true
     elif [ "$arg" = "--skip-data-lake" ]; then
         SKIP_DATA_LAKE=true
-    elif [ "$arg" = "--skip-cleanup" ]; then
-        SKIP_CLEANUP=true
     elif [ "$arg" = "--preempt" ]; then
         PREEMPT=true
     else
@@ -94,7 +90,7 @@ else
 fi
 
 # Export flags for sub-scripts
-export DRY_RUN SKIP_DATA_LAKE SKIP_CLEANUP PREEMPT
+export DRY_RUN SKIP_DATA_LAKE PREEMPT
 
 # Show usage information
 show_usage() {
@@ -132,7 +128,6 @@ ${BLUE}Environments:${NC}
   ${GREEN}--dry-run${NC}          Preview changes without modifying AWS resources
   ${GREEN}--preempt${NC}          Destroy existing infrastructure before deployment (clean slate)
   ${GREEN}--skip-data-lake${NC}   Skip data-lake setup even if analytics scheduler is enabled
-  ${GREEN}--skip-cleanup${NC}     Skip cleanup phase (Phase 7)
 
 ${BLUE}Examples:${NC}
   ${GREEN}Basic Deployments:${NC}
@@ -272,7 +267,7 @@ deploy_ecs_full() {
     
     # Get step information from main() (accounts for Phase 0 steps and preempt if enabled)
     local step_num="${CURRENT_STEP:-4}"  # Default to 4 (after Phase 0.1-0.3, or 0.4 if preempt)
-    local total_steps="${TOTAL_STEPS:-13}"  # Default for ecs-full
+    local total_steps="${TOTAL_STEPS:-12}"  # Default for ecs-full
     
     # ============================================================================
     # Phase 1: Environment Preparation - Step 1.3: Prepare container image
@@ -432,7 +427,7 @@ deploy_ecs_full() {
     elapsed=$(( $(date +%s) - step_start_time ))
     log_success "Phase 5: Step 5.2 - Step ${step_num}/${total_steps} PASSED: Frontend deployed to S3 (took $(format_elapsed_time $elapsed))"
     
-    # Export updated step number for Phase 6 and Phase 7 in main()
+    # Export updated step number for Phase 6 in main()
     export CURRENT_STEP=$((step_num + 1))
     
     local total_elapsed=$(( $(date +%s) - deploy_start_time ))
@@ -451,7 +446,7 @@ deploy_eks_full() {
     
     # Get step information from main() (accounts for Phase 0 steps and preempt if enabled)
     local step_num="${CURRENT_STEP:-4}"  # Default to 4 (after Phase 0.1-0.3, or 0.4 if preempt)
-    local total_steps="${TOTAL_STEPS:-11}"  # Default for eks-full
+    local total_steps="${TOTAL_STEPS:-10}"  # Default for eks-full
     
     # ============================================================================
     # Phase 1: Environment Preparation - Step 1.3: Prepare container image
@@ -618,7 +613,7 @@ deploy_eks_full() {
     elapsed=$(( $(date +%s) - step_start_time ))
     log_success "Phase 5: Step 5.3 - Step ${step_num}/${total_steps} PASSED: Kubernetes manifests deployed (took $(format_elapsed_time $elapsed))"
     
-    # Export updated step number for Phase 6 and Phase 7 in main()
+    # Export updated step number for Phase 6 in main()
     export CURRENT_STEP=$((step_num + 1))
     
     local total_elapsed=$(( $(date +%s) - deploy_start_time ))
@@ -698,12 +693,12 @@ main() {
     local script_start_time=$(date +%s)
     
     # Calculate total steps based on deployment type
-    # Base steps: 3 (Phase 0.1-0.3) + deployment steps + 2 (Phase 6 + Phase 7)
-    local total_steps=13  # Default for ecs-full: 3 (Phase 0) + 8 (deploy) + 2 (Phase 6+7)
+    # Base steps: 3 (Phase 0.1-0.3) + deployment steps + 1 (Phase 6)
+    local total_steps=12  # Default for ecs-full: 3 (Phase 0) + 8 (deploy) + 1 (Phase 6)
     local current_step=1  # Start at step 1
     
     if [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
-        total_steps=11  # 3 (Phase 0) + 6 (deploy) + 2 (Phase 6+7)
+        total_steps=10  # 3 (Phase 0) + 6 (deploy) + 1 (Phase 6)
     elif [ "$DEPLOYMENT_TYPE" = "infrastructure" ]; then
         total_steps=5  # 3 (Phase 0) + 2 (infrastructure only)
     fi
@@ -867,11 +862,11 @@ main() {
     if [ "$DEPLOYMENT_TYPE" = "ecs-full" ] || [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
         # Use step number from deployment function (accounts for Phase 0 and preempt)
         local step_num="${CURRENT_STEP:-12}"  # Default: after Phase 0 (3) + deploy (8) + 1 = 12
-        local total_steps="${TOTAL_STEPS:-13}"  # Default for ecs-full
+        local total_steps="${TOTAL_STEPS:-12}"  # Default for ecs-full
         if [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
             # Defaults for eks-full if not set
             step_num="${CURRENT_STEP:-10}"  # Default: after Phase 0 (3) + deploy (6) + 1 = 10
-            total_steps="${TOTAL_STEPS:-11}"  # Default for eks-full
+            total_steps="${TOTAL_STEPS:-10}"  # Default for eks-full
         fi
         step_start_time=$(date +%s)
         log_step "Phase 6: Step 6.1 - Step ${step_num}/${total_steps}: Verifying deployment and generating test instructions"
@@ -884,62 +879,6 @@ main() {
             log_warning "Phase 6: Step 6.1 - Step ${step_num}/${total_steps} had issues (deployment may still be successful) (took $(format_elapsed_time $elapsed))"
             log_info "Check the verification output above for details"
         fi
-        # Update step number for Phase 7
-        export CURRENT_STEP=$((step_num + 1))
-    fi
-    
-    # ============================================================================
-    # Phase 7: Cleanup
-    # ============================================================================
-    # Step 7.1: Cleanup orphaned resources (optional)
-    # Note: Cleanup is optional and can be skipped
-    # Use --skip-cleanup flag to skip this phase
-    # Only runs for full deployment workflows (ecs-full, eks-full)
-    if [ "$SKIP_CLEANUP" != "true" ]; then
-        if [ "$DEPLOYMENT_TYPE" = "ecs-full" ] || [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
-            # Determine container system
-            local cont_sys="ecs"
-            if [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
-                cont_sys="eks"
-            fi
-            
-            # Use step number from Phase 6 (accounts for Phase 0 and preempt)
-            local step_num="${CURRENT_STEP:-13}"  # Default: after Phase 0 (3) + deploy (8) + Phase 6 (1) + 1 = 13
-            local total_steps="${TOTAL_STEPS:-13}"  # Default for ecs-full
-            if [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
-                # Defaults for eks-full if not set
-                step_num="${CURRENT_STEP:-11}"  # Default: after Phase 0 (3) + deploy (6) + Phase 6 (1) + 1 = 11
-                total_steps="${TOTAL_STEPS:-11}"  # Default for eks-full
-            fi
-            
-            step_start_time=$(date +%s)
-            log_step "Phase 7: Step 7.1 - Step ${step_num}/${total_steps}: Cleaning up orphaned AWS resources"
-            echo ""
-            # Build cleanup command with appropriate flags
-            # Uses cleanup-resources.sh (wrapper) with --force in non-dry-run mode to actually perform cleanup
-            # In automated deployment workflows, cleanup should happen automatically
-            local cleanup_cmd="$SCRIPT_DIR/shared/resources_cleanup/cleanup-resources.sh --cont-sys $cont_sys --environment $ENVIRONMENT"
-            if [ "$DRY_RUN" = "true" ]; then
-                cleanup_cmd="$cleanup_cmd --dry-run"
-            else
-                cleanup_cmd="$cleanup_cmd --force"
-            fi
-            # Note: Uses --force in non-dry-run mode to actually perform cleanup
-            #       In automated deployment workflows, cleanup should happen automatically
-            #       Use --dry-run flag to preview cleanup without executing
-            if $cleanup_cmd; then
-                elapsed=$(( $(date +%s) - step_start_time ))
-                log_success "Phase 7: Step 7.1 - Step ${step_num}/${total_steps} PASSED: Cleanup completed (took $(format_elapsed_time $elapsed))"
-            else
-                elapsed=$(( $(date +%s) - step_start_time ))
-                log_warning "Phase 7: Step 7.1 - Step ${step_num}/${total_steps} had issues (deployment may still be successful) (took $(format_elapsed_time $elapsed))"
-                log_info "Check the cleanup output above for details"
-            fi
-        else
-            log_info "Skipping cleanup (only runs for full workflows: ecs-full, eks-full)"
-        fi
-    else
-        log_info "Skipping cleanup (--skip-cleanup flag set)"
     fi
     
     # Log total script execution time

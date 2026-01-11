@@ -70,3 +70,6 @@ pgdata/
 test/cache_files/
 .env.bak*
 data/raw/*.backup*
+
+# Backup files
+.env.example.bk1

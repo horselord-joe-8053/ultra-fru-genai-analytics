@@ -7,7 +7,6 @@
 #   --skip-frontend         → Skip frontend development server startup
 #   --skip-data-load        → Skip loading data into database
 #   --skip-data-lake        → Skip data-lake setup even if analytics scheduler is enabled
-#   --skip-cleanup          → Skip cleanup phase (Phase 7)
 #   --preempt               → Destroy all local resources before setup (complete teardown and fresh rebuild)
 #                             Executes Phase 0: Step 0.3 - calls teardown-resources.sh to:
 #                             - Stop Docker services and frontend dev server
@@ -34,7 +33,6 @@ log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (local/run.sh)"
 SKIP_FRONTEND=false
 SKIP_DATA_LOAD=false
 SKIP_DATA_LAKE=false
-SKIP_CLEANUP=false
 PREEMPT=false
 
 while [[ $# -gt 0 ]]; do
@@ -51,17 +49,13 @@ while [[ $# -gt 0 ]]; do
             SKIP_DATA_LAKE=true
             shift
             ;;
-        --skip-cleanup)
-            SKIP_CLEANUP=true
-            shift
-            ;;
         --preempt)
             PREEMPT=true
             shift
             ;;
         *)
             log_error "Unknown option: $1"
-            log_info "Usage: $0 [--skip-frontend] [--skip-data-load] [--skip-data-lake] [--skip-cleanup] [--preempt]"
+            log_info "Usage: $0 [--skip-frontend] [--skip-data-load] [--skip-data-lake] [--preempt]"
             exit 1
             ;;
     esac
@@ -107,14 +101,14 @@ format_elapsed_time() {
 }
 
 # Main setup function
-# Handles Phase 0-7: Prerequisites → Preempt Teardown (optional) → Environment Preparation → Infrastructure Setup → Database Setup → Data Lake → Application Deployment → Verification → Cleanup
+# Handles Phase 0-6: Prerequisites → Preempt Teardown (optional) → Environment Preparation → Infrastructure Setup → Database Setup → Data Lake → Application Deployment → Verification
 main() {
     # Record script start time
     local script_start_time=$(date +%s)
     log_step "Starting local development environment setup"
     
-    # Calculate total steps (base: 11, +1 if preempt)
-    local total_steps=11
+    # Calculate total steps (base: 10, +1 if preempt)
+    local total_steps=10
     local current_step=1
     
     if [ "$PREEMPT" = "true" ]; then
@@ -387,37 +381,6 @@ main() {
     fi
     current_step=$((current_step + 1))
     echo ""
-    
-    # ============================================================================
-    # Phase 7: Cleanup
-    # ============================================================================
-    # Step 7.1: Cleanup Docker resources (optional)
-    # Note: Cleanup is optional and can be skipped
-    # Use --skip-cleanup flag to skip this phase
-    if [ "$SKIP_CLEANUP" != "true" ]; then
-        step_start_time=$(date +%s)
-        log_step "Phase 7: Step 7.1 - Step ${current_step}/${total_steps}: Cleaning up Docker resources"
-        echo ""
-        # Note: cleanup-docker.sh requires user confirmation for --all
-        # For automated runs, we'll do a safe cleanup (containers and images only, no volumes)
-        if [ "${DRY_RUN:-false}" = "true" ]; then
-            log_info "[DRY-RUN] Would run: $SCRIPT_DIR/cleanup-docker.sh --containers --images"
-        else
-            # Run safe cleanup (no user confirmation needed)
-            if "$SCRIPT_DIR/cleanup-docker.sh" --containers --images; then
-                elapsed=$(( $(date +%s) - step_start_time ))
-                log_success "Phase 7: Step 7.1 - Step ${current_step}/${total_steps} PASSED: Cleanup completed (took $(format_elapsed_time $elapsed))"
-            else
-                elapsed=$(( $(date +%s) - step_start_time ))
-                log_warning "Phase 7: Step 7.1 - Step ${current_step}/${total_steps} had issues (deployment may still be successful) (took $(format_elapsed_time $elapsed))"
-                log_info "Check the cleanup output above for details"
-            fi
-        current_step=$((current_step + 1))
-        echo ""
-        fi
-    else
-        log_info "Skipping cleanup (--skip-cleanup flag set)"
-    fi
     
     # Log total script execution time
     local total_elapsed=$(( $(date +%s) - script_start_time ))
