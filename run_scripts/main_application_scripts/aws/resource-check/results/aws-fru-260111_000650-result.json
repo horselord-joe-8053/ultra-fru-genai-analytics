@@ -1,0 +1,62 @@
+{
+  "metadata": {
+    "account_id": "744139897900",
+    "profile": "admin",
+    "region": "us-east-1",
+    "timestamp": "2026-01-11T00:07:17.305480",
+    "total_resources": 8
+  },
+  "results": {
+    "ec2": {
+      "instances": [],
+      "vpcs": [],
+      "subnets": [],
+      "security_groups": [],
+      "internet_gateways": [],
+      "nat_gateways": [],
+      "elastic_ips": []
+    },
+    "s3": {
+      "buckets": []
+    },
+    "ecs": {
+      "clusters": [],
+      "task_definitions": []
+    },
+    "eks": {
+      "clusters": []
+    },
+    "rds": {
+      "instances": [],
+      "aurora_clusters": []
+    },
+    "elb": {
+      "load_balancers": []
+    },
+    "lambda": {
+      "functions": []
+    },
+    "api_gateway": {
+      "rest_apis": []
+    },
+    "cloudfront": {
+      "distributions": []
+    },
+    "ecr": {
+      "repositories": []
+    },
+    "iam": {
+      "roles": [],
+      "policies": []
+    },
+    "secrets_manager": {
+      "secrets": []
+    },
+    "sqs": {
+      "queues": []
+    },
+    "sns": {
+      "topics": []
+    }
+  }
+}
