@@ -61,9 +61,17 @@ FRU (**Fridges R Us**) is a real, end-to-end **conversational analytics system**
 
 ## 📚 Documentation Guide
 
-- **[`README_RUN.md`](README_RUN.md)** - Detailed manual instructions for running FRU locally, in production simulation, and on AWS (ECS, EKS, Terraform)
-- **[`README_RUN_SCRIPTS.md`](README_RUN_SCRIPTS.md)** - Automated setup scripts for one-command deployment across all scenarios
+**Main Documentation:**
+- **[`README_RUN.md`](README_RUN.md)** - Quick start guide for running FRU locally and on AWS
 - **[`README_INFRA.md`](README_INFRA.md)** - Complete Infrastructure as Code (IaC) documentation for Terraform + Terragrunt deployment with modular architecture, environment management, and security best practices
+
+**Additional Guides:**
+- **[`guides/DELTA_SPARK_VS_POSTGRESQL_FULL_STACK.md`](guides/DELTA_SPARK_VS_POSTGRESQL_FULL_STACK.md)** - Detailed comparison and architecture guide for Delta Lake + Spark vs PostgreSQL + pgvector
+- **[`guides/MANUAL_DEPLOYMENT_AND_TESTING.md`](guides/MANUAL_DEPLOYMENT_AND_TESTING.md)** - Manual deployment and testing procedures
+- **[`guides/PERFORMANCE_BREAKDOWN.md`](guides/PERFORMANCE_BREAKDOWN.md)** - Performance analysis and optimization guide
+- **[`guides/aws_setup_guide.md`](guides/aws_setup_guide.md)** - AWS setup and configuration guide
+- **[`guides/database_setup_explanation.md`](guides/database_setup_explanation.md)** - Database setup and schema explanation
+- **[`guides/deployment_scripts_relationship.md`](guides/deployment_scripts_relationship.md)** - Explanation of deployment scripts and their relationships
 
 ---
 
@@ -213,6 +221,7 @@ fru-genai-analytics-all/
 │   ├─ aws/                       # AWS deployments (ECS, EKS, Terraform)
 │   │   ├─ common_ecs_eks/        # Shared ECS/EKS scripts
 │   │   ├─ bedrock/               # Bedrock model access
+│   │   ├─ resource-check/        # AWS resource inventory scripts
 │   │   └─ terraform/             # Terraform deployment & teardown
 │   └─ common/                    # Shared utilities
 │
@@ -245,113 +254,28 @@ fru-genai-analytics-all/
 │               ├─ application/   # ECS-specific
 │               └─ eks/           # EKS-specific
 │
+├─ guides/                        # Additional documentation and guides
+│   ├─ DELTA_SPARK_VS_POSTGRESQL_FULL_STACK.md
+│   ├─ MANUAL_DEPLOYMENT_AND_TESTING.md
+│   ├─ PERFORMANCE_BREAKDOWN.md
+│   ├─ aws_setup_guide.md
+│   ├─ database_setup_explanation.md
+│   └─ deployment_scripts_relationship.md
+│
 └─ study/
     └─ ARCHITECT_STUDY_GUIDE_DETAILED.md
 ```
 
 ---
 
-# ⚡️ 4. Local Quickstart (Works Without AWS)
+# ⚡️ 4. Local Quickstart
 
-> Easiest way to play with FRU and test embeddings.
+For detailed instructions on running FRU locally, see **[`README_RUN.md`](README_RUN.md)**.
 
-## 4.1 Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
----
-
-## 4.2 Run pgvector locally
-
-```bash
-cd infra/docker
-docker compose up -d
-```
-
-You now have:
-- Postgres + pgvector on `localhost:5432`
-- Optional API container
-
----
-
-## 4.3 Initialize pgvector schema
-
-```bash
-psql "postgresql://postgres:postgres@localhost:5432/fru_db"   -f sql/schema_pgvector.sql
-```
-
----
-
-## 4.4 Load embeddings into pgvector
-
-> Embeds `CUSTOMER_FEEDBACK` using OpenAI `text-embedding-3-small`.
-
-```bash
-export OPENAI_API_KEY="sk-yourkey"
-export PGHOST=localhost
-export PGPORT=5432
-export PGUSER=postgres
-export PGPASSWORD=postgres
-export PGDATABASE=fru_db
-export FRU_CSV_PATH="data/raw/fridge_sales_with_rating.csv"
-
-python backend/etl/load_openai_embeddings_to_pgvector.py
-```
-
----
-
-## 4.5 Run API locally
-
-```bash
-python backend/api/app.py
-```
-
-Test query endpoint:
-
-```bash
-curl -X POST http://localhost:5000/query   -H "Content-Type: application/json"   -d '{"query": "Why are Samsung customers upset?"}'
-```
-
-The `/query` endpoint will:
-
-1. Embed your question using OpenAI.
-2. Run a pgvector similarity search over `fru_sales_embeddings`.
-3. Compute simple stats (counts by brand/store/rating).
-4. Send structured JSON + your question to Claude via Bedrock.
-5. Return a grounded natural-language summary plus raw stats.
-
-**Batch Analytics Integration:**
-
-The API also includes an optional scheduler that runs Spark batch analytics every 5 minutes and stores results in PostgreSQL. Enable it by setting `ENABLE_ANALYTICS_SCHEDULER=true` in your `.env` file.
-
-Test analytics endpoint:
-
-```bash
-curl http://localhost:5000/analytics
-```
-
-This returns the latest batch analytics results from Spark + Delta, including sales by brand, store performance, feedback analysis, and more.
-
----
-
-## 4.6 Start Frontend (Optional)
-
-The project includes a React + Vite frontend with a chat interface, batch analytics panel, and query statistics.
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-The frontend will be available at `http://localhost:5173` and includes:
-- **Chat interface** - Interactive query interface
-- **Batch Analytics Panel** - Displays Spark batch analytics results with auto-refresh
-- **Query Stats Panel** - Shows query statistics and performance metrics
-
-> **Note**: For automated setup, use `./run_scripts/local/run.sh` which handles frontend setup and startup automatically.
+**Quick summary:**
+- Set up `.env` file with your credentials
+- Run `./run_scripts/main_application_scripts/local/run.sh` for one-command setup
+- Access frontend at `http://localhost:5173`
 
 ---
 
@@ -552,134 +476,13 @@ Claude returns:
 
 # 🏗 8. Full AWS Deployment
 
-### 8.1 S3 (raw + delta storage)
+For detailed instructions on deploying FRU to AWS, see **[`README_RUN.md`](README_RUN.md)** and **[`README_INFRA.md`](README_INFRA.md)**.
 
-- Bucket: `fru-analytics-data-<env>`
-- Layout:
-  ```text
-  s3://fru-analytics-data-prod/raw/fridge_sales/<date>/fridge_sales_with_rating.csv
-  s3://fru-analytics-data-prod/delta/fru_sales/...
-  ```
-
-Use the Terraform modules in `infra/terraform/modules/` with Terragrunt configurations in `infra/terraform/environments/`. 
-
-**Recommended deployment workflows:**
-```bash
-# Complete ECS deployment (infrastructure + ECS application)
-./run_scripts/aws/run.sh ecs-full dev
-
-# Complete EKS deployment (infrastructure + EKS cluster + Kubernetes manifests)
-./run_scripts/aws/run.sh eks-full dev
-
-# Infrastructure only (VPC, Aurora, IAM, Secrets Manager)
-./run_scripts/aws/run.sh infrastructure dev
-```
-
-**EKS Deployment Details:**
-- EKS cluster is created automatically via Terraform (no manual `eksctl` needed)
-- Supports both Fargate profiles and managed node groups
-- kubectl is configured automatically after cluster creation
-- Kubernetes manifests are applied from `infra/k8s/`
-
-See [`README_INFRA.md`](README_INFRA.md) for detailed instructions.
-
----
-
-### 8.2 RDS (or Aurora) PostgreSQL with pgvector
-
-- Engine: Postgres 16 (or Aurora Postgres compatible)
-- Private subnets
-- Security groups:
-  - allow ECS tasks, deny public internet
-- After provisioning:
-
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-\i sql/schema_pgvector.sql
-```
-
-FRU now has a semantic store inside AWS.
-
----
-
-### 8.3 Embedding ETL in AWS
-
-First stage: run ETL from your laptop pointing at RDS:
-
-```bash
-export PGHOST=<rds-endpoint>   # from RDS console
-export PGPORT=5432
-export PGUSER=fru_user
-export PGPASSWORD=<password>
-export PGDATABASE=fru_db
-export FRU_CSV_PATH=data/raw/fridge_sales_with_rating.csv
-
-python backend/etl/load_openai_embeddings_to_pgvector.py
-```
-
-Later evolution:
-
-- run ETL on ECS Fargate or EMR Serverless
-- pull CSV from S3 rather than local disk
-
----
-
-### 8.4 Containerize API + push to ECR
-
-**Recommended: Use automated script**
-```bash
-# Automated build and push (idempotent)
-./run_scripts/aws/common_ecs_eks/build-push-ecr.sh
-```
-
-**Manual steps (for reference):**
-```bash
-docker build -f infra/docker/Dockerfile.api -t fru-api .
-aws ecr create-repository --repository-name fru-api --profile admin
-# tag & push
-```
-
-> **Note:** 
-> - The automated script checks if the image already exists in ECR before building, making it idempotent and faster for repeated runs
-> - Uses `admin` profile for infrastructure operations (ECR, S3, etc.)
-> - Application runtime uses `bedrock` profile (or `admin` for local Docker development)
-
----
-
-### 8.5 ECS Fargate Service
-
-- Task definition uses `fru-api` ECR image.
-- Environment variables:
-
-```text
-PGHOST=<rds-endpoint>
-PGPORT=5432
-PGUSER=fru_user
-PGPASSWORD=<password>
-PGDATABASE=fru_db
-OPENAI_API_KEY=<your-openai-key>
-AWS_REGION=<region-with-bedrock>
-BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240229-v1:0
-```
-
-- Service runs in private subnets.
-- Security groups allow:
-  - outbound to RDS SG
-  - outbound to Bedrock via VPC endpoint (recommended)
-- Exposed via:
-  - ALB, or
-  - API Gateway HTTP API via private integration.
-
----
-
-### 8.6 Bedrock Access
-
-Grant the ECS task role permissions for:
-
-- `bedrock:InvokeModel`
-- `bedrock:InvokeModelWithResponseStream`
-
-And, optionally, restrict to the Claude model ID you use.
+**Quick summary:**
+- Set up `.env` file with AWS credentials
+- Run `./run_scripts/main_application_scripts/aws/run.sh ecs-full dev` for complete ECS deployment
+- Or use `eks-full` for Kubernetes deployment
+- Infrastructure is managed via Terraform + Terragrunt (see `README_INFRA.md`)
 
 ---
 

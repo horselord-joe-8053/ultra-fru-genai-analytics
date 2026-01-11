@@ -511,9 +511,22 @@ DELTA_TABLE_PATH=data/delta/fru_sales
 
 ## 📚 Additional Resources
 
+**Main Documentation:**
 - **Main README**: `README.md` - Project overview
 - **Run Guide**: `README_RUN.md` - Detailed manual setup instructions
+- **Infrastructure Guide**: `README_INFRA.md` - Terraform + Terragrunt IaC documentation
 - **Architecture**: See README.md Section 6 (pgvector) and Section 10 (Query Processing)
+
+**Additional Guides** (in `guides/` directory):
+- `guides/DELTA_SPARK_VS_POSTGRESQL_FULL_STACK.md` - Delta Lake + Spark vs PostgreSQL + pgvector comparison
+- `guides/MANUAL_DEPLOYMENT_AND_TESTING.md` - Manual deployment and testing procedures
+- `guides/PERFORMANCE_BREAKDOWN.md` - Performance analysis and optimization
+- `guides/aws_setup_guide.md` - AWS setup and configuration
+- `guides/database_setup_explanation.md` - Database setup and schema explanation
+- `guides/deployment_scripts_relationship.md` - Deployment scripts relationships
+
+**AWS Resource Management:**
+- `run_scripts/main_application_scripts/aws/resource-check/find-all-current-aws-resources.sh` - AWS resource inventory script that generates JSON reports of all non-default AWS resources
 
 ---
 

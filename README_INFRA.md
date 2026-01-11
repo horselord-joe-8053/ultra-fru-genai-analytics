@@ -615,3 +615,22 @@ This provides:
 
 See `README_RUN.md` for detailed local setup instructions.
 
+---
+
+## 📚 Additional Resources
+
+**Main Documentation:**
+- **[`README.md`](README.md)** - Project overview and architecture
+- **[`README_RUN.md`](README_RUN.md)** - Quick start guide for running FRU locally and on AWS
+
+**Additional Guides** (in `guides/` directory):
+- `guides/DELTA_SPARK_VS_POSTGRESQL_FULL_STACK.md` - Detailed comparison and architecture guide for Delta Lake + Spark vs PostgreSQL + pgvector
+- `guides/MANUAL_DEPLOYMENT_AND_TESTING.md` - Manual deployment and testing procedures
+- `guides/PERFORMANCE_BREAKDOWN.md` - Performance analysis and optimization guide
+- `guides/aws_setup_guide.md` - AWS setup and configuration guide
+- `guides/database_setup_explanation.md` - Database setup and schema explanation
+- `guides/deployment_scripts_relationship.md` - Explanation of deployment scripts and their relationships
+
+**AWS Resource Management:**
+- `run_scripts/main_application_scripts/aws/resource-check/find-all-current-aws-resources.sh` - AWS resource inventory script that generates JSON reports of all non-default AWS resources in your account
+
