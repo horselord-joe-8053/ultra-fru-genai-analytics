@@ -25,6 +25,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
+source "$REPO_ROOT/run_scripts/shared/performance-tracker.sh"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 load_env_file || true
 log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (local/run.sh)"
@@ -107,6 +108,9 @@ main() {
     local script_start_time=$(date +%s)
     log_step "Starting local development environment setup"
     
+    # Initialize performance tracking
+    perf_init
+    
     # Calculate total steps (base: 10, +1 if preempt)
     local total_steps=10
     local current_step=1
@@ -118,26 +122,33 @@ main() {
     # ============================================================================
     # Phase 0: Prerequisites and Setup
     # ============================================================================
+    perf_phase_start 0 "Prerequisites and Setup"
+    perf_step_start 0 "0.1" "Checking and installing prerequisites"
     local step_start_time=$(date +%s)
     log_step "Phase 0: Step 0.1 - Step ${current_step}/${total_steps}: Checking and installing prerequisites"
     if ! "$REPO_ROOT/run_scripts/main_application_scripts/common/prerequisites/check-and-install.sh" "local"; then
         local elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 0 "0.1" "FAILED" "Prerequisites check/installation failed"
         log_error "Phase 0: Step 0.1 - Step ${current_step}/${total_steps} FAILED: Prerequisites check/installation failed (took $(format_elapsed_time $elapsed))"
         exit 1
     fi
     local elapsed=$(( $(date +%s) - step_start_time ))
+    perf_step_end 0 "0.1" "SUCCESS" "Prerequisites check/installation completed"
     log_success "Phase 0: Step 0.1 - Step ${current_step}/${total_steps} PASSED: Prerequisites check/installation completed (took $(format_elapsed_time $elapsed))"
     current_step=$((current_step + 1))
     echo ""
     
+    perf_step_start 0 "0.2" "Setting up environment file"
     step_start_time=$(date +%s)
     log_step "Phase 0: Step 0.2 - Step ${current_step}/${total_steps}: Setting up environment file"
     if ! "$SCRIPT_DIR/setup-env.sh"; then
         elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 0 "0.2" "FAILED" "Environment file setup failed"
         log_error "Phase 0: Step 0.2 - Step ${current_step}/${total_steps} FAILED: Environment file setup failed (took $(format_elapsed_time $elapsed))"
         exit 1
     fi
     elapsed=$(( $(date +%s) - step_start_time ))
+    perf_step_end 0 "0.2" "SUCCESS" "Environment file ready"
     log_success "Phase 0: Step 0.2 - Step ${current_step}/${total_steps} PASSED: Environment file ready (took $(format_elapsed_time $elapsed))"
     current_step=$((current_step + 1))
     echo ""
@@ -147,6 +158,7 @@ main() {
     # ============================================================================
     # If preempt is enabled, execute preempt teardown
     if [ "$PREEMPT" = "true" ]; then
+        perf_step_start 0 "0.3" "Destroying existing local resources (PREEMPT)"
         step_start_time=$(date +%s)
         log_step "Phase 0: Step 0.3 - Step ${current_step}/${total_steps}: Destroying existing local resources (PREEMPT MODE)"
         log_warning "════════════════════════════════════════════════════════════════"
@@ -176,6 +188,7 @@ main() {
         
         if $teardown_cmd; then
             elapsed=$(( $(date +%s) - step_start_time ))
+            perf_step_end 0 "0.3" "SUCCESS" "Local environment destruction completed"
             log_success "════════════════════════════════════════════════════════════════"
             log_success "Phase 0: Step 0.3 - Step ${current_step}/${total_steps} PASSED: Local environment destruction completed (took $(format_elapsed_time $elapsed))"
             log_success "════════════════════════════════════════════════════════════════"
@@ -189,38 +202,48 @@ main() {
             current_step=$((current_step + 1))
         else
             elapsed=$(( $(date +%s) - step_start_time ))
+            perf_step_end 0 "0.3" "FAILED" "Preempt destruction failed"
             log_error "Phase 0: Step 0.3 - Step ${current_step}/${total_steps} FAILED: Preempt destruction failed (took $(format_elapsed_time $elapsed))"
             log_info "Check the destruction output above for details"
             exit 1
         fi
     fi
+    perf_phase_end 0
     
     # ============================================================================
     # Phase 1: Environment Preparation
     # ============================================================================
+    perf_phase_start 1 "Environment Preparation"
+    perf_step_start 1 "1.1" "Setting up Python environment"
     step_start_time=$(date +%s)
     log_step "Phase 1: Step 1.1 - Step ${current_step}/${total_steps}: Setting up Python environment"
     if ! "$SCRIPT_DIR/setup-python.sh"; then
         elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 1 "1.1" "FAILED" "Python environment setup failed"
         log_error "Phase 1: Step 1.1 - Step ${current_step}/${total_steps} FAILED: Python environment setup failed (took $(format_elapsed_time $elapsed))"
         exit 1
     fi
     elapsed=$(( $(date +%s) - step_start_time ))
+    perf_step_end 1 "1.1" "SUCCESS" "Python environment ready"
     log_success "Phase 1: Step 1.1 - Step ${current_step}/${total_steps} PASSED: Python environment ready (took $(format_elapsed_time $elapsed))"
     current_step=$((current_step + 1))
     echo ""
     
+    perf_step_start 1 "1.2" "Setting up frontend dependencies"
     step_start_time=$(date +%s)
     log_step "Phase 1: Step 1.2 - Step ${current_step}/${total_steps}: Setting up frontend dependencies"
     if ! "$SCRIPT_DIR/setup-frontend.sh"; then
         elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 1 "1.2" "FAILED" "Frontend dependencies setup failed"
         log_error "Phase 1: Step 1.2 - Step ${current_step}/${total_steps} FAILED: Frontend dependencies setup failed (took $(format_elapsed_time $elapsed))"
         exit 1
     fi
     elapsed=$(( $(date +%s) - step_start_time ))
+    perf_step_end 1 "1.2" "SUCCESS" "Frontend dependencies ready"
     log_success "Phase 1: Step 1.2 - Step ${current_step}/${total_steps} PASSED: Frontend dependencies ready (took $(format_elapsed_time $elapsed))"
     current_step=$((current_step + 1))
     echo ""
+    perf_phase_end 1
     
     # ============================================================================
     # (Phase 1: Step 1.3 is for AWS deployments only)
@@ -229,18 +252,23 @@ main() {
     # ============================================================================
     # Phase 2: Infrastructure Setup
     # ============================================================================
+    perf_phase_start 2 "Infrastructure Setup"
+    perf_step_start 2 "2.1" "Starting Docker services"
     step_start_time=$(date +%s)
     log_step "Phase 2: Step 2.1 - Step ${current_step}/${total_steps}: Starting Docker services"
     # Use --force to ensure containers are recreated with latest .env variables
     if ! "$SCRIPT_DIR/start-services.sh" --force; then
         elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 2 "2.1" "FAILED" "Docker services startup failed"
         log_error "Phase 2: Step 2.1 - Step ${current_step}/${total_steps} FAILED: Docker services startup failed (took $(format_elapsed_time $elapsed))"
         exit 1
     fi
     elapsed=$(( $(date +%s) - step_start_time ))
+    perf_step_end 2 "2.1" "SUCCESS" "Docker services running"
     log_success "Phase 2: Step 2.1 - Step ${current_step}/${total_steps} PASSED: Docker services running (took $(format_elapsed_time $elapsed))"
     current_step=$((current_step + 1))
     echo ""
+    perf_phase_end 2
     
     # ============================================================================
     # (Phase 2: Steps 2.2, 2.3 are for AWS deployments only)
@@ -249,34 +277,44 @@ main() {
     # ============================================================================
     # Phase 3: Database Setup
     # ============================================================================
+    perf_phase_start 3 "Database Setup"
+    perf_step_start 3 "3.1" "Initializing database schema"
     step_start_time=$(date +%s)
     log_step "Phase 3: Step 3.1 - Step ${current_step}/${total_steps}: Initializing database schema"
     if ! "$REPO_ROOT/run_scripts/main_application_scripts/common/database/init_schema.sh" "local"; then
         elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 3 "3.1" "FAILED" "Database schema initialization failed"
         log_error "Phase 3: Step 3.1 - Step ${current_step}/${total_steps} FAILED: Database schema initialization failed (took $(format_elapsed_time $elapsed))"
         exit 1
     fi
     elapsed=$(( $(date +%s) - step_start_time ))
+    perf_step_end 3 "3.1" "SUCCESS" "Database schema initialized"
     log_success "Phase 3: Step 3.1 - Step ${current_step}/${total_steps} PASSED: Database schema initialized (took $(format_elapsed_time $elapsed))"
     current_step=$((current_step + 1))
     echo ""
     
     # Phase 3: Database Setup - Step 3.2: Load data into database (optional)
     if [ "$SKIP_DATA_LOAD" = false ]; then
+        perf_step_start 3 "3.2" "Loading data into database"
         step_start_time=$(date +%s)
         log_step "Phase 3: Step 3.2 - Step ${current_step}/${total_steps}: Loading data into database"
         if ! "$REPO_ROOT/run_scripts/main_application_scripts/common/database/load_data.sh" "local"; then
             elapsed=$(( $(date +%s) - step_start_time ))
+            perf_step_end 3 "3.2" "FAILED" "Data load failed"
             log_error "Phase 3: Step 3.2 - Step ${current_step}/${total_steps} FAILED: Data load failed (took $(format_elapsed_time $elapsed))"
             exit 1
         fi
         elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 3 "3.2" "SUCCESS" "Data loaded into database"
         log_success "Phase 3: Step 3.2 - Step ${current_step}/${total_steps} PASSED: Data loaded into database (took $(format_elapsed_time $elapsed))"
         current_step=$((current_step + 1))
         echo ""
     else
+        perf_step_start 3 "3.2" "Loading data into database"
+        perf_step_end 3 "3.2" "SKIPPED" "Data load skipped (--skip-data-load flag)"
         log_info "Skipping data load (--skip-data-load flag set)"
     fi
+    perf_phase_end 3
     
     # ============================================================================
     # (Phase 3: Steps 3.3, 3.4 are for AWS deployments only)
@@ -285,10 +323,12 @@ main() {
     # ============================================================================
     # Phase 4: Data Lake Setup
     # ============================================================================
+    perf_phase_start 4 "Data Lake Setup"
     # Step 4.1: Setup data-lake [CONDITIONAL]
     # Delta Lake setup: ENABLE_ANALYTICS_SCHEDULER=true → auto-setup, or use --skip-data-lake to override
     # Uses Docker Spark execution (Spark runs inside fru_api container)
     if should_setup_data_lake; then
+        perf_step_start 4 "4.1" "Setting up data-lake (Delta table using Docker Spark)"
         step_start_time=$(date +%s)
         log_step "Phase 4: Step 4.1 - Step ${current_step}/${total_steps}: Setting up data-lake (Delta table using Docker Spark)"
         log_info "Spark runs inside the Docker container (no local Spark installation needed)"
@@ -297,28 +337,34 @@ main() {
         # Delta tables were already removed if --preempt was set, so no need to pass it again
         if ! $setup_cmd; then
             elapsed=$(( $(date +%s) - step_start_time ))
+            perf_step_end 4 "4.1" "FAILED" "Data-lake setup had issues"
             log_warning "Phase 4: Step 4.1 - Step ${current_step}/${total_steps} had issues (application may still work without Delta tables) (took $(format_elapsed_time $elapsed))"
             log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/local/delta-lake/setup-and-verify.sh"
         else
             elapsed=$(( $(date +%s) - step_start_time ))
+            perf_step_end 4 "4.1" "SUCCESS" "Delta-lake ready"
             log_success "Phase 4: Step 4.1 - Step ${current_step}/${total_steps} PASSED: Delta-lake ready (took $(format_elapsed_time $elapsed))"
         fi
         current_step=$((current_step + 1))
         echo ""
     else
+        perf_step_start 4 "4.1" "Setting up data-lake (Delta table using Docker Spark)"
+        perf_step_end 4 "4.1" "SKIPPED" "Delta Lake setup skipped"
         log_info "Skipping Delta Lake setup (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"
     fi
+    perf_phase_end 4
     
     # ============================================================================
     # Phase 5: Application Deployment
     # ============================================================================
-  
+    perf_phase_start 5 "Application Deployment"
     # ============================================================================
     # (Phase 5: Steps 5.1, 5.3 are for AWS deployments only)
     # ============================================================================
     
     # Step 5.2: Start frontend dev server (optional)
     if [ "$SKIP_FRONTEND" = false ]; then
+        perf_step_start 5 "5.2" "Starting frontend development server"
         step_start_time=$(date +%s)
         log_step "Phase 5: Step 5.2 - Step ${current_step}/${total_steps}: Starting frontend development server"
         log_info "Starting frontend development server in background..."
@@ -354,41 +400,57 @@ main() {
         sleep 5
         echo ""
         elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 5 "5.2" "SUCCESS" "Frontend development server started"
         log_success "Phase 5: Step 5.2 - Step ${current_step}/${total_steps} PASSED: Frontend development server started (took $(format_elapsed_time $elapsed))"
         current_step=$((current_step + 1))
         echo ""
     else
+        perf_step_start 5 "5.2" "Starting frontend development server"
+        perf_step_end 5 "5.2" "SKIPPED" "Frontend startup skipped (--skip-frontend flag)"
         log_info "To start the frontend, run:"
         log_info "  cd $REPO_ROOT/frontend && npm run dev"
         echo ""
         log_info "Or run: ./run_scripts/local/start-frontend.sh"
     fi
+    perf_phase_end 5
     
     # ============================================================================
     # Phase 6: Validation and Verification
     # ============================================================================
+    perf_phase_start 6 "Validation and Verification"
     # Step 6.1: Post-deployment verification
+    perf_step_start 6 "6.1" "Verifying deployment and generating test instructions"
     step_start_time=$(date +%s)
     log_step "Phase 6: Step 6.1 - Step ${current_step}/${total_steps}: Verifying deployment and generating test instructions"
     echo ""
     if "$SCRIPT_DIR/verification/auto_verify_and_manual_hint.sh" "false"; then
         elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 6 "6.1" "SUCCESS" "Verification completed"
         log_success "Phase 6: Step 6.1 - Step ${current_step}/${total_steps} PASSED: Verification completed (took $(format_elapsed_time $elapsed))"
     else
         elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 6 "6.1" "FAILED" "Verification had issues"
         log_warning "Phase 6: Step 6.1 - Step ${current_step}/${total_steps} had issues (deployment may still be successful) (took $(format_elapsed_time $elapsed))"
         log_info "Check the verification output above for details"
     fi
     current_step=$((current_step + 1))
     echo ""
+    perf_phase_end 6
     
-    # Log total script execution time
+    # Remove trap before printing summary (to avoid duplicate output)
+    trap - EXIT
+    
+    # Log total script execution time and print performance summary
     local total_elapsed=$(( $(date +%s) - script_start_time ))
     echo ""
     log_success "═══════════════════════════════════════════════════════════════════════════════"
     log_success "Local development environment setup completed successfully!"
     log_success "Total execution time: $(format_elapsed_time $total_elapsed)"
     log_success "═══════════════════════════════════════════════════════════════════════════════"
+    
+    # Print performance summary and statistics
+    perf_print_summary
+    perf_print_statistics
 }
 
 # Run main function
