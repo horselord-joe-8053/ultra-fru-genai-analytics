@@ -241,7 +241,7 @@ fi
 # 1.2. Stop all running tasks (including one-off tasks, retry up to 30 times)
 # 1.3. Wait for all tasks to fully stop (up to 5 minutes for RUNNING/STOPPING tasks)
 stop_services() {
-    log_step "Step 1: Stopping ECS/EKS Services and Tasks"
+    log_step "Substep 1: Stopping ECS/EKS Services and Tasks"
     
     # Try to detect container system
     local cluster_name="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
@@ -394,7 +394,7 @@ stop_services() {
 # - Frontend bucket (static website files)
 # - Note: Terraform state bucket is NOT emptied (preserved for state management)
 empty_s3_buckets() {
-    log_step "Step 2: Emptying S3 Buckets"
+    log_step "Substep 2: Emptying S3 Buckets"
     
     # Expected buckets (managed by Terraform - will be destroyed by Terraform, but empty first)
     local buckets_to_empty=(
@@ -454,7 +454,7 @@ if objects:
 # - Checks for network interfaces in private subnets (waits up to 3 minutes for cleanup)
 # - Prevents subnet deletion timeouts by ensuring ENIs are cleaned up first
 wait_for_vpc_endpoints_deletion() {
-    log_step "Step 2.5.1: Checking VPC Endpoints and Network Interfaces"
+    log_step "Substep 2.5.1: Checking VPC Endpoints and Network Interfaces"
     
     local vpc_id
     vpc_id=$(aws ec2 describe-vpcs \
@@ -587,7 +587,7 @@ wait_for_vpc_endpoints_deletion() {
 # - Terraform destroy will timeout on subnet deletion if Aurora is still deleting
 # - This step waits up to 25 minutes for Aurora cluster and instances to fully delete
 wait_for_aurora_deletion() {
-    log_step "Step 2.5.2: Checking Aurora Cluster Status"
+    log_step "Substep 2.5.2: Checking Aurora Cluster Status"
     
     local cluster_name="${PROJECT_NAME}-${ENVIRONMENT}-aurora-cluster"
     
@@ -711,7 +711,7 @@ wait_for_aurora_deletion() {
 # - Steps 2.5.1-2.5.2 ensure VPC endpoints and Aurora are deleted first
 # - Terraform handles dependency ordering within each layer
 terraform_destroy() {
-    log_step "Step 3: Destroying Terraform Infrastructure"
+    log_step "Substep 3: Destroying Terraform Infrastructure"
     
     if [ "$DRY_RUN" = "true" ]; then
         log_info "[DRY-RUN] Would run: terraform/teardown.sh $ENVIRONMENT all"
@@ -746,7 +746,7 @@ terraform_destroy() {
 # Note: This step is non-critical - it only cleans local images and doesn't
 # affect AWS resources. If Docker is not running, this step is skipped.
 cleanup_local_images() {
-    log_step "Step 4: Cleaning Up Local Docker Images"
+    log_step "Substep 4: Cleaning Up Local Docker Images"
     
     if [ "$DRY_RUN" = "true" ]; then
         log_info "[DRY-RUN] Would clean up local Docker images:"
@@ -851,7 +851,7 @@ cleanup_local_images() {
 # This step uses the cleanup-orphaned-resources.sh helper script which provides
 # safe cleanup with retention policies and protection for in-use resources.
 cleanup_orphaned() {
-    log_step "Step 5: Cleaning Up Orphaned AWS Resources"
+    log_step "Substep 5: Cleaning Up Orphaned AWS Resources"
     
     # Detect container system for cleanup
     local cluster_name="${PROJECT_NAME}-${ENVIRONMENT}-cluster"

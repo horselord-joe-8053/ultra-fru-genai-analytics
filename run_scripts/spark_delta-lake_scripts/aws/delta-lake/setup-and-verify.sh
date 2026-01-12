@@ -65,7 +65,7 @@ fi
 
 log_step "Setting up and verifying data-lake infrastructure"
 
-log_step "Step 1/3: Setting up data-lake infrastructure (S3 + IAM)"
+log_step "Substep 1/3: Setting up data-lake infrastructure (S3 + IAM)"
 if [ "$DRY_RUN" = "true" ]; then
     log_info "[DRY-RUN] Would run setup-delta-lake.sh"
 else
@@ -73,7 +73,7 @@ else
     VARS_FILE=$("$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/setup-delta-lake.sh" 2>&1 | tee /dev/stderr | tail -1)
     EXIT_CODE=${PIPESTATUS[0]}
     if [ $EXIT_CODE -ne 0 ]; then
-        log_error "Step 1/3 FAILED: Delta-lake infrastructure setup failed"
+        log_error "Substep 1/3 FAILED: Delta-lake infrastructure setup failed"
         exit 1
     fi
     if [ -n "$VARS_FILE" ] && [ -f "$VARS_FILE" ]; then
@@ -81,9 +81,9 @@ else
         rm -f "$VARS_FILE"
     fi
 fi
-log_success "Step 1/3 PASSED: Delta-lake infrastructure ready"
+log_success "Substep 1/3 PASSED: Delta-lake infrastructure ready"
 
-log_step "Step 2/3: Creating Delta table in S3"
+log_step "Substep 2/3: Creating Delta table in S3"
 if [ "$DRY_RUN" = "true" ]; then
     log_info "[DRY-RUN] Would run create-delta-table.sh"
 else
@@ -156,23 +156,23 @@ print(f'{get_spark_packages(is_aws_deployment=True)}|{to_spark_path(csv_path)}|{
     export AWS_PROFILE="${AWS_PROFILE:-admin}"
     export AWS_REGION="${AWS_REGION:-us-east-1}"
     if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/create-delta-table.sh" "$CSV_PATH" "$DELTA_TABLE_PATH"; then
-        log_error "Step 2/3 FAILED: Delta table creation failed"
+        log_error "Substep 2/3 FAILED: Delta table creation failed"
         exit 1
     fi
 fi
-log_success "Step 2/3 PASSED: Delta table ready"
+log_success "Substep 2/3 PASSED: Delta table ready"
 
-log_step "Step 3/3: Verifying data-lake setup"
+log_step "Substep 3/3: Verifying data-lake setup"
 if [ "$DRY_RUN" = "true" ]; then
     log_info "[DRY-RUN] Would run verify-delta-lake.sh"
 else
     export VERIFY_METHOD="s3"
     if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/verify-delta-lake.sh"; then
-        log_error "Step 3/3 FAILED: Delta-lake verification failed"
+        log_error "Substep 3/3 FAILED: Delta-lake verification failed"
         exit 1
     fi
 fi
-log_success "Step 3/3 PASSED: Delta-lake verification complete"
+log_success "Substep 3/3 PASSED: Delta-lake verification complete"
 
 log_info ""
 log_info "════════════════════════════════════════════════════════════════"

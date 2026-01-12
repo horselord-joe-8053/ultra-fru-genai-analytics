@@ -162,7 +162,7 @@ fi
 # Step 1: Stop Services
 # ============================================================================
 stop_services() {
-    log_step "Step 1: Stopping Services"
+    log_step "Substep 1: Stopping Services"
     
     if [ "$DRY_RUN" = "true" ]; then
         log_info "[DRY-RUN] Would stop Docker Compose services"
@@ -207,7 +207,7 @@ stop_services() {
 # Step 2: Remove Delta Tables
 # ============================================================================
 remove_delta_tables() {
-    log_step "Step 2: Removing Delta Tables"
+    log_step "Substep 2: Removing Delta Tables"
     
     local teardown_cmd="$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/teardown-delta.sh --local"
     if [ "$DRY_RUN" = "true" ]; then
@@ -234,7 +234,7 @@ remove_delta_tables() {
 # Step 3: Reset Database (Optional)
 # ============================================================================
 reset_database() {
-    log_step "Step 3: Resetting Database"
+    log_step "Substep 3: Resetting Database"
     
     if [ "$RESET_DB" != "true" ]; then
         log_info "Database reset skipped (use --reset-db to reset)"
@@ -283,7 +283,7 @@ reset_database() {
 # Step 4: Clean Up Docker Resources
 # ============================================================================
 cleanup_docker_resources() {
-    log_step "Step 4: Cleaning Up Docker Resources"
+    log_step "Substep 4: Cleaning Up Docker Resources"
     
     if [ "$DRY_RUN" = "true" ]; then
         log_info "[DRY-RUN] Would clean up Docker resources:"

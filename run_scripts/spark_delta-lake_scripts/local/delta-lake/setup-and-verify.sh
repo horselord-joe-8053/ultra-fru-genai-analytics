@@ -63,19 +63,19 @@ fi
 
 log_step "Setting up and verifying Delta Lake for local development"
 
-log_step "Step 1/3: Setting up Delta Lake directory structure"
+log_step "Substep 1/3: Setting up Delta Lake directory structure"
 if [ "$DRY_RUN" = "true" ]; then
     log_info "[DRY-RUN] Would run setup-delta-lake.sh"
 else
     export SETUP_METHOD="filesystem"
     if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/setup-delta-lake.sh"; then
-        log_error "Step 1/3 FAILED: Delta Lake directory setup failed"
+        log_error "Substep 1/3 FAILED: Delta Lake directory setup failed"
         exit 1
     fi
 fi
-log_success "Step 1/3 PASSED: Delta Lake directory structure ready"
+log_success "Substep 1/3 PASSED: Delta Lake directory structure ready"
 
-log_step "Step 2/3: Creating Delta table from CSV"
+log_step "Substep 2/3: Creating Delta table from CSV"
 if [ "$DRY_RUN" = "true" ]; then
     log_info "[DRY-RUN] Would run create-delta-table.sh"
 else
@@ -126,23 +126,23 @@ else
     # Explicitly set to true to force recreation (bypasses idempotent check)
     export CSV_WAS_UPLOADED="true"
     if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/create-delta-table.sh" "$CSV_PATH" "$OUTPUT_PATH"; then
-        log_error "Step 2/3 FAILED: Delta table creation failed"
+        log_error "Substep 2/3 FAILED: Delta table creation failed"
         exit 1
     fi
 fi
-log_success "Step 2/3 PASSED: Delta table ready"
+log_success "Substep 2/3 PASSED: Delta table ready"
 
-log_step "Step 3/3: Verifying Delta table"
+log_step "Substep 3/3: Verifying Delta table"
 if [ "$DRY_RUN" = "true" ]; then
     log_info "[DRY-RUN] Would run verify-delta-lake.sh"
 else
     export VERIFY_METHOD="filesystem"
     if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/verify-delta-lake.sh"; then
-        log_error "Step 3/3 FAILED: Delta table verification failed"
+        log_error "Substep 3/3 FAILED: Delta table verification failed"
         exit 1
     fi
 fi
-log_success "Step 3/3 PASSED: Delta table verification complete"
+log_success "Substep 3/3 PASSED: Delta table verification complete"
 
 log_info ""
 log_info "════════════════════════════════════════════════════════════════"

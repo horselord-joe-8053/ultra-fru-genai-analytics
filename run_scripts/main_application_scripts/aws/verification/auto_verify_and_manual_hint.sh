@@ -29,25 +29,25 @@ log_step "═══════════════════════�
 echo ""
 
 # Step 1: Fetch deployment information
-log_step "Step 1/4: Fetching deployment information from Terraform..."
+log_step "Substep 1/4: Fetching deployment information from Terraform..."
 source "$VERIFICATION_DIR/fetch-deployment-info.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "$DRY_RUN"
 
 # Step 2: Quick service status checks (lightweight, no retry)
 if [ "$DRY_RUN" != "true" ]; then
-    log_step "Step 2/4: Checking service status..."
+    log_step "Substep 2/4: Checking service status..."
     source "$VERIFICATION_DIR/check-service-status.sh"
     check_service_status "$DEPLOYMENT_TYPE" "$ENVIRONMENT" || true  # Don't fail on status checks
     echo ""
 fi
 
 # Step 3: Print manual test hints
-log_step "Step 3/4: Displaying manual test hints..."
+log_step "Substep 3/4: Displaying manual test hints..."
 source "$VERIFICATION_DIR/print-manual-hints.sh"
 print_manual_test_hints
 
 # Step 4: Comprehensive endpoint validation (with retry logic)
 if [ "$DRY_RUN" != "true" ]; then
-    log_step "Step 4/4: Validating deployment endpoints (comprehensive)..."
+    log_step "Substep 4/4: Validating deployment endpoints (comprehensive)..."
     source "$VERIFICATION_DIR/diagnose-failures.sh"  # For diagnose_api_failure()
     source "$VERIFICATION_DIR/validate-endpoints.sh"
     validate_urls || true  # Don't fail script if validation has issues

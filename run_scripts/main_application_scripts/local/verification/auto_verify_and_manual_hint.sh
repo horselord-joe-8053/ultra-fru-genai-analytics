@@ -30,14 +30,14 @@ log_step "═══════════════════════�
 echo ""
 
 # Step 1: Check Docker services
-log_step "Step 1/4: Checking Docker services..."
+log_step "Substep 1/4: Checking Docker services..."
 if [ "$DRY_RUN" != "true" ]; then
     check_docker_services || true  # Don't fail on service checks
     echo ""
 fi
 
 # Step 1.5: Check Spark setup (optional)
-log_step "Step 1.5/4: Checking Spark setup (optional)..."
+log_step "Substep 1.5/4: Checking Spark setup (optional)..."
 if [ "$DRY_RUN" != "true" ]; then
     # Check Spark version inside the Docker container (fru_api),
     # since all analytics and Delta jobs run there.
@@ -58,7 +58,7 @@ if [ "$DRY_RUN" != "true" ]; then
 fi
 
 # Step 2: Display manual test hints
-log_step "Step 2/4: Displaying manual test hints..."
+log_step "Substep 2/4: Displaying manual test hints..."
 # Use REPO_ROOT-based path for reliability (works regardless of how script is called)
 local_manual_hint_script="$REPO_ROOT/run_scripts/main_application_scripts/local/verification/manual_test_hint.sh"
 if [ -f "$local_manual_hint_script" ]; then
@@ -71,7 +71,7 @@ fi
 
 # Step 3: Validate endpoints (using common logic)
 if [ "$DRY_RUN" != "true" ]; then
-    log_step "Step 3/4: Validating endpoints..."
+    log_step "Substep 3/4: Validating endpoints..."
     
     # Validate API endpoint
     if validate_api_endpoint "$API_URL"; then

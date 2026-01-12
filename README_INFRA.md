@@ -365,7 +365,28 @@ EKS Deployment:
      ```bash
      TF_STATE_BUCKET="fru-terraform-state-<account-id>"
      ```
+   
+   **What it is:**
+   - S3 bucket name for storing Terraform remote state files (records the current state of your infrastructure)
+   - Format: `<PROJ_NAME>-terraform-state-<ACCOUNT_ID>` (you can define this format in .env)
+   - Example: `fru-terraform-state-123456789012`
+   
+   **Important:**
+   - Must be **globally unique** across ALL AWS accounts worldwide (not just within your account)
+   - The format is a **project convention** (not an AWS requirement), but the scripts expect this pattern
+   - Replace `<ACCOUNT_ID>` with your actual AWS account ID (found via `aws sts get-caller-identity` or AWS Console)
+   
+   **How it works:**
+   - Terraform uses this bucket to store the current state of your infrastructure (which resources exist, their configurations, etc.)
+   - State files are organized by environment and layer: `<bucket>/<environment>/<layer>/terraform.tfstate`
+   - The bucket enables remote state sharing and state locking to prevent concurrent modifications
+   
+   **Bucket Creation:**
    - The `setup-s3-bucket.sh` script handles bucket creation, versioning, encryption, and public access blocking automatically
+   - Configured with:
+     - Versioning enabled (for state file history)
+     - Server-side encryption (AES256)
+     - Public access blocked
 
 ---
 

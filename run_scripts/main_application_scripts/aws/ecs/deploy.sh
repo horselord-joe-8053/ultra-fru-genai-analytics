@@ -36,20 +36,20 @@ main() {
     log_step "Starting AWS ECS deployment"
     
     # Step 1: Check AWS credentials
-    log_step "Step 1/4: Checking AWS credentials"
+    log_step "Substep 1/4: Checking AWS credentials"
     "$REPO_ROOT/run_scripts/main_application_scripts/aws/check-aws-credentials.sh" || exit 1
     
     # Step 2: Build and push to ECR
     if [ "$SKIP_BUILD" = false ]; then
-        log_step "Step 2/4: Building and pushing Docker image to ECR"
+        log_step "Substep 2/4: Building and pushing Docker image to ECR"
         "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/build-push-ecr.sh" || exit 1
     else
-        log_info "Step 2/4: Skipping ECR build/push (--skip-build flag set)"
+        log_info "Substep 2/4: Skipping ECR build/push (--skip-build flag set)"
     fi
     
     # Step 3: Deploy frontend
     if [ "$SKIP_FRONTEND" = false ]; then
-        log_step "Step 3/4: Deploying frontend to S3"
+        log_step "Substep 3/4: Deploying frontend to S3"
         # Ensure frontend is built
         if [ ! -d "$REPO_ROOT/frontend/dist" ]; then
             log_info "Building frontend first..."
@@ -61,11 +61,11 @@ main() {
         fi
         "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/deploy-frontend.sh" || exit 1
     else
-        log_info "Step 3/4: Skipping frontend deployment (--skip-frontend flag set)"
+        log_info "Substep 3/4: Skipping frontend deployment (--skip-frontend flag set)"
     fi
     
     # Step 4: Infrastructure setup reminder
-    log_step "Step 4/4: Infrastructure setup"
+    log_step "Substep 4/4: Infrastructure setup"
     log_warning "ECS infrastructure setup is not fully automated yet"
     log_info "You need to set up (manually or via Terraform):"
     log_info "  - VPC and subnets"

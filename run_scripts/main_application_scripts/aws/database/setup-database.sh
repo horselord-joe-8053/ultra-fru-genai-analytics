@@ -17,19 +17,19 @@ setup_database() {
     log_step "Setting up database (pgvector, schema, data)"
     
     # Step 1: Ensure pgvector extension
-    log_info "Step 1/3: Ensuring pgvector extension..."
+    log_info "Substep 1/3: Ensuring pgvector extension..."
     "$SCRIPT_DIR/ensure-pgvector.sh" "$env" || {
         log_warning "pgvector extension setup had issues (may already exist)"
     }
     
     # Step 2: Initialize database schema
-    log_info "Step 2/3: Initializing database schema..."
+    log_info "Substep 2/3: Initializing database schema..."
     "$REPO_ROOT/run_scripts/main_application_scripts/common/database/init_schema.sh" "aws" "$env" || {
         log_warning "Schema initialization had issues (tables may already exist)"
     }
     
     # Step 3: Load data
-    log_info "Step 3/3: Loading data..."
+    log_info "Substep 3/3: Loading data..."
     "$REPO_ROOT/run_scripts/main_application_scripts/common/database/load_data.sh" "aws" "$env" || {
         log_warning "Data loading had issues (data may already exist)"
     }

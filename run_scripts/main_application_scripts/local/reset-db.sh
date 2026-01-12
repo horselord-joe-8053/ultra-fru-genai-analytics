@@ -33,7 +33,7 @@ reset_database() {
     fi
     
     # Step 1: Drop the table (CASCADE to drop indexes and constraints)
-    log_step "Step 1/3: Dropping fru_sales_embeddings table..."
+    log_step "Substep 1/3: Dropping fru_sales_embeddings table..."
     if docker exec fru_db psql -U "$PGUSER" -d "$PGDATABASE" -c "DROP TABLE IF EXISTS fru_sales_embeddings CASCADE;" 2>/dev/null; then
         log_success "Table dropped successfully"
     else
@@ -42,7 +42,7 @@ reset_database() {
     fi
     
     # Step 2: Recreate schema
-    log_step "Step 2/3: Recreating schema..."
+    log_step "Substep 2/3: Recreating schema..."
     SCHEMA_FILE="$REPO_ROOT/sql/schema_pgvector.sql"
     if [ ! -f "$SCHEMA_FILE" ]; then
         log_error "Schema file not found at $SCHEMA_FILE"
@@ -53,7 +53,7 @@ reset_database() {
     log_success "Schema recreated successfully"
     
     # Step 3: Repopulate data
-    log_step "Step 3/3: Repopulating data from CSV..."
+    log_step "Substep 3/3: Repopulating data from CSV..."
     "$SCRIPT_DIR/load-data.sh"
     
     # Verify the reset
