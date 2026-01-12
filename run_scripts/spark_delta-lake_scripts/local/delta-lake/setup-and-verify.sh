@@ -12,6 +12,7 @@ log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (spark local delta setup)"
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 DRY_RUN="${DRY_RUN:-false}"
 PREEMPT="${PREEMPT:-false}"
+FORCE_REFRESH_DATA="${FORCE_REFRESH_DATA:-false}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -22,6 +23,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run)
             DRY_RUN="true"
+            shift
+            ;;
+        --force-refresh-data)
+            FORCE_REFRESH_DATA="true"
             shift
             ;;
         --environment|-e)
@@ -37,6 +42,7 @@ done
 export ENVIRONMENT
 export DRY_RUN
 export PREEMPT
+export FORCE_REFRESH_DATA
 
 # If --preempt flag is set, teardown existing Delta tables first
 if [ "$PREEMPT" = "true" ]; then
@@ -125,7 +131,11 @@ else
     # This ensures data freshness and avoids complex file comparison logic
     # Explicitly set to true to force recreation (bypasses idempotent check)
     export CSV_WAS_UPLOADED="true"
-    if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/create-delta-table.sh" "$CSV_PATH" "$OUTPUT_PATH"; then
+    create_cmd="$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/create-delta-table.sh $CSV_PATH $OUTPUT_PATH"
+    if [ "$FORCE_REFRESH_DATA" = "true" ]; then
+        create_cmd="$create_cmd --force-refresh-data"
+    fi
+    if ! $create_cmd; then
         log_error "Substep 2/3 FAILED: Delta table creation failed"
         exit 1
     fi

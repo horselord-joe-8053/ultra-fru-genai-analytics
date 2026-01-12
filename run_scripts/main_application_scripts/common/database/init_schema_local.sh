@@ -1,6 +1,7 @@
 #!/bin/bash
 # Initialize database schema for local development
 # Uses local PostgreSQL (Docker or direct connection)
+# Usage: init_schema_local [--force-refresh-data]
 
 set -e
 
@@ -8,6 +9,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+
+FORCE_REFRESH_DATA="${FORCE_REFRESH_DATA:-false}"
+
+# Parse arguments
+for arg in "$@"; do
+    if [ "$arg" = "--force-refresh-data" ]; then
+        FORCE_REFRESH_DATA=true
+    fi
+done
 
 init_schema_local() {
     log_step "Initializing database schema (local)"
@@ -32,6 +42,17 @@ init_schema_local() {
         log_info "  Database: $PGHOST:$PGPORT/$PGDATABASE (Docker)"
     else
         log_info "  Database: $PGHOST:$PGPORT/$PGDATABASE"
+    fi
+    
+    # If --force-refresh-data is set, drop tables first
+    if [ "$FORCE_REFRESH_DATA" = "true" ]; then
+        log_info "FORCE_REFRESH_DATA=true: Dropping existing tables (if any)..."
+        if command_exists psql; then
+            PGPASSWORD="$PGPASSWORD" psql "postgresql://$PGUSER@$PGHOST:$PGPORT/$PGDATABASE" -c "DROP TABLE IF EXISTS batch_analytics CASCADE; DROP TABLE IF EXISTS fru_sales_embeddings CASCADE;" >/dev/null 2>&1 || true
+        elif docker ps | grep -q fru_db; then
+            docker exec fru_db psql -U "$PGUSER" -d "$PGDATABASE" -c "DROP TABLE IF EXISTS batch_analytics CASCADE; DROP TABLE IF EXISTS fru_sales_embeddings CASCADE;" >/dev/null 2>&1 || true
+        fi
+        log_info "Tables dropped (if they existed). Proceeding with fresh schema initialization..."
     fi
     
     # Check if psql is available

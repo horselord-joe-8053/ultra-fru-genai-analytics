@@ -19,7 +19,7 @@
 #   --dry-run                → Preview changes without modifying AWS resources
 #   --skip-data-lake         → Skip data-lake setup even if analytics scheduler is enabled
 #   --preempt                → Destroy all AWS infrastructure before deployment (complete teardown and fresh rebuild)
-#                              Executes Phase 0: Step 0.4 - calls teardown-resources.sh to:
+#                              Executes Phase 0: Step 0.5 - calls teardown-resources.sh to:
 #                              - Stop ECS/EKS services (scale to 0)
 #                              - Empty S3 buckets
 #                              - Destroy Terraform infrastructure
@@ -59,6 +59,7 @@ DEFAULT_IMAGE_TAG="latest"
 DRY_RUN=false
 SKIP_DATA_LAKE=false
 PREEMPT=false
+FORCE_REFRESH_DATA=false
 REMAINING_ARGS=()
 
 # First, extract flags if present
@@ -70,6 +71,8 @@ for arg in "$@"; do
         SKIP_DATA_LAKE=true
     elif [ "$arg" = "--preempt" ]; then
         PREEMPT=true
+    elif [ "$arg" = "--force-refresh-data" ]; then
+        FORCE_REFRESH_DATA=true
     else
         ARGS_TO_PARSE+=("$arg")
     fi
@@ -91,7 +94,7 @@ else
 fi
 
 # Export flags for sub-scripts
-export DRY_RUN SKIP_DATA_LAKE PREEMPT
+export DRY_RUN SKIP_DATA_LAKE PREEMPT FORCE_REFRESH_DATA
 
 # Show usage information
 show_usage() {
@@ -129,6 +132,7 @@ ${BLUE}Environments:${NC}
   ${GREEN}--dry-run${NC}          Preview changes without modifying AWS resources
   ${GREEN}--preempt${NC}          Destroy existing infrastructure before deployment (clean slate)
   ${GREEN}--skip-data-lake${NC}   Skip data-lake setup even if analytics scheduler is enabled
+  ${GREEN}--force-refresh-data${NC} Force refresh of data resources (database schema, data, Delta tables) without destroying infrastructure
 
 ${BLUE}Examples:${NC}
   ${GREEN}Basic Deployments:${NC}
@@ -217,13 +221,24 @@ check_or_build_image() {
     AWS_REGION="${AWS_REGION:-$DEFAULT_AWS_REGION}"
     
     # Check if image already exists in ECR
-    if aws ecr describe-images \
+    log_info "Checking if container image exists in ECR: $CONTAINER_IMAGE"
+    local image_check_output
+    if image_check_output=$(aws ecr describe-images \
         --profile "$AWS_PROFILE" \
         --repository-name "$ECR_REPO_NAME" \
         --image-ids imageTag="$IMAGE_TAG" \
-        --region "$AWS_REGION" >/dev/null 2>&1; then
-        log_info "Container image already exists: $CONTAINER_IMAGE"
+        --region "$AWS_REGION" 2>&1); then
+        log_success "Container image already exists: $CONTAINER_IMAGE"
         return 0
+    else
+        local image_check_exit=$?
+        if echo "$image_check_output" | grep -q "ImageNotFoundException\|does not exist"; then
+            log_info "Container image not found: $CONTAINER_IMAGE (will be built)"
+        else
+            log_error "Failed to check container image existence (exit code: $image_check_exit)"
+            log_error "Error: $image_check_output"
+            exit 1
+        fi
     fi
     
     # Image doesn't exist, build and push it
@@ -267,8 +282,8 @@ deploy_ecs_full() {
     log_info "Environment: $ENVIRONMENT"
     
     # Get step information from main() (accounts for Phase 0 steps and preempt if enabled)
-    local step_num="${CURRENT_STEP:-4}"  # Default to 4 (after Phase 0.1-0.3, or 0.4 if preempt)
-    local total_steps="${TOTAL_STEPS:-12}"  # Default for ecs-full
+    local step_num="${CURRENT_STEP:-5}"  # Default to 5 (after Phase 0.1-0.4, or 0.5 if preempt)
+    local total_steps="${TOTAL_STEPS:-13}"  # Default for ecs-full
     
     # ============================================================================
     # Phase 1: Environment Preparation - Step 1.3: Prepare container image
@@ -331,7 +346,11 @@ deploy_ecs_full() {
         perf_step_start 3 "3.3" "Setting up database (pgvector, schema, data)"
         step_start_time=$(date +%s)
         log_step "Phase 3: Step 3.3 - Step ${step_num}/${total_steps}: Setting up database (pgvector, schema, data)"
-        if "$SCRIPT_DIR/database/setup-database.sh" "$ENVIRONMENT"; then
+        local db_setup_cmd="$SCRIPT_DIR/database/setup-database.sh $ENVIRONMENT"
+        if [ "$FORCE_REFRESH_DATA" = "true" ]; then
+            db_setup_cmd="$db_setup_cmd --force-refresh-data"
+        fi
+        if $db_setup_cmd; then
             elapsed=$(( $(date +%s) - step_start_time ))
             perf_step_end 3 "3.3" "SUCCESS" "Database setup completed"
             log_success "Phase 3: Step 3.3 - Step ${step_num}/${total_steps} PASSED: Database setup completed (took $(format_elapsed_time $elapsed))"
@@ -410,6 +429,9 @@ deploy_ecs_full() {
             if [ "$PREEMPT" = "true" ]; then
                 setup_cmd="$setup_cmd --preempt"
             fi
+            if [ "$FORCE_REFRESH_DATA" = "true" ]; then
+                setup_cmd="$setup_cmd --force-refresh-data"
+            fi
             if ! $setup_cmd; then
                 elapsed=$(( $(date +%s) - step_start_time ))
                 # If analytics scheduler is enabled, Delta table is REQUIRED - fail fast
@@ -479,8 +501,8 @@ deploy_eks_full() {
     log_info "Environment: $ENVIRONMENT"
     
     # Get step information from main() (accounts for Phase 0 steps and preempt if enabled)
-    local step_num="${CURRENT_STEP:-4}"  # Default to 4 (after Phase 0.1-0.3, or 0.4 if preempt)
-    local total_steps="${TOTAL_STEPS:-10}"  # Default for eks-full
+    local step_num="${CURRENT_STEP:-5}"  # Default to 5 (after Phase 0.1-0.4, or 0.5 if preempt)
+    local total_steps="${TOTAL_STEPS:-11}"  # Default for eks-full
     
     # ============================================================================
     # Phase 1: Environment Preparation - Step 1.3: Prepare container image
@@ -558,6 +580,9 @@ deploy_eks_full() {
             if [ "$PREEMPT" = "true" ]; then
                 setup_cmd="$setup_cmd --preempt"
             fi
+            if [ "$FORCE_REFRESH_DATA" = "true" ]; then
+                setup_cmd="$setup_cmd --force-refresh-data"
+            fi
             if ! $setup_cmd; then
                 elapsed=$(( $(date +%s) - step_start_time ))
                 # If analytics scheduler is enabled, Delta table is REQUIRED - fail fast
@@ -629,7 +654,15 @@ deploy_eks_full() {
         # Configure kubectl
         log_info "Configuring kubectl for EKS cluster..."
         cd "$ENV_DIR/eks"
-        CLUSTER_NAME=$(terragrunt output -raw cluster_name 2>/dev/null || echo "")
+        log_info "Fetching Terraform output: cluster_name"
+        if ! CLUSTER_NAME=$(terragrunt output -raw cluster_name 2>&1); then
+            log_error "Failed to fetch Terraform output 'cluster_name'"
+            log_error "Error: ${CLUSTER_NAME:0:500}"
+            CLUSTER_NAME=""
+            exit 1
+        else
+            log_info "Output retrieved: cluster_name=$CLUSTER_NAME"
+        fi
         
         if [ -z "$CLUSTER_NAME" ]; then
             log_error "Failed to get EKS cluster name from Terraform output"
@@ -755,14 +788,14 @@ main() {
     perf_init
     
     # Calculate total steps based on deployment type
-    # Base steps: 3 (Phase 0.1-0.3) + deployment steps + 1 (Phase 7)
-    local total_steps=12  # Default for ecs-full: 3 (Phase 0) + 8 (deploy) + 1 (Phase 7)
+    # Base steps: 4 (Phase 0.1-0.4) + deployment steps + 1 (Phase 7)
+    local total_steps=13  # Default for ecs-full: 4 (Phase 0) + 8 (deploy) + 1 (Phase 7)
     local current_step=1  # Start at step 1
     
     if [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
-        total_steps=10  # 3 (Phase 0) + 6 (deploy) + 1 (Phase 7)
+        total_steps=11  # 4 (Phase 0) + 6 (deploy) + 1 (Phase 7)
     elif [ "$DEPLOYMENT_TYPE" = "infrastructure" ]; then
-        total_steps=5  # 3 (Phase 0) + 2 (infrastructure only)
+        total_steps=6  # 4 (Phase 0) + 2 (infrastructure only)
     fi
     
     # If preempt is enabled for full workflows, add 1 to total steps
@@ -790,50 +823,66 @@ main() {
     current_step=$((current_step + 1))
     echo ""
     
-    # Step 0.2: Setup configuration files (AWS profiles from .env)
-    # Note: AWS uses existing .env file, but sets up AWS profiles
-    perf_step_start 0 "0.2" "Setting up AWS profiles from .env"
+    # Step 0.2: Setup Python virtual environment
+    perf_step_start 0 "0.2" "Setting up Python environment"
     step_start_time=$(date +%s)
-    log_step "Phase 0: Step 0.2 - Step ${current_step}/${total_steps}: Setting up AWS profiles from .env"
-    if ! "$SCRIPT_DIR/setup-aws-profiles.sh"; then
+    log_step "Phase 0: Step 0.2 - Step ${current_step}/${total_steps}: Setting up Python environment"
+    if ! "$REPO_ROOT/run_scripts/main_application_scripts/local/setup-python.sh"; then
         elapsed=$(( $(date +%s) - step_start_time ))
-        perf_step_end 0 "0.2" "FAILED" "AWS profiles setup failed"
-        log_error "Phase 0: Step 0.2 - Step ${current_step}/${total_steps} FAILED: AWS profiles setup failed (took $(format_elapsed_time $elapsed))"
+        perf_step_end 0 "0.2" "FAILED" "Python environment setup failed"
+        log_error "Phase 0: Step 0.2 - Step ${current_step}/${total_steps} FAILED: Python environment setup failed (took $(format_elapsed_time $elapsed))"
         exit 1
     fi
     elapsed=$(( $(date +%s) - step_start_time ))
-    perf_step_end 0 "0.2" "SUCCESS" "AWS profiles setup completed"
-    log_success "Phase 0: Step 0.2 - Step ${current_step}/${total_steps} PASSED: AWS profiles setup completed (took $(format_elapsed_time $elapsed))"
+    perf_step_end 0 "0.2" "SUCCESS" "Python environment ready"
+    log_success "Phase 0: Step 0.2 - Step ${current_step}/${total_steps} PASSED: Python environment ready (took $(format_elapsed_time $elapsed))"
     current_step=$((current_step + 1))
     echo ""
     
-    # Check AWS credentials for actual deployments
-    # This is AWS-specific and doesn't have a direct local equivalent
-    perf_step_start 0 "0.3" "Checking AWS credentials"
+    # Step 0.3: Setup configuration files (AWS profiles from .env)
+    # Note: AWS uses existing .env file, but sets up AWS profiles
+    perf_step_start 0 "0.3" "Setting up AWS profiles from .env"
     step_start_time=$(date +%s)
-    log_step "Phase 0: Step 0.3 - Step ${current_step}/${total_steps}: Checking AWS credentials"
-    if ! "$SCRIPT_DIR/check-aws-credentials.sh"; then
+    log_step "Phase 0: Step 0.3 - Step ${current_step}/${total_steps}: Setting up AWS profiles from .env"
+    if ! "$SCRIPT_DIR/setup-aws-profiles.sh"; then
         elapsed=$(( $(date +%s) - step_start_time ))
-        perf_step_end 0 "0.3" "FAILED" "AWS credentials check failed"
-        log_error "Phase 0: Step 0.3 - Step ${current_step}/${total_steps} FAILED: AWS credentials check failed (took $(format_elapsed_time $elapsed))"
+        perf_step_end 0 "0.3" "FAILED" "AWS profiles setup failed"
+        log_error "Phase 0: Step 0.3 - Step ${current_step}/${total_steps} FAILED: AWS profiles setup failed (took $(format_elapsed_time $elapsed))"
         exit 1
     fi
     elapsed=$(( $(date +%s) - step_start_time ))
-    perf_step_end 0 "0.3" "SUCCESS" "AWS credentials validated"
-    log_success "Phase 0: Step 0.3 - Step ${current_step}/${total_steps} PASSED: AWS credentials validated (took $(format_elapsed_time $elapsed))"
+    perf_step_end 0 "0.3" "SUCCESS" "AWS profiles setup completed"
+    log_success "Phase 0: Step 0.3 - Step ${current_step}/${total_steps} PASSED: AWS profiles setup completed (took $(format_elapsed_time $elapsed))"
+    current_step=$((current_step + 1))
+    echo ""
+    
+    # Step 0.4: Check AWS credentials for actual deployments
+    # This is AWS-specific and doesn't have a direct local equivalent
+    perf_step_start 0 "0.4" "Checking AWS credentials"
+    step_start_time=$(date +%s)
+    log_step "Phase 0: Step 0.4 - Step ${current_step}/${total_steps}: Checking AWS credentials"
+    if ! "$SCRIPT_DIR/check-aws-credentials.sh"; then
+        elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 0 "0.4" "FAILED" "AWS credentials check failed"
+        log_error "Phase 0: Step 0.4 - Step ${current_step}/${total_steps} FAILED: AWS credentials check failed (took $(format_elapsed_time $elapsed))"
+        exit 1
+    fi
+    elapsed=$(( $(date +%s) - step_start_time ))
+    perf_step_end 0 "0.4" "SUCCESS" "AWS credentials validated"
+    log_success "Phase 0: Step 0.4 - Step ${current_step}/${total_steps} PASSED: AWS credentials validated (took $(format_elapsed_time $elapsed))"
     current_step=$((current_step + 1))
     echo ""
     
     # ============================================================================
-    # Phase 0: Step 0.4 - Preempt: Destroy existing infrastructure before deployment (if requested)
+    # Phase 0: Step 0.5 - Preempt: Destroy existing infrastructure before deployment (if requested)
     # ============================================================================
     # If preempt is enabled, execute preempt teardown
     if [ "$PREEMPT" = "true" ]; then
         if [ "$DEPLOYMENT_TYPE" = "ecs-full" ] || [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
             # Note: total_steps already includes preempt step from calculation above
-            perf_step_start 0 "0.4" "Destroying existing infrastructure (PREEMPT)"
+            perf_step_start 0 "0.5" "Destroying existing infrastructure (PREEMPT)"
             step_start_time=$(date +%s)
-            log_step "Phase 0: Step 0.4 - Step ${current_step}/${total_steps}: Destroying existing infrastructure (PREEMPT MODE)"
+            log_step "Phase 0: Step 0.5 - Step ${current_step}/${total_steps}: Destroying existing infrastructure (PREEMPT MODE)"
             log_warning "════════════════════════════════════════════════════════════════"
             log_warning "PREEMPT MODE: Complete Infrastructure Destruction"
             log_warning "════════════════════════════════════════════════════════════════"
@@ -872,9 +921,9 @@ main() {
             
             if $destroy_cmd; then
                 elapsed=$(( $(date +%s) - step_start_time ))
-                perf_step_end 0 "0.4" "SUCCESS" "Infrastructure destruction completed"
+                perf_step_end 0 "0.5" "SUCCESS" "Infrastructure destruction completed"
                 log_success "════════════════════════════════════════════════════════════════"
-                log_success "Phase 0: Step 0.4 - Step ${current_step}/${total_steps} PASSED: Infrastructure destruction completed (took $(format_elapsed_time $elapsed))"
+                log_success "Phase 0: Step 0.5 - Step ${current_step}/${total_steps} PASSED: Infrastructure destruction completed (took $(format_elapsed_time $elapsed))"
                 log_success "════════════════════════════════════════════════════════════════"
                 log_info "Preempt destruction summary:"
                 log_info "  - All services stopped"
@@ -887,8 +936,8 @@ main() {
                 current_step=$((current_step + 1))  # Increment for next step
             else
                 elapsed=$(( $(date +%s) - step_start_time ))
-                perf_step_end 0 "0.4" "FAILED" "Preempt destruction failed"
-                log_error "Phase 0: Step 0.4 - Step ${current_step}/${total_steps} FAILED: Preempt destruction failed (took $(format_elapsed_time $elapsed))"
+                perf_step_end 0 "0.5" "FAILED" "Preempt destruction failed"
+                log_error "Phase 0: Step 0.5 - Step ${current_step}/${total_steps} FAILED: Preempt destruction failed (took $(format_elapsed_time $elapsed))"
                 log_info "Check the destruction output above for details"
                 exit 1
             fi
@@ -939,12 +988,12 @@ main() {
     # Infrastructure-only and legacy workflows skip this phase
     if [ "$DEPLOYMENT_TYPE" = "ecs-full" ] || [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
         # Use step number from deployment function (accounts for Phase 0 and preempt)
-        local step_num="${CURRENT_STEP:-12}"  # Default: after Phase 0 (3) + deploy (8) + 1 = 12
-        local total_steps="${TOTAL_STEPS:-12}"  # Default for ecs-full
+        local step_num="${CURRENT_STEP:-13}"  # Default: after Phase 0 (4) + deploy (8) + 1 = 13
+        local total_steps="${TOTAL_STEPS:-13}"  # Default for ecs-full
         if [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
             # Defaults for eks-full if not set
-            step_num="${CURRENT_STEP:-10}"  # Default: after Phase 0 (3) + deploy (6) + 1 = 10
-            total_steps="${TOTAL_STEPS:-10}"  # Default for eks-full
+            step_num="${CURRENT_STEP:-11}"  # Default: after Phase 0 (4) + deploy (6) + 1 = 11
+            total_steps="${TOTAL_STEPS:-11}"  # Default for eks-full
         fi
         perf_phase_start 7 "Validation and Verification"
         perf_step_start 7 "7.1" "Verifying deployment and generating test instructions"

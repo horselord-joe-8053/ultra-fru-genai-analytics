@@ -1,6 +1,7 @@
 #!/bin/bash
 # Load CSV data into local database via ETL script
 # Idempotent: checks if data already exists before loading
+# Usage: load_data_local [--force-refresh-data]
 
 set -e
 
@@ -8,6 +9,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+
+FORCE_REFRESH_DATA="${FORCE_REFRESH_DATA:-false}"
+
+# Parse arguments
+for arg in "$@"; do
+    if [ "$arg" = "--force-refresh-data" ]; then
+        FORCE_REFRESH_DATA=true
+    fi
+done
 
 load_data_local() {
     log_step "Loading data into database (local)"
@@ -39,19 +49,30 @@ load_data_local() {
     # Activate virtual environment
     source "$REPO_ROOT/venv/bin/activate"
     
-    # Check if data is already loaded
-    log_info "Checking if data is already loaded..."
-    ROW_COUNT=0
-    if command_exists psql; then
-        ROW_COUNT=$(PGPASSWORD="$PGPASSWORD" psql "postgresql://$PGUSER@$PGHOST:$PGPORT/$PGDATABASE" -tAc "SELECT COUNT(*) FROM fru_sales_embeddings;" 2>/dev/null || echo "0")
-    elif docker ps | grep -q fru_db; then
-        ROW_COUNT=$(docker exec fru_db psql -U "$PGUSER" -d "$PGDATABASE" -tAc "SELECT COUNT(*) FROM fru_sales_embeddings;" 2>/dev/null || echo "0")
-    fi
-    
-    if [ "$ROW_COUNT" -gt 0 ]; then
-        log_info "Data already loaded ($ROW_COUNT rows found). Skipping ETL."
-        log_info "To reload data, drop the table first or use --force flag (not implemented yet)"
-        return 0
+    # If --force-refresh-data is set, TRUNCATE table and bypass pre-check
+    if [ "$FORCE_REFRESH_DATA" = "true" ]; then
+        log_info "FORCE_REFRESH_DATA=true: Truncating existing data..."
+        if command_exists psql; then
+            PGPASSWORD="$PGPASSWORD" psql "postgresql://$PGUSER@$PGHOST:$PGPORT/$PGDATABASE" -c "TRUNCATE TABLE fru_sales_embeddings CASCADE;" >/dev/null 2>&1 || true
+        elif docker ps | grep -q fru_db; then
+            docker exec fru_db psql -U "$PGUSER" -d "$PGDATABASE" -c "TRUNCATE TABLE fru_sales_embeddings CASCADE;" >/dev/null 2>&1 || true
+        fi
+        log_info "Table truncated. Proceeding with fresh data load..."
+    else
+        # Check if data is already loaded
+        log_info "Checking if data is already loaded..."
+        ROW_COUNT=0
+        if command_exists psql; then
+            ROW_COUNT=$(PGPASSWORD="$PGPASSWORD" psql "postgresql://$PGUSER@$PGHOST:$PGPORT/$PGDATABASE" -tAc "SELECT COUNT(*) FROM fru_sales_embeddings;" 2>/dev/null || echo "0")
+        elif docker ps | grep -q fru_db; then
+            ROW_COUNT=$(docker exec fru_db psql -U "$PGUSER" -d "$PGDATABASE" -tAc "SELECT COUNT(*) FROM fru_sales_embeddings;" 2>/dev/null || echo "0")
+        fi
+        
+        if [ "$ROW_COUNT" -gt 0 ]; then
+            log_info "Data already loaded ($ROW_COUNT rows found). Skipping ETL."
+            log_info "To reload data, use --force-refresh-data flag"
+            return 0
+        fi
     fi
     
     # Set CSV path if not already set

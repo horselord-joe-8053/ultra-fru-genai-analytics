@@ -2,7 +2,7 @@
 # Create Delta table from CSV file
 # Idempotent: skips creation if table already exists
 #
-# Usage: create-delta-table.sh <INPUT_PATH> <OUTPUT_PATH>
+# Usage: create-delta-table.sh <INPUT_PATH> <OUTPUT_PATH> [--force-refresh-data]
 #
 # Required Environment Variables:
 #   SPARK_PACKAGES - Maven coordinates for Spark packages
@@ -14,12 +14,22 @@
 #   CLUSTER_NAME - ECS cluster name (required for ecs_task)
 #   SERVICE_NAME - ECS service name (required for ecs_task)
 #   DRY_RUN - "true" to preview without creating
+#   FORCE_REFRESH_DATA - "true" to force refresh (delete existing table before creating)
 
 set -e
 
 INPUT_PATH="$1"
 OUTPUT_PATH="$2"
 DRY_RUN="${DRY_RUN:-false}"
+FORCE_REFRESH_DATA="${FORCE_REFRESH_DATA:-false}"
+
+# Parse arguments (shift past INPUT_PATH and OUTPUT_PATH)
+shift 2 || true
+for arg in "$@"; do
+    if [ "$arg" = "--force-refresh-data" ]; then
+        FORCE_REFRESH_DATA=true
+    fi
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
@@ -54,20 +64,48 @@ log_info "Execution method: $EXECUTION_METHOD"
 # Track if table was actually created (not skipped)
 DELTA_TABLE_WAS_CREATED="false"
 
-# Check if CSV was uploaded (indicates CSV content changed)
-# If CSV was uploaded, bypass idempotent check and force recreation
-if [ "${CSV_WAS_UPLOADED:-false}" = "true" ]; then
+# If --force-refresh-data is set, delete existing Delta table first
+if [ "$FORCE_REFRESH_DATA" = "true" ]; then
+    log_info "FORCE_REFRESH_DATA=true: Deleting existing Delta table (if any)..."
+    if [ "$PATH_CHECK_METHOD" = "s3" ]; then
+        # Delete from S3
+        AWS_PROFILE="${AWS_PROFILE:-admin}"
+        AWS_REGION="${AWS_REGION:-us-east-1}"
+        if aws s3 rm "$OUTPUT_PATH" --recursive --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null 2>&1; then
+            log_info "Delta table deleted from S3: $OUTPUT_PATH"
+        else
+            log_info "Delta table may not exist in S3 (or deletion failed): $OUTPUT_PATH"
+        fi
+    else
+        # Delete from local filesystem
+        if [ -d "$OUTPUT_PATH" ]; then
+            rm -rf "$OUTPUT_PATH"
+            log_info "Delta table deleted from filesystem: $OUTPUT_PATH"
+        else
+            log_info "Delta table directory does not exist: $OUTPUT_PATH"
+        fi
+    fi
+    log_info "Proceeding with fresh Delta table creation..."
+    DELTA_TABLE_WAS_CREATED="true"
+elif [ "${CSV_WAS_UPLOADED:-false}" = "true" ]; then
+    # Check if CSV was uploaded (indicates CSV content changed)
+    # If CSV was uploaded, bypass idempotent check and force recreation
     log_info "CSV was uploaded (size changed), forcing Delta table recreation..."
     log_info "Bypassing idempotent check (CSV content has changed)"
     DELTA_TABLE_WAS_CREATED="true"
-elif "$SCRIPT_DIR/helpers/check-delta-table-exists.sh" "$OUTPUT_PATH" "$PATH_CHECK_METHOD" 2>/dev/null; then
-    log_info "Delta table already exists at: $OUTPUT_PATH"
-    log_success "Skipping creation (idempotent - CSV unchanged)"
-    DELTA_TABLE_WAS_CREATED="false"
-    # Don't exit - continue to analytics check (will skip if table not created)
 else
-    # Table doesn't exist, will create it
-    DELTA_TABLE_WAS_CREATED="true"
+    # Check if Delta table already exists (idempotent check)
+    log_info "Checking if Delta table already exists at: $OUTPUT_PATH"
+    if "$SCRIPT_DIR/helpers/check-delta-table-exists.sh" "$OUTPUT_PATH" "$PATH_CHECK_METHOD"; then
+        log_info "Delta table already exists at: $OUTPUT_PATH"
+        log_success "Skipping creation (idempotent - CSV unchanged)"
+        DELTA_TABLE_WAS_CREATED="false"
+        # Don't exit - continue to analytics check (will skip if table not created)
+    else
+        # Table doesn't exist, will create it
+        log_info "Delta table does not exist, will create it"
+        DELTA_TABLE_WAS_CREATED="true"
+    fi
 fi
 
 # Only create table if needed

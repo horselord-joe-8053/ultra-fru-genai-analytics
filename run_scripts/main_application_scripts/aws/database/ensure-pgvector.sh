@@ -1,6 +1,6 @@
 #!/bin/bash
 # Ensure pgvector extension is installed on the Aurora/Postgres database
-# Usage: ./ensure-pgvector.sh <env>
+# Usage: ./ensure-pgvector.sh <env> [--force-refresh-data]
 # Uses the RDS Data API (no direct network access to Aurora required).
 # Requires: aws cli; AWS_PROFILE (admin) and AWS_REGION set by caller.
 
@@ -11,6 +11,23 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 
 ENVIRONMENT="${1:-dev}"
+FORCE_REFRESH_DATA="${FORCE_REFRESH_DATA:-false}"
+
+# Parse arguments
+ARGS=()
+for arg in "$@"; do
+    if [ "$arg" = "--force-refresh-data" ]; then
+        FORCE_REFRESH_DATA=true
+    else
+        ARGS+=("$arg")
+    fi
+done
+
+# Update ENVIRONMENT from parsed args if provided
+if [ ${#ARGS[@]} -gt 0 ]; then
+    ENVIRONMENT="${ARGS[0]:-$ENVIRONMENT}"
+fi
+
 AWS_PROFILE="${AWS_PROFILE:-admin}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 
@@ -45,6 +62,46 @@ ensure_pgvector() {
     log_info "Using cluster ARN: $DB_CLUSTER_ARN"
     log_info "Using DB credentials secret ARN: $DB_SECRET_ARN"
     log_info "Database name: $DB_NAME"
+    
+    # If --force-refresh-data is set, drop extension first
+    if [ "$FORCE_REFRESH_DATA" = "true" ]; then
+        log_info "FORCE_REFRESH_DATA=true: Dropping existing pgvector extension (if any)..."
+        aws rds-data execute-statement \
+            --resource-arn "$DB_CLUSTER_ARN" \
+            --secret-arn "$DB_SECRET_ARN" \
+            --database "$DB_NAME" \
+            --sql "DROP EXTENSION IF EXISTS vector CASCADE;" \
+            --profile "$AWS_PROFILE" \
+            --region "$AWS_REGION" >/dev/null 2>&1 || true
+        log_info "Extension dropped (if it existed). Proceeding with fresh installation..."
+    else
+        # Check if pgvector extension already exists
+        log_info "Checking if pgvector extension is already installed..."
+        local extension_exists=false
+        local check_result
+        
+        if check_result=$(aws rds-data execute-statement \
+            --resource-arn "$DB_CLUSTER_ARN" \
+            --secret-arn "$DB_SECRET_ARN" \
+            --database "$DB_NAME" \
+            --sql "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector');" \
+            --profile "$AWS_PROFILE" \
+            --region "$AWS_REGION" \
+            --output text \
+            --query 'records[0][0].booleanValue' 2>&1); then
+            if [ "$check_result" = "True" ] || [ "$check_result" = "true" ] || [ "$check_result" = "1" ]; then
+                extension_exists=true
+            fi
+        fi
+        
+        if [ "$extension_exists" = true ]; then
+            log_info "pgvector extension already installed"
+            log_success "Skipping pgvector installation (idempotent - extension exists)"
+            return 0
+        fi
+        
+        log_info "pgvector extension not found. Proceeding with installation..."
+    fi
     
     # Retry a few times in case the cluster is not immediately ready for Data API
     max_retries=5

@@ -14,6 +14,7 @@ log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (spark aws delta setup)"
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 DRY_RUN="${DRY_RUN:-false}"
 PREEMPT="${PREEMPT:-false}"
+FORCE_REFRESH_DATA="${FORCE_REFRESH_DATA:-false}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -24,6 +25,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run)
             DRY_RUN="true"
+            shift
+            ;;
+        --force-refresh-data)
+            FORCE_REFRESH_DATA="true"
             shift
             ;;
         --environment|-e)
@@ -39,6 +44,7 @@ done
 export ENVIRONMENT
 export DRY_RUN
 export PREEMPT
+export FORCE_REFRESH_DATA
 
 # If --preempt flag is set, teardown existing Delta tables first
 if [ "$PREEMPT" = "true" ]; then
@@ -155,7 +161,11 @@ print(f'{get_spark_packages(is_aws_deployment=True)}|{to_spark_path(csv_path)}|{
     # Export AWS credentials for ECS task execution
     export AWS_PROFILE="${AWS_PROFILE:-admin}"
     export AWS_REGION="${AWS_REGION:-us-east-1}"
-    if ! "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/create-delta-table.sh" "$CSV_PATH" "$DELTA_TABLE_PATH"; then
+    create_cmd="$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/create-delta-table.sh $CSV_PATH $DELTA_TABLE_PATH"
+    if [ "$FORCE_REFRESH_DATA" = "true" ]; then
+        create_cmd="$create_cmd --force-refresh-data"
+    fi
+    if ! $create_cmd; then
         log_error "Substep 2/3 FAILED: Delta table creation failed"
         exit 1
     fi

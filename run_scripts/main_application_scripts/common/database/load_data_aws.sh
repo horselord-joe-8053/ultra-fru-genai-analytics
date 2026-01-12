@@ -6,8 +6,9 @@
 # It reads credentials from .env file (single source of truth) and gets Aurora endpoint
 # from Terragrunt outputs.
 #
-# Usage: load_data_aws [environment]
+# Usage: load_data_aws [environment] [--force-refresh-data]
 # Example: load_data_aws dev
+# Example: load_data_aws dev --force-refresh-data
 
 set -e
 
@@ -18,6 +19,22 @@ source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 
 # Default environment
 ENVIRONMENT="${1:-dev}"
+FORCE_REFRESH_DATA="${FORCE_REFRESH_DATA:-false}"
+
+# Parse arguments
+ARGS=()
+for arg in "$@"; do
+    if [ "$arg" = "--force-refresh-data" ]; then
+        FORCE_REFRESH_DATA=true
+    else
+        ARGS+=("$arg")
+    fi
+done
+
+# Update ENVIRONMENT from parsed args if provided
+if [ ${#ARGS[@]} -gt 0 ]; then
+    ENVIRONMENT="${ARGS[0]:-$ENVIRONMENT}"
+fi
 
 # AWS configuration
 AWS_PROFILE="${AWS_PROFILE:-admin}"
@@ -41,9 +58,36 @@ load_data_aws() {
     log_info "Fetching Aurora cluster information from Terraform outputs..."
     
     local db_cluster_arn db_secret_arn db_name
-    db_cluster_arn=$(cd "$infra_dir" && terragrunt output -raw db_cluster_arn 2>/dev/null || true)
-    db_secret_arn=$(cd "$infra_dir" && terragrunt output -raw db_password_secret_arn 2>/dev/null || true)
-    db_name=$(cd "$infra_dir" && terragrunt output -raw aurora_database_name 2>/dev/null || echo "fru_db")
+    local output_error
+    
+    log_info "Fetching Terraform output: db_cluster_arn"
+    if ! db_cluster_arn=$(cd "$infra_dir" && terragrunt output -raw db_cluster_arn 2>&1); then
+        output_error="$db_cluster_arn"
+        db_cluster_arn=""
+        log_error "Failed to fetch Terraform output 'db_cluster_arn'"
+        log_error "Error: ${output_error:0:500}"
+    else
+        log_info "Output retrieved: db_cluster_arn=${db_cluster_arn:0:100}..."
+    fi
+    
+    log_info "Fetching Terraform output: db_password_secret_arn"
+    if ! db_secret_arn=$(cd "$infra_dir" && terragrunt output -raw db_password_secret_arn 2>&1); then
+        output_error="$db_secret_arn"
+        db_secret_arn=""
+        log_error "Failed to fetch Terraform output 'db_password_secret_arn'"
+        log_error "Error: ${output_error:0:500}"
+    else
+        log_info "Output retrieved: db_password_secret_arn=${db_secret_arn:0:100}..."
+    fi
+    
+    log_info "Fetching Terraform output: aurora_database_name"
+    if ! db_name=$(cd "$infra_dir" && terragrunt output -raw aurora_database_name 2>&1); then
+        log_warning "Failed to fetch Terraform output 'aurora_database_name', using default: fru_db"
+        log_warning "Error: ${db_name:0:500}"
+        db_name="fru_db"
+    else
+        log_info "Output retrieved: aurora_database_name=$db_name"
+    fi
     
     if [ -z "$db_cluster_arn" ] || [ -z "$db_secret_arn" ]; then
         log_error "Missing Aurora cluster ARN or secret ARN from infrastructure outputs"
@@ -150,54 +194,69 @@ load_data_aws() {
         --output text \
         --query 'records[0][0].stringValue' 2>/dev/null || echo "")
     
-    # Determine if reload is needed
-    local needs_reload=false
-    local reload_reason=""
-    
-    if [ "$row_count" -eq 0 ] || [ "$row_count" = "0" ]; then
+    # If --force-refresh-data is set, TRUNCATE table and bypass pre-check
+    if [ "$FORCE_REFRESH_DATA" = "true" ]; then
+        log_info "FORCE_REFRESH_DATA=true: Truncating existing data..."
+        aws rds-data execute-statement \
+            --resource-arn "$db_cluster_arn" \
+            --secret-arn "$db_secret_arn" \
+            --database "$db_name" \
+            --sql "TRUNCATE TABLE fru_sales_embeddings CASCADE;" \
+            --profile "$AWS_PROFILE" \
+            --region "$AWS_REGION" >/dev/null 2>&1 || true
+        log_info "Table truncated. Proceeding with fresh data load..."
         needs_reload=true
-        reload_reason="No data found in database"
-    elif [ -z "$stored_csv_hash" ]; then
-        # Metadata table doesn't exist or is empty - reload to establish baseline
-        needs_reload=true
-        reload_reason="Metadata not found (first load or metadata table missing)"
-    elif [ "$csv_hash" != "$stored_csv_hash" ]; then
-        needs_reload=true
-        reload_reason="CSV file has changed (hash: ${csv_hash:0:8}... vs stored: ${stored_csv_hash:0:8}...)"
-    elif [ "$schema_hash" != "$stored_schema_hash" ] && [ "$schema_hash" != "unknown" ]; then
-        needs_reload=true
-        reload_reason="Schema has changed (hash: ${schema_hash:0:8}... vs stored: ${stored_schema_hash:0:8}...)"
-    fi
-    
-    if [ "$needs_reload" = false ]; then
-        log_info "Data is up to date:"
-        log_info "  - Row count: $row_count"
-        log_info "  - CSV hash matches stored hash"
-        if [ "$schema_hash" != "unknown" ]; then
-            log_info "  - Schema version matches stored version"
+        reload_reason="FORCE_REFRESH_DATA flag is set"
+    else
+        # Determine if reload is needed
+        local needs_reload=false
+        local reload_reason=""
+        
+        if [ "$row_count" -eq 0 ] || [ "$row_count" = "0" ]; then
+            needs_reload=true
+            reload_reason="No data found in database"
+        elif [ -z "$stored_csv_hash" ]; then
+            # Metadata table doesn't exist or is empty - reload to establish baseline
+            needs_reload=true
+            reload_reason="Metadata not found (first load or metadata table missing)"
+        elif [ "$csv_hash" != "$stored_csv_hash" ]; then
+            needs_reload=true
+            reload_reason="CSV file has changed (hash: ${csv_hash:0:8}... vs stored: ${stored_csv_hash:0:8}...)"
+        elif [ "$schema_hash" != "$stored_schema_hash" ] && [ "$schema_hash" != "unknown" ]; then
+            needs_reload=true
+            reload_reason="Schema has changed (hash: ${schema_hash:0:8}... vs stored: ${stored_schema_hash:0:8}...)"
         fi
-        log_info "Skipping data reload."
-        return 0
-    fi
-    
-    # Reload needed
-    log_info "Data reload needed: $reload_reason"
-    log_info "  - Current CSV hash: ${csv_hash:0:16}..."
-    log_info "  - Current schema hash: ${schema_hash:0:16}..."
-    
-    # For non-interactive mode (automated deployments), auto-reload
-    # For interactive mode, prompt user
-    if [ -t 0 ] && [ "${FORCE_RELOAD:-false}" != "true" ]; then
-        # Interactive mode: prompt user
-        read -p "Do you want to reload data? This will upsert existing rows. (y/N): " -n 1 -r
-        echo # Add a newline after the prompt
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        
+        if [ "$needs_reload" = false ]; then
+            log_info "Data is up to date:"
+            log_info "  - Row count: $row_count"
+            log_info "  - CSV hash matches stored hash"
+            if [ "$schema_hash" != "unknown" ]; then
+                log_info "  - Schema version matches stored version"
+            fi
             log_info "Skipping data reload."
             return 0
         fi
-    else
-        # Non-interactive mode: auto-reload
-        log_info "Non-interactive mode: Auto-reloading data..."
+        
+        # Reload needed
+        log_info "Data reload needed: $reload_reason"
+        log_info "  - Current CSV hash: ${csv_hash:0:16}..."
+        log_info "  - Current schema hash: ${schema_hash:0:16}..."
+        
+        # For non-interactive mode (automated deployments), auto-reload
+        # For interactive mode, prompt user
+        if [ -t 0 ] && [ "${FORCE_RELOAD:-false}" != "true" ]; then
+            # Interactive mode: prompt user
+            read -p "Do you want to reload data? This will upsert existing rows. (y/N): " -n 1 -r
+            echo # Add a newline after the prompt
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                log_info "Skipping data reload."
+                return 0
+            fi
+        else
+            # Non-interactive mode: auto-reload
+            log_info "Non-interactive mode: Auto-reloading data..."
+        fi
     fi
     
     # Set environment variables for RDS Data API ETL script

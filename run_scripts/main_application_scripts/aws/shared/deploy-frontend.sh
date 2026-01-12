@@ -5,7 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 # Save SCRIPT_DIR before sourcing load-env.sh (which sets its own SCRIPT_DIR)
 FRONTEND_SCRIPT_DIR="$SCRIPT_DIR"
@@ -78,10 +78,45 @@ deploy_frontend() {
     
     S3_BUCKET_NAME="$s3_bucket_name"
     
-    # Check if frontend is built, build if needed
+    # Check if frontend needs to be built
     # Frontend uses relative URLs - CloudFront will proxy /query and /analytics to ALB
+    local needs_build=false
+    
     if [ ! -d "$REPO_ROOT/frontend/dist" ]; then
-        log_info "Frontend not built, building now..."
+        log_info "Frontend dist directory not found, will build"
+        needs_build=true
+    else
+        # Check if any source files are newer than the dist build
+        # This ensures we rebuild when source code changes
+        # Use cross-platform stat command (macOS: -f, Linux: -c)
+        local dist_file=$(find "$REPO_ROOT/frontend/dist" -type f \( -name "*.html" -o -name "*.js" -o -name "*.css" \) 2>/dev/null | head -1)
+        local dist_mtime="0"
+        if [ -n "$dist_file" ]; then
+            dist_mtime=$(stat -f "%m" "$dist_file" 2>/dev/null || stat -c "%Y" "$dist_file" 2>/dev/null || echo "0")
+        fi
+        
+        local src_mtime="0"
+        local src_files=$(find "$REPO_ROOT/frontend/src" -type f \( -name "*.tsx" -o -name "*.ts" -o -name "*.jsx" -o -name "*.js" -o -name "*.css" \) 2>/dev/null)
+        if [ -n "$src_files" ]; then
+            # Get the most recent source file modification time
+            for src_file in $src_files; do
+                local file_mtime=$(stat -f "%m" "$src_file" 2>/dev/null || stat -c "%Y" "$src_file" 2>/dev/null || echo "0")
+                if [ "$file_mtime" -gt "$src_mtime" ]; then
+                    src_mtime="$file_mtime"
+                fi
+            done
+        fi
+        
+        if [ "$src_mtime" -gt "$dist_mtime" ]; then
+            log_info "Source files are newer than dist build, will rebuild"
+            needs_build=true
+        else
+            log_info "Frontend already built and up-to-date"
+        fi
+    fi
+    
+    if [ "$needs_build" = "true" ]; then
+        log_info "Building frontend..."
         cd "$REPO_ROOT/frontend"
         
         # Check if node_modules exists, install if needed
@@ -111,8 +146,6 @@ deploy_frontend() {
             log_info "Frontend uses relative URLs - CloudFront will proxy /query and /analytics to ALB"
         fi
         cd "$REPO_ROOT"
-    else
-        log_info "Frontend already built"
     fi
     
     # Check if S3 bucket exists

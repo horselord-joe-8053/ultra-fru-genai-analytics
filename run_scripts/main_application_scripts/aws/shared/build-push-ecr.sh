@@ -76,12 +76,21 @@ build_and_push_ecr() {
     log_info "Full Image URI: $ECR_REPO_URI:$IMAGE_TAG"
     
     # Check if ECR repository exists
+    log_info "Checking if ECR repository exists: $ECR_REPO_NAME"
     local repo_exists=false
-    if aws ecr describe-repositories --profile "$AWS_PROFILE" --repository-names "$ECR_REPO_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+    local repo_check_output
+    if repo_check_output=$(aws ecr describe-repositories --profile "$AWS_PROFILE" --repository-names "$ECR_REPO_NAME" --region "$AWS_REGION" 2>&1); then
         repo_exists=true
-        log_info "ECR repository already exists"
+        log_success "ECR repository exists: $ECR_REPO_NAME"
     else
-        log_info "ECR repository does not exist"
+        local repo_check_exit=$?
+        if echo "$repo_check_output" | grep -q "RepositoryNotFoundException"; then
+            log_info "ECR repository does not exist: $ECR_REPO_NAME (will be created)"
+        else
+            log_error "Failed to check ECR repository existence (exit code: $repo_check_exit)"
+            log_error "Error: $repo_check_output"
+            exit 1
+        fi
     fi
     
     # Check if image exists (by tag)
@@ -89,10 +98,21 @@ build_and_push_ecr() {
     # This is why we use git SHA tags - each commit gets a unique tag
     local image_exists=false
     if [ "$repo_exists" = true ]; then
-        if aws ecr describe-images --profile "$AWS_PROFILE" --repository-name "$ECR_REPO_NAME" --image-ids imageTag="$IMAGE_TAG" --region "$AWS_REGION" >/dev/null 2>&1; then
+        log_info "Checking if container image exists: $ECR_REPO_URI:$IMAGE_TAG"
+        local image_check_output
+        if image_check_output=$(aws ecr describe-images --profile "$AWS_PROFILE" --repository-name "$ECR_REPO_NAME" --image-ids imageTag="$IMAGE_TAG" --region "$AWS_REGION" 2>&1); then
             image_exists=true
-            log_info "Container image already exists: $ECR_REPO_URI:$IMAGE_TAG"
+            log_success "Container image already exists: $ECR_REPO_URI:$IMAGE_TAG"
             log_info "Note: If code changed but tag is the same, set FORCE_REBUILD=true to rebuild"
+        else
+            local image_check_exit=$?
+            if echo "$image_check_output" | grep -q "ImageNotFoundException\|does not exist"; then
+                log_info "Container image not found: $ECR_REPO_URI:$IMAGE_TAG (will be built)"
+            else
+                log_error "Failed to check container image existence (exit code: $image_check_exit)"
+                log_error "Error: $image_check_output"
+                exit 1
+            fi
         fi
     fi
     

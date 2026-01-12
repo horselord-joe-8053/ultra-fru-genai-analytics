@@ -35,6 +35,7 @@ SKIP_FRONTEND=false
 SKIP_DATA_LOAD=false
 SKIP_DATA_LAKE=false
 PREEMPT=false
+FORCE_REFRESH_DATA=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -54,13 +55,20 @@ while [[ $# -gt 0 ]]; do
             PREEMPT=true
             shift
             ;;
+        --force-refresh-data)
+            FORCE_REFRESH_DATA=true
+            shift
+            ;;
         *)
             log_error "Unknown option: $1"
-            log_info "Usage: $0 [--skip-frontend] [--skip-data-load] [--skip-data-lake] [--preempt]"
+            log_info "Usage: $0 [--skip-frontend] [--skip-data-load] [--skip-data-lake] [--preempt] [--force-refresh-data]"
             exit 1
             ;;
     esac
 done
+
+# Export flags for sub-scripts
+export FORCE_REFRESH_DATA
 
 # Determine if data-lake setup is needed (consistent with AWS)
 # Priority order:
@@ -281,7 +289,11 @@ main() {
     perf_step_start 3 "3.1" "Initializing database schema"
     step_start_time=$(date +%s)
     log_step "Phase 3: Step 3.1 - Step ${current_step}/${total_steps}: Initializing database schema"
-    if ! "$REPO_ROOT/run_scripts/main_application_scripts/common/database/init_schema.sh" "local"; then
+    local schema_cmd="$REPO_ROOT/run_scripts/main_application_scripts/common/database/init_schema.sh local"
+    if [ "$FORCE_REFRESH_DATA" = "true" ]; then
+        schema_cmd="$schema_cmd --force-refresh-data"
+    fi
+    if ! $schema_cmd; then
         elapsed=$(( $(date +%s) - step_start_time ))
         perf_step_end 3 "3.1" "FAILED" "Database schema initialization failed"
         log_error "Phase 3: Step 3.1 - Step ${current_step}/${total_steps} FAILED: Database schema initialization failed (took $(format_elapsed_time $elapsed))"
@@ -298,7 +310,11 @@ main() {
         perf_step_start 3 "3.2" "Loading data into database"
         step_start_time=$(date +%s)
         log_step "Phase 3: Step 3.2 - Step ${current_step}/${total_steps}: Loading data into database"
-        if ! "$REPO_ROOT/run_scripts/main_application_scripts/common/database/load_data.sh" "local"; then
+        local load_cmd="$REPO_ROOT/run_scripts/main_application_scripts/common/database/load_data.sh local"
+        if [ "$FORCE_REFRESH_DATA" = "true" ]; then
+            load_cmd="$load_cmd --force-refresh-data"
+        fi
+        if ! $load_cmd; then
             elapsed=$(( $(date +%s) - step_start_time ))
             perf_step_end 3 "3.2" "FAILED" "Data load failed"
             log_error "Phase 3: Step 3.2 - Step ${current_step}/${total_steps} FAILED: Data load failed (took $(format_elapsed_time $elapsed))"
@@ -335,6 +351,9 @@ main() {
         local setup_cmd="$REPO_ROOT/run_scripts/spark_delta-lake_scripts/local/delta-lake/setup-and-verify.sh"
         # Note: --preempt flag is already handled in Phase 0: Step 0.3 (teardown-resources.sh)
         # Delta tables were already removed if --preempt was set, so no need to pass it again
+        if [ "$FORCE_REFRESH_DATA" = "true" ]; then
+            setup_cmd="$setup_cmd --force-refresh-data"
+        fi
         if ! $setup_cmd; then
             elapsed=$(( $(date +%s) - step_start_time ))
             perf_step_end 4 "4.1" "FAILED" "Data-lake setup had issues"
