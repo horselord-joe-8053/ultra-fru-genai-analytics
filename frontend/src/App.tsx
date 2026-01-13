@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import Chat from "./components/Chat";
 import BatchAnalyticsPanel from "./components/BatchAnalyticsPanel";
 import ExecutionPanel, { ExecutionState } from "./components/ExecutionPanel";
+import { handleBackendError } from "./utils/errorHandler";
 
 export interface Message {
   role: "user" | "assistant";
@@ -239,24 +240,32 @@ const App: React.FC = () => {
     eventSource.addEventListener("error", (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
+        const errorMessage = data.message || "Unknown error";
+        
+        // Handle error with proper logging and truncation
+        const { truncated } = handleBackendError(errorMessage, "Server Error Event");
+        
         setExecutionState((prev) => ({
           ...prev,
-          error: data.message || "Unknown error",
+          error: truncated,
           isStreaming: false,
         }));
         
-        // Also update Chat panel with error
+        // Also update Chat panel with user-friendly error
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            text: `Sorry, an error occurred: ${data.message || "Unknown error"}`,
+            text: `Sorry, an error occurred: ${errorMessage}`,
           },
         ]);
       } catch (e) {
+        // JSON parse failed - handle the parsing error
+        const { truncated } = handleBackendError(e, "Server Error Event (JSON Parse Failed)");
+        
         setExecutionState((prev) => ({
           ...prev,
-          error: "Error processing query",
+          error: truncated,
           isStreaming: false,
         }));
         
@@ -276,19 +285,21 @@ const App: React.FC = () => {
 
     // Handle connection errors
     eventSource.onerror = (error) => {
-      console.error("EventSource connection error:", error);
+      // Handle error with proper logging and truncation
+      const { truncated } = handleBackendError(error, "EventSource Connection");
+      
       // Only set error if we haven't received a complete event
       setExecutionState((prev) => {
         if (prev.isStreaming) {
           return {
             ...prev,
-            error: "Connection error - streaming interrupted",
+            error: truncated,
             isStreaming: false,
           };
         }
         return prev;
       });
-      // Update Chat panel with error
+      // Update Chat panel with user-friendly error
       setMessages((prev) => [
         ...prev,
         {

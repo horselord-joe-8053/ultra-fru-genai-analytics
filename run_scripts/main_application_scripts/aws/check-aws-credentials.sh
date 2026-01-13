@@ -231,6 +231,12 @@ check_all_aws_credentials() {
 }
 
 main() {
+    # Skip if credentials were already checked in parent script
+    if [ "${AWS_CREDENTIALS_CHECKED:-false}" = "true" ]; then
+        log_info "AWS credentials already validated in parent script - skipping redundant check"
+        return 0
+    fi
+    
     check_all_aws_credentials
 }
 

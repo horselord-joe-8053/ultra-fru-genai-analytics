@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import type { Message } from "../App";
+import { getBuildVersion } from "../utils/version";
 
 interface ChatProps {
   messages: Message[];
@@ -27,6 +28,9 @@ const Chat: React.FC<ChatProps> = ({ messages, onSend, loading }) => {
       <div className="flex items-center justify-between px-4 py-3 border-b bg-gray-50">
         <div>
           <h1 className="text-lg font-semibold">FRU Analytics Assistant</h1>
+          <p className="text-[10px] text-gray-400 font-mono leading-tight">
+            {getBuildVersion()}
+          </p>
           <p className="text-xs text-gray-500">
             Ask about sales, brands, stores, and customer feedback.
           </p>

@@ -887,6 +887,11 @@ main() {
     elapsed=$(( $(date +%s) - step_start_time ))
     perf_step_end 0 "0.4" "SUCCESS" "AWS credentials validated"
     log_success "Phase 0: Step 0.4 - Step ${current_step}/${total_steps} PASSED: AWS credentials validated (took $(format_elapsed_time $elapsed))"
+    
+    # Export flag to skip redundant credential checks in child scripts
+    export AWS_CREDENTIALS_CHECKED="true"
+    log_info "AWS credentials validated - skipping redundant checks in child scripts"
+    
     current_step=$((current_step + 1))
     echo ""
     

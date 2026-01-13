@@ -49,8 +49,8 @@ fi
 build_and_push_ecr() {
     log_step "Building and pushing Docker image to ECR"
     
-    # Check AWS credentials
-    "$REPO_ROOT/run_scripts/main_application_scripts/aws/check-aws-credentials.sh" || exit 1
+    # AWS credentials are already checked in Phase 0.4 of run.sh
+    # Skip redundant check here
     
     # Load environment variables
     load_env_file
