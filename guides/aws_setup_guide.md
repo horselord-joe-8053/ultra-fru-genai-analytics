@@ -781,7 +781,7 @@ curl http://${ALB_DNS}/health
 # Test with a sample query
 curl -X POST http://${ALB_DNS}/query \
   -H "Content-Type: application/json" \
-  -d '{"query": "Why are Samsung customers unhappy?"}'
+  -d '{"query": "What is the overall average customer rating?"}'
 
 # Expected: JSON response with answer from Claude via Bedrock
 ```
@@ -893,7 +893,7 @@ The frontend will:
 - Proxy API requests to your backend
 
 **Try asking questions like:**
-- "Why are Samsung customers unhappy?"
+- "What is the overall average customer rating?"
 - "What are the top-selling fridge models?"
 - "Which stores have the best performance?"
 
@@ -918,7 +918,7 @@ curl http://${ALB_DNS}/health
 ```bash
 curl -X POST http://${ALB_DNS}/query \
   -H "Content-Type: application/json" \
-  -d '{"query": "Why are Samsung customers unhappy?"}'
+  -d '{"query": "What is the overall average customer rating?"}'
 ```
 
 ### 15.3 Monitor Your Deployment

@@ -80,7 +80,7 @@ It is designed as a working prototype that demonstrates production-ready GenAI a
 FRU (**Fridges R Us**) is a **conversational analytics assistant** for fridge sales.
 
 Typical user asks:
-> _“Why are Samsung customers unhappy?”_  
+> _“What is the overall average customer rating?”_  
 > _“How many LG fridges did we sell in Brazil last month?”_  
 > _“Which stores consistently get negative delivery feedback?”_
 

@@ -231,7 +231,7 @@ validate_frontend_endpoint() {
 #        query_response=$(curl -s -w "\n%{http_code}" --max-time 30 \
 #            -X POST "$api_endpoint/query" \
 #            -H "Content-Type: application/json" \
-#            -d '{"query": "Why are Samsung customers unhappy?"}' 2>/dev/null || echo -e "\n000")
+#            -d '{"query": "What is the overall average customer rating?"}' 2>/dev/null || echo -e "\n000")
 #        
 #        query_status=$(echo "$query_response" | tail -n 1)
 #        last_status="$query_status"

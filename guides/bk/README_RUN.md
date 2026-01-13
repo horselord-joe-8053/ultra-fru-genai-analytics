@@ -371,7 +371,7 @@ So the frontend calls `fetch("/query")` and `fetch("/analytics")` and Vite forwa
 
 Open `http://localhost:5173` and ask:
 
-- "Why are Samsung customers unhappy?"
+- "What is the overall average customer rating?"
 - "Which store has the most negative feedback?"
 - "How many LG fridges did we sell last month?"
 

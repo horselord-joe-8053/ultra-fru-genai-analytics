@@ -316,7 +316,7 @@ Interactive conversational interface for querying the fridge sales data.
 - Grounded answers based on actual sales data
 
 **Example queries:**
-- "Why are Samsung customers unhappy?"
+- "What is the overall average customer rating?"
 - "Which store has the most negative feedback?"
 - "How many LG fridges did we sell last month?"
 

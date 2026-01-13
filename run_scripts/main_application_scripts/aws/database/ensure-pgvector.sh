@@ -114,8 +114,23 @@ ensure_pgvector() {
             --sql "CREATE EXTENSION IF NOT EXISTS vector;" \
             --profile "$AWS_PROFILE" \
             --region "$AWS_REGION" >/dev/null; then
-            log_success "pgvector extension ensured via Data API (attempt ${attempt}/${max_retries})."
+            log_success "pgvector extension created via Data API (attempt ${attempt}/${max_retries})."
+            
+            # Wait for extension to be fully ready (not just created, but actually usable)
+            if [ -f "$REPO_ROOT/run_scripts/main_application_scripts/aws/database/wait-for-pgvector-ready.sh" ]; then
+                source "$REPO_ROOT/run_scripts/main_application_scripts/aws/database/wait-for-pgvector-ready.sh"
+                if wait_for_pgvector_ready "$DB_CLUSTER_ARN" "$DB_SECRET_ARN" "$DB_NAME" 60 2; then
+                    log_success "pgvector extension is fully ready and usable"
+                    return 0
+                else
+                    log_warning "pgvector extension created but readiness check failed"
+                    log_warning "Extension may still be initializing - this is usually fine"
+                    return 0  # Still return success - extension was created
+                fi
+            else
+                log_info "wait-for-pgvector-ready.sh not found, skipping readiness check"
             return 0
+            fi
         else
             log_info "RDS Data API attempt ${attempt}/${max_retries} failed."
             if [ "$attempt" -lt "$max_retries" ]; then

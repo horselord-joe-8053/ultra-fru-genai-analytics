@@ -53,6 +53,8 @@ while [[ $# -gt 0 ]]; do
             ;;
         --preempt)
             PREEMPT=true
+            # When preempting, also force refresh data to ensure a clean local state
+            FORCE_REFRESH_DATA=true
             shift
             ;;
         --force-refresh-data)
@@ -265,7 +267,13 @@ main() {
     step_start_time=$(date +%s)
     log_step "Phase 2: Step 2.1 - Step ${current_step}/${total_steps}: Starting Docker services"
     # Use --force to ensure containers are recreated with latest .env variables
-    if ! "$SCRIPT_DIR/start-services.sh" --force; then
+    # In PREEMPT mode, also pass --build-api to force image rebuild after teardown.
+    local start_cmd="$SCRIPT_DIR/start-services.sh --force"
+    if [ "$PREEMPT" = "true" ]; then
+        log_info "PREEMPT mode: Forcing API image rebuild via start-services.sh --build-api"
+        start_cmd="$start_cmd --build-api"
+    fi
+    if ! $start_cmd; then
         elapsed=$(( $(date +%s) - step_start_time ))
         perf_step_end 2 "2.1" "FAILED" "Docker services startup failed"
         log_error "Phase 2: Step 2.1 - Step ${current_step}/${total_steps} FAILED: Docker services startup failed (took $(format_elapsed_time $elapsed))"

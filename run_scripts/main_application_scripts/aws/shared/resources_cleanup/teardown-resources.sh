@@ -418,16 +418,27 @@ empty_s3_buckets() {
                     aws s3 rm "s3://$bucket" --profile "$AWS_PROFILE" --recursive 2>&1 || {
                         log_warning "    Some objects may have failed to delete"
                     }
-                    # Delete versioned objects
-                    aws s3api list-object-versions --bucket "$bucket" --profile "$AWS_PROFILE" --region "$AWS_REGION" --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}, DeleteMarkers: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json 2>/dev/null | \
-                        python3 -c "
+                    # Delete versioned objects (only if any exist)
+                    local versioned_json
+                    versioned_json=$(aws s3api list-object-versions --bucket "$bucket" --profile "$AWS_PROFILE" --region "$AWS_REGION" --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}, DeleteMarkers: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json 2>/dev/null || echo '{"Objects":[],"DeleteMarkers":[]}')
+                    
+                    local delete_payload
+                    delete_payload=$(echo "$versioned_json" | python3 -c "
 import sys, json
-data = json.load(sys.stdin)
-objects = data.get('Objects', []) + data.get('DeleteMarkers', [])
-if objects:
-    print(json.dumps({'Objects': objects, 'Quiet': True}))
-" 2>/dev/null | \
-                        aws s3api delete-objects --bucket "$bucket" --delete file:///dev/stdin --profile "$AWS_PROFILE" --region "$AWS_REGION" 2>&1 || true
+try:
+    data = json.load(sys.stdin)
+    objects = data.get('Objects', []) + data.get('DeleteMarkers', [])
+    if objects:
+        print(json.dumps({'Objects': objects, 'Quiet': True}))
+except Exception:
+    pass
+" 2>/dev/null || echo "")
+                    
+                    if [ -n "$delete_payload" ]; then
+                        echo "$delete_payload" | aws s3api delete-objects --bucket "$bucket" --delete file:///dev/stdin --profile "$AWS_PROFILE" --region "$AWS_REGION" 2>&1 || {
+                            log_warning "    Some versioned objects may have failed to delete"
+                        }
+                    fi
                     log_success "    ✓ Emptied: $bucket"
                 fi
             else

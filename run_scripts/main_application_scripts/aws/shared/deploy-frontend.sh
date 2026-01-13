@@ -89,18 +89,22 @@ deploy_frontend() {
         # Check if any source files are newer than the dist build
         # This ensures we rebuild when source code changes
         # Use cross-platform stat command (macOS: -f, Linux: -c)
-        local dist_file=$(find "$REPO_ROOT/frontend/dist" -type f \( -name "*.html" -o -name "*.js" -o -name "*.css" \) 2>/dev/null | head -1)
+        local dist_file
+        dist_file=$(find "$REPO_ROOT/frontend/dist" -type f \( -name "*.html" -o -name "*.js" -o -name "*.css" \) 2>/dev/null | head -1)
         local dist_mtime="0"
         if [ -n "$dist_file" ]; then
             dist_mtime=$(stat -f "%m" "$dist_file" 2>/dev/null || stat -c "%Y" "$dist_file" 2>/dev/null || echo "0")
         fi
         
         local src_mtime="0"
-        local src_files=$(find "$REPO_ROOT/frontend/src" -type f \( -name "*.tsx" -o -name "*.ts" -o -name "*.jsx" -o -name "*.js" -o -name "*.css" \) 2>/dev/null)
+        local src_files
+        src_files=$(find "$REPO_ROOT/frontend/src" -type f \( -name "*.tsx" -o -name "*.ts" -o -name "*.jsx" -o -name "*.js" -o -name "*.css" \) 2>/dev/null)
         if [ -n "$src_files" ]; then
             # Get the most recent source file modification time
+            local src_file
             for src_file in $src_files; do
-                local file_mtime=$(stat -f "%m" "$src_file" 2>/dev/null || stat -c "%Y" "$src_file" 2>/dev/null || echo "0")
+                local file_mtime
+                file_mtime=$(stat -f "%m" "$src_file" 2>/dev/null || stat -c "%Y" "$src_file" 2>/dev/null || echo "0")
                 if [ "$file_mtime" -gt "$src_mtime" ]; then
                     src_mtime="$file_mtime"
                 fi
@@ -112,6 +116,13 @@ deploy_frontend() {
             needs_build=true
         else
             log_info "Frontend already built and up-to-date"
+        fi
+        
+        # In preempt/force-rebuild mode, always rebuild the frontend even if timestamps look up-to-date.
+        # This ensures a truly clean slate when using --preempt or when FORCE_REBUILD is set by callers.
+        if [ "${PREEMPT:-false}" = "true" ] || [ "${FORCE_REBUILD:-false}" = "true" ]; then
+            log_info "PREEMPT/FORCE_REBUILD mode: Forcing frontend rebuild"
+            needs_build=true
         fi
     fi
     

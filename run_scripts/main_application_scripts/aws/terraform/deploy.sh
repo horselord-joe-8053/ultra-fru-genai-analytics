@@ -42,9 +42,7 @@ deploy_terragrunt() {
     calculate_lock_age() {
         local created_iso="$1"
         # Parse ISO 8601 timestamp (e.g., "2025-12-18T22:46:26.942208Z")
-        # Remove microseconds and Z suffix for parsing
-        local created_clean="${created_iso%.*}"  # Remove .942208
-        created_clean="${created_clean%Z}"       # Remove Z
+        # The timestamp is in UTC (indicated by 'Z' suffix)
         
         if ! command_exists date; then
             echo 0
@@ -54,19 +52,29 @@ deploy_terragrunt() {
         local created_epoch=0
         local now_epoch=$(date +%s 2>/dev/null || echo 0)
         
-        # Try macOS date format first (date -j)
-        if created_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$created_clean" +%s 2>/dev/null); then
+        # Try macOS date format first (date -j with UTC parsing)
+        # macOS date -j -u parses as UTC
+        if created_epoch=$(date -j -u -f "%Y-%m-%dT%H:%M:%S" "${created_iso%.*Z}" +%s 2>/dev/null); then
             echo $((now_epoch - created_epoch))
             return
         fi
         
-        # Try Linux date format (date -d)
+        # Try Linux date format (date -d handles UTC automatically)
         if created_epoch=$(date -d "$created_iso" +%s 2>/dev/null); then
             echo $((now_epoch - created_epoch))
             return
         fi
         
-        # Fallback: return 0 if parsing fails
+        # Fallback: Use Python for reliable UTC parsing (works on both macOS and Linux)
+        if command_exists python3; then
+            created_epoch=$(python3 -c "from datetime import datetime; print(int(datetime.fromisoformat('${created_iso}'.replace('Z', '+00:00')).timestamp()))" 2>/dev/null || echo "0")
+            if [ "$created_epoch" != "0" ] && [ -n "$created_epoch" ]; then
+                echo $((now_epoch - created_epoch))
+                return
+            fi
+        fi
+        
+        # Final fallback: return 0 if parsing fails
         echo 0
     }
 

@@ -116,7 +116,7 @@ print_manual_test_hints() {
         log_info "   - Replace <alb-dns-name> with your ALB DNS from Terraform outputs"
     fi
     log_info "     -H \"Content-Type: application/json\" \\"
-    log_info "     -d '{\"query\": \"Why are Samsung customers unhappy?\"}'${NC}"
+    log_info "     -d '{\"query\": \"What is the overall average customer rating?\"}'${NC}"
     echo ""
     
     log_info "${GREEN}6. Access Frontend:${NC}"
@@ -131,7 +131,7 @@ print_manual_test_hints() {
         log_info "   ${GREEN}terragrunt output cloudfront_domain_name${NC}"
         log_info "   - Or if shown above, open: https://<cloudfront-domain> in your browser"
     fi
-    log_info "   - Try asking questions like: 'Why are Samsung customers unhappy?'"
+    log_info "   - Try asking questions like: 'What is the overall average customer rating?'"
     echo ""
     
     log_info "${GREEN}7. Monitor Resources:${NC}"

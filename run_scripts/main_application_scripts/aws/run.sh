@@ -71,6 +71,8 @@ for arg in "$@"; do
         SKIP_DATA_LAKE=true
     elif [ "$arg" = "--preempt" ]; then
         PREEMPT=true
+        # When preempting, also force refresh data resources to ensure a clean state
+        FORCE_REFRESH_DATA=true
     elif [ "$arg" = "--force-refresh-data" ]; then
         FORCE_REFRESH_DATA=true
     else
@@ -229,7 +231,14 @@ check_or_build_image() {
         --image-ids imageTag="$IMAGE_TAG" \
         --region "$AWS_REGION" 2>&1); then
         log_success "Container image already exists: $CONTAINER_IMAGE"
-        return 0
+        # In PREEMPT mode we still want to rebuild the image to ensure a clean slate.
+        if [ "$PREEMPT" = "true" ]; then
+            log_info "PREEMPT mode: Will force rebuild existing image"
+            export FORCE_REBUILD=true
+            # Fall through to build-and-push logic below instead of returning early.
+        else
+            return 0
+        fi
     else
         local image_check_exit=$?
         if echo "$image_check_output" | grep -q "ImageNotFoundException\|does not exist"; then
@@ -241,9 +250,17 @@ check_or_build_image() {
         fi
     fi
     
-    # Image doesn't exist, build and push it
+    # Image doesn't exist (or PREEMPT requested), build and push it
     log_info "Building and pushing container image..."
     log_info "Image will be tagged as: $CONTAINER_IMAGE"
+    
+    # In PREEMPT mode, ensure FORCE_REBUILD is set so build-push-ecr.sh always rebuilds
+    if [ "$PREEMPT" = "true" ]; then
+        if [ "${FORCE_REBUILD:-false}" != "true" ]; then
+            log_info "PREEMPT mode: Setting FORCE_REBUILD=true for container image build"
+        fi
+        export FORCE_REBUILD=true
+    fi
     
     if "$SCRIPT_DIR/shared/build-push-ecr.sh"; then
         log_success "Container image built and pushed: $CONTAINER_IMAGE"
