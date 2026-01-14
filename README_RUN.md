@@ -183,8 +183,12 @@ The `--preempt` flag performs a complete cleanup before deployment:
    - Remove Secrets Manager secrets
 
 2. **Clean local resources:**
-   - Remove local Docker images related to the project
-   - Clean Docker build cache
+   - Stop Docker services and frontend dev server
+   - Remove Delta tables from local filesystem
+   - Reset database (removes data directory)
+   - Remove stopped containers, unused volumes, images, and build cache
+   - **Verification**: Teardown script verifies deletion success with fail-fast behavior
+   - **Options**: Use `--clean-all` flag for complete cleanup (removes all Docker resources)
 
 3. **Recreate everything:**
    - Run the full deployment workflow from scratch
@@ -304,6 +308,13 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plu
 # 🖥️ 3. Frontend Overview
 
 The FRU frontend displays **3 vertical panels** (left, middle, right) that occupy the full vertical space, providing different views of the analytics system:
+
+**Panel Layout & Configuration:**
+- **Resizable panels**: Panel boundaries can be adjusted by dragging with the mouse
+- **Width configuration**: Panel widths are configured via environment variables in `.env`:
+  - `VITE_FRONTEND_EXEC_LOG_PANEL_WIDTH_PERCENT` - Execution Log panel width as percentage (default: 0.3 = 30%)
+  - `VITE_FRONTEND_BATCH_ANALYTIC_PANEL_WIDTH_PERCENT` - Batch Analytics panel width as percentage (default: 0.2 = 20%)
+- **Reset on reload**: Panels reset to env var values on page reload (user resizing is session-only)
 
 ## Panel 1: Chat Interface (Left)
 

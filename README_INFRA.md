@@ -673,4 +673,14 @@ See `README_RUN.md` for detailed local setup instructions.
   - Truncated error messages (15 words) displayed in Execution Log panel
   - User-friendly error messages in Chat panel
   - Consistent error handling pattern across all backend errors
+- **Configurable panel widths**: Panel widths configured via env vars (`VITE_FRONTEND_EXEC_LOG_PANEL_WIDTH_PERCENT`, `VITE_FRONTEND_BATCH_ANALYTIC_PANEL_WIDTH_PERCENT`)
+- **Resizable panels**: Panel boundaries can be adjusted by dragging with the mouse (session-only, resets to env vars on reload)
+- **Fixed resize direction**: Resize handles now move in the same direction as mouse drag
+
+### Local Development Improvements
+- **Enhanced teardown script**: `teardown-resources.sh` now includes:
+  - Verification of resource deletion (containers, volumes, images, cache)
+  - Fail-fast behavior (exits immediately on verification failure)
+  - Short waits for deletions to complete before verification
+  - Detailed error reporting with resource counts
 

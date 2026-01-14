@@ -72,7 +72,7 @@ It demonstrates:
 - ✔️ **Infrastructure as Code (Terraform + Terragrunt)** - Production-ready IaC with modular architecture, environment management, and security best practices
 - ⭐ **Agent-based query processing** (optional) - Autonomous ReAct agent for complex queries - **See [Section 10](#🤖-10-query-processing-architecture) for detailed architecture**
 - ✔️ **Optimized deployment** - Redundant operations eliminated for faster deployments (~15-30s saved)
-- ✔️ **Enhanced frontend** - Build version tracking and improved error handling with detailed console logging
+- ✔️ **Enhanced frontend** - Build version tracking, improved error handling with detailed console logging, configurable resizable panels, and environment-based width configuration
 
 It is designed as a working prototype that demonstrates production-ready GenAI architecture patterns.
 
@@ -735,6 +735,9 @@ Set `USE_AGENT_QUERY=false` to disable agent and fall back to original `/query` 
 # 📌 11. Next Steps (Roadmap)
 
 - ✅ **React UI** - Already implemented with Chat interface, Batch Analytics Panel, and Query Stats
+  - Configurable panel widths via environment variables (`VITE_FRONTEND_EXEC_LOG_PANEL_WIDTH_PERCENT`, `VITE_FRONTEND_BATCH_ANALYTIC_PANEL_WIDTH_PERCENT`)
+  - Mouse-adjustable panel boundaries (resets to env vars on page reload)
+  - Enhanced error handling with detailed console logging
 - ✅ **Agent-based query processing** - Implemented (Enhancement_C) with ReAct pattern
 - ✅ **Batch analytics integration** - Spark analytics scheduled and displayed in UI
 - **Future enhancements:**
