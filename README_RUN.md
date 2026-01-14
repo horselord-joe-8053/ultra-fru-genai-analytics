@@ -125,7 +125,7 @@ The `--preempt` flag will:
 The `ecs-full` workflow performs a complete ECS deployment:
 
 1. **Phase 0: Pre-flight checks**
-   - Verify AWS credentials
+   - Verify AWS credentials (checked once, reused by child scripts for efficiency)
    - Check prerequisites (Terraform, AWS CLI, Docker)
 
 2. **Phase 1: Build and push Docker image**
@@ -155,7 +155,7 @@ The `ecs-full` workflow performs a complete ECS deployment:
    - Verify Delta table creation
 
 7. **Phase 6: Deploy frontend application**
-   - Build React frontend application
+   - Build React frontend application (includes build version display)
    - Sync frontend to S3 bucket
    - Invalidate CloudFront cache
 
@@ -314,6 +314,7 @@ Interactive conversational interface for querying the fridge sales data.
 - Chat history with user questions and AI responses
 - Real-time query processing
 - Grounded answers based on actual sales data
+- **Build version display**: Shows deployment version (`V_YYMMDD-HHMMSS`) below app title
 
 **Example queries:**
 - "What is the overall average customer rating?"
@@ -329,7 +330,7 @@ Shows **real-time execution details** for the current query, including agent-bas
 - Shows tool calls and iterations (for agent-based queries)
 - Execution time and token usage metrics
 - Real-time streaming updates during query processing
-- Error messages if query processing fails
+- **Enhanced error handling**: Truncated error messages (15 words) displayed in panel, full errors logged to browser console
 - Detailed view of each tool's input and output
 
 **Data Source:** Server-Sent Events (SSE) stream from the Flask API showing step-by-step query execution.
@@ -399,8 +400,15 @@ Batch Analytics Panel (Right Panel - Auto-refresh via VITE_FRONTEND_POLL_FREQUEN
 
 **Key Separation:**
 - **Chat Interface (Left)**: Interactive queries → AI-generated answers
-- **Execution Log Panel (Middle)**: Real-time processing → Query execution details, tool calls, and performance metrics
+- **Execution Log Panel (Middle)**: Real-time processing → Query execution details, tool calls, performance metrics, and **truncated error messages** (full errors logged to browser console)
 - **Batch Analytics Panel (Right)**: Offline processing (Spark + Delta) → Pre-computed aggregated statistics
+
+**Frontend Features:**
+- **Build Version Display**: Shows build timestamp (`V_YYMMDD-HHMMSS`) below app title for tracking deployments
+- **Enhanced Error Handling**: 
+  - Full error details logged to browser console for debugging
+  - Truncated error messages (15 words) displayed in Execution Log panel
+  - User-friendly error messages in Chat panel
 
 ---
 

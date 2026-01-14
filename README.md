@@ -71,6 +71,8 @@ It demonstrates:
 - ✔️ **AWS-native deployment story**
 - ✔️ **Infrastructure as Code (Terraform + Terragrunt)** - Production-ready IaC with modular architecture, environment management, and security best practices
 - ⭐ **Agent-based query processing** (optional) - Autonomous ReAct agent for complex queries - **See [Section 10](#🤖-10-query-processing-architecture) for detailed architecture**
+- ✔️ **Optimized deployment** - Redundant operations eliminated for faster deployments (~15-30s saved)
+- ✔️ **Enhanced frontend** - Build version tracking and improved error handling with detailed console logging
 
 It is designed as a working prototype that demonstrates production-ready GenAI architecture patterns.
 

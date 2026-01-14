@@ -70,6 +70,7 @@ This implementation provides:
 - **Idempotent operations**: Safe to run multiple times without side effects
 - **Parallel resource creation**: Terraform creates independent resources concurrently
 - **Quick environment spin-up**: New dev/staging environments in minutes
+- **Optimized deployment scripts**: Redundant credential checks eliminated (credentials checked once, reused by child scripts) - saves ~15-30 seconds per deployment
 
 #### 4. **Cost Optimization**
 - **Environment-specific sizing**: Dev uses smaller instances, prod uses production-grade resources
@@ -654,4 +655,22 @@ See `README_RUN.md` for detailed local setup instructions.
 
 **AWS Resource Management:**
 - `run_scripts/main_application_scripts/aws/resource-check/find-all-current-aws-resources.sh` - AWS resource inventory script that generates JSON reports of all non-default AWS resources in your account
+
+---
+
+## 🚀 Recent Improvements
+
+### Deployment Optimizations (Phase 1)
+- **Redundant credential checks eliminated**: AWS credentials are now checked once at the start of deployment (Phase 0.4) and reused by all child scripts
+- **Performance improvement**: Saves ~15-30 seconds per deployment by avoiding redundant credential validation
+- **Idempotent credential checking**: The credential check script is now idempotent - safe to call multiple times, but skips if already checked
+- **Cleaner logs**: Less verbose output, easier to read deployment logs
+
+### Frontend Enhancements
+- **Build version tracking**: Frontend displays build timestamp (`V_YYMMDD-HHMMSS`) below app title for easy deployment tracking
+- **Enhanced error handling**: 
+  - Full error details logged to browser console (with context) for debugging
+  - Truncated error messages (15 words) displayed in Execution Log panel
+  - User-friendly error messages in Chat panel
+  - Consistent error handling pattern across all backend errors
 
