@@ -328,9 +328,10 @@ Interactive conversational interface for querying the fridge sales data.
 - **Build version display**: Shows deployment version (`V_YYMMDD-HHMMSS`) below app title
 
 **Example queries:**
-- "What is the overall average customer rating?"
-- "Which store has the most negative feedback?"
-- "How many LG fridges did we sell last month?"
+- "What is the average rating?"
+- "Show me rankings by quantity by brands"
+- "Which brand has the best energy saving?"
+- "What are the 3 areas that customers complained the most about?"
 
 ## Panel 2: Execution Log (Middle)
 
