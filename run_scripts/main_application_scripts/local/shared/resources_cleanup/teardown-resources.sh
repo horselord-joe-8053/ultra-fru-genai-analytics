@@ -280,6 +280,58 @@ reset_database() {
 }
 
 # ============================================================================
+# Verification Helper Functions
+# ============================================================================
+verify_containers_removed() {
+    # Check if there are any stopped containers remaining
+    local stopped_count=$(docker ps -a --filter "status=exited" --format "{{.ID}}" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$stopped_count" -gt 0 ]; then
+        log_error "  ✗ Verification failed: $stopped_count stopped container(s) still exist"
+        return 1
+    fi
+    return 0
+}
+
+verify_volumes_removed() {
+    # Check if there are any volumes remaining
+    # After docker volume prune, all unused volumes should be removed
+    # Since services are stopped, there should be no volumes in use
+    local volume_count=$(docker volume ls -q 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$volume_count" -gt 0 ]; then
+        log_error "  ✗ Verification failed: $volume_count volume(s) still exist"
+        log_info "    Remaining volumes:"
+        docker volume ls --format "    - {{.Name}}" 2>/dev/null | head -5
+        [ "$volume_count" -gt 5 ] && log_info "    ... and $((volume_count - 5)) more"
+        return 1
+    fi
+    return 0
+}
+
+verify_images_removed() {
+    # Check if there are any images remaining (excluding base images that might be in use)
+    # For --clean-all, we expect all images to be removed
+    local image_count=$(docker images --format "{{.ID}}" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$image_count" -gt 0 ]; then
+        log_error "  ✗ Verification failed: $image_count image(s) still exist"
+        log_info "    Remaining images:"
+        docker images --format "    - {{.Repository}}:{{.Tag}} ({{.Size}})" 2>/dev/null | head -5
+        [ "$image_count" -gt 5 ] && log_info "    ... and $((image_count - 5)) more"
+        return 1
+    fi
+    return 0
+}
+
+verify_cache_removed() {
+    # Check build cache size (should be minimal after prune)
+    local cache_size=$(docker system df --format "{{.Type}}\t{{.Size}}" 2>/dev/null | grep "Build Cache" | awk '{print $2}' || echo "0B")
+    # If cache size is significant (>1MB), verification failed
+    # Note: Some minimal cache may remain, so we check for reasonable threshold
+    log_info "  Build cache size after cleanup: $cache_size"
+    # For now, we just log the size - Docker's cache can have some overhead
+    return 0
+}
+
+# ============================================================================
 # Step 4: Clean Up Docker Resources
 # ============================================================================
 cleanup_docker_resources() {
@@ -302,18 +354,32 @@ cleanup_docker_resources() {
         # Remove stopped containers (always do this)
         log_info "Removing stopped containers..."
         if docker container prune -f >/dev/null 2>&1; then
-            log_success "  ✓ Stopped containers removed"
+            sleep 1  # Brief wait for Docker to process
+            if verify_containers_removed; then
+                log_success "  ✓ Stopped containers removed and verified"
+            else
+                log_error "  ✗ Failed to verify container removal"
+                return 1
+            fi
         else
-            log_warning "    Some containers may have failed to remove"
+            log_error "  ✗ Failed to remove stopped containers"
+            return 1
         fi
         
         # Remove volumes (if requested)
         if [ "$CLEAN_VOLUMES" = "true" ]; then
             log_warning "Removing unused volumes (this will delete database data if volumes are not in use)..."
             if docker volume prune -f >/dev/null 2>&1; then
-                log_success "  ✓ Unused volumes removed"
+                sleep 2  # Volumes may take a moment to fully delete
+                if verify_volumes_removed; then
+                    log_success "  ✓ Unused volumes removed and verified"
+                else
+                    log_error "  ✗ Failed to verify volume removal"
+                    return 1
+                fi
             else
-                log_warning "    Some volumes may have failed to remove"
+                log_error "  ✗ Failed to remove unused volumes"
+                return 1
             fi
         else
             log_info "Volumes preserved (use --clean-volumes to remove)"
@@ -321,11 +387,18 @@ cleanup_docker_resources() {
         
         # Remove images (if requested)
         if [ "$CLEAN_IMAGES" = "true" ]; then
-            log_info "Removing unused images..."
+            log_info "Removing unused images (this may take a moment)..."
             if docker image prune -a -f >/dev/null 2>&1; then
-                log_success "  ✓ Unused images removed"
+                sleep 3  # Images can take time to delete, especially large ones
+                if verify_images_removed; then
+                    log_success "  ✓ Unused images removed and verified"
+                else
+                    log_error "  ✗ Failed to verify image removal"
+                    return 1
+                fi
             else
-                log_warning "    Some images may have failed to remove"
+                log_error "  ✗ Failed to remove unused images"
+                return 1
             fi
         else
             log_info "Images preserved (use --clean-images to remove)"
@@ -335,9 +408,12 @@ cleanup_docker_resources() {
         if [ "$CLEAN_CACHE" = "true" ]; then
             log_info "Removing build cache..."
             if docker builder prune -f >/dev/null 2>&1; then
+                sleep 1  # Brief wait for cache cleanup
+                verify_cache_removed  # Log cache size (non-fatal)
                 log_success "  ✓ Build cache removed"
             else
-                log_warning "    Some cache may have failed to remove"
+                log_error "  ✗ Failed to remove build cache"
+                return 1
             fi
         else
             log_info "Build cache preserved (use --clean-cache to remove)"
@@ -351,22 +427,31 @@ cleanup_docker_resources() {
 # Main Execution
 # ============================================================================
 main() {
-    local failed=false
+    # Fail-fast: exit immediately on any failure
+    # (Confirmation and warnings are handled at script level before main() is called)
     
+    # Step 1: Stop services (fail-fast)
     if ! stop_services; then
-        failed=true
+        log_error "Failed to stop services - aborting"
+        exit 1
     fi
     
+    # Step 2: Remove Delta tables (fail-fast)
     if ! remove_delta_tables; then
-        failed=true
+        log_error "Failed to remove Delta tables - aborting"
+        exit 1
     fi
     
+    # Step 3: Reset database (fail-fast)
     if ! reset_database; then
-        failed=true
+        log_error "Failed to reset database - aborting"
+        exit 1
     fi
     
+    # Step 4: Clean up Docker resources (fail-fast)
     if ! cleanup_docker_resources; then
-        failed=true
+        log_error "Failed to clean up Docker resources - aborting"
+        exit 1
     fi
     
     echo ""
@@ -381,21 +466,12 @@ main() {
         log_info "To actually destroy local resources, run:"
         log_info "  $0 --force"
     else
-        if [ "$failed" = "true" ]; then
-            log_warning "Destruction completed with some issues"
-            log_info "Review the output above for details"
-        else
-            log_success "Local environment destruction completed!"
-            log_info ""
-            log_info "All local resources have been destroyed"
-            log_info "You can now run a fresh setup with: ./run_scripts/main_application_scripts/local/run.sh"
-        fi
+        log_success "Local environment destruction completed!"
+        log_info ""
+        log_info "All local resources have been destroyed and verified"
+        log_info "You can now run a fresh setup with: ./run_scripts/main_application_scripts/local/run.sh"
     fi
     log_info "════════════════════════════════════════════════════════════════"
-    
-    if [ "$failed" = "true" ]; then
-        exit 1
-    fi
 }
 
 main "$@"

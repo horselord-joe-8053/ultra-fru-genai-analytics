@@ -31,15 +31,29 @@ const App: React.FC = () => {
   });
   const eventSourceRef = useRef<EventSource | null>(null);
 
+  // Calculate initial panel widths from percentage env vars
+  const getInitialPanelWidths = () => {
+    const viewportWidth = window.innerWidth;
+    
+    const execLogPercent = parseFloat(
+      import.meta.env.VITE_FRONTEND_EXEC_LOG_PANEL_WIDTH_PERCENT || "0.3"
+    );
+    const batchAnalyticPercent = parseFloat(
+      import.meta.env.VITE_FRONTEND_BATCH_ANALYTIC_PANEL_WIDTH_PERCENT || "0.2"
+    );
+    
+    return {
+      executionLog: Math.floor(viewportWidth * execLogPercent),
+      batchAnalytics: Math.floor(viewportWidth * batchAnalyticPercent),
+    };
+  };
+
   // Panel visibility and width state
   const [panelVisibility, setPanelVisibility] = useState(() => {
     const saved = localStorage.getItem("panelVisibility");
     return saved ? JSON.parse(saved) : { executionLog: true, batchAnalytics: true };
   });
-  const [panelWidths, setPanelWidths] = useState(() => {
-    const saved = localStorage.getItem("panelWidths");
-    return saved ? JSON.parse(saved) : { executionLog: 400, batchAnalytics: 380 };
-  });
+  const [panelWidths, setPanelWidths] = useState(() => getInitialPanelWidths());
   const [isResizing, setIsResizing] = useState<string | null>(null);
   const [resizeStartX, setResizeStartX] = useState(0);
   const [resizeStartWidth, setResizeStartWidth] = useState(0);
@@ -49,11 +63,6 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem("panelVisibility", JSON.stringify(panelVisibility));
   }, [panelVisibility]);
-
-  // Save panel widths to localStorage
-  useEffect(() => {
-    localStorage.setItem("panelWidths", JSON.stringify(panelWidths));
-  }, [panelWidths]);
 
   // Cleanup EventSource on unmount
   useEffect(() => {
@@ -92,7 +101,12 @@ const App: React.FC = () => {
       if (!isResizing || !resizeRef.current) return;
 
       const deltaX = e.clientX - resizeRef.current.startX;
-      const newWidth = resizeRef.current.startWidth + deltaX;
+      // The resize handles are positioned BEFORE the panels in the flex layout
+      // When dragging RIGHT (positive deltaX), the boundary should move RIGHT
+      // This means the panel AFTER the handle should get WIDER
+      // Since the handle is BEFORE the panel, dragging right should increase the panel width
+      // However, the user reports it moves opposite, so we invert the sign
+      const newWidth = resizeRef.current.startWidth - deltaX;
       const minWidth = 200;
 
       if (newWidth >= minWidth) {
