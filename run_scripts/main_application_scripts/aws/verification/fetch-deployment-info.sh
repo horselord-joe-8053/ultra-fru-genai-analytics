@@ -4,9 +4,12 @@
 # Usage: source fetch-deployment-info.sh <deployment-type> <environment> [dry-run]
 
 # Get parameters
-DEPLOYMENT_TYPE="${1:-${DEPLOYMENT_TYPE:-ecs-full}}"
+# CONTAINER_TYPE is used (set via environment variable from run.sh)
 ENVIRONMENT="${2:-${ENVIRONMENT:-dev}}"
 DRY_RUN="${3:-${DRY_RUN:-false}}"
+
+# Determine container type from CONTAINER_TYPE (exported by run.sh)
+CONTAINER_TYPE="${CONTAINER_TYPE:-ecs}"  # Default to ecs if not set
 
 # Helper function to check if command exists
 command_exists() {
@@ -66,8 +69,8 @@ fetch_terraform_outputs() {
     
     TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT"
     
-    # Fetch ECS/ALB outputs
-    if [ "$DEPLOYMENT_TYPE" = "ecs-full" ]; then
+    # Fetch ECS/ALB outputs (for ECS container type)
+    if [ "${CONTAINER_TYPE:-ecs}" = "ecs" ]; then
         APP_DIR="$TERRAFORM_DIR/application"
         if [ -d "$APP_DIR" ] && command_exists terragrunt; then
             ORIG_DIR=$(pwd)
@@ -218,7 +221,7 @@ fetch_terraform_outputs() {
     fi
     
     # Fetch EKS outputs
-    if [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
+    if [ "${CONTAINER_TYPE:-ecs}" = "eks" ]; then
         EKS_DIR="$TERRAFORM_DIR/eks"
         if [ -d "$EKS_DIR" ] && command_exists terragrunt; then
             ORIG_DIR=$(pwd)
@@ -263,13 +266,13 @@ fetch_terraform_outputs() {
             if command -v write_cache_value >/dev/null 2>&1; then
                 local aws_region="${AWS_REGION:-us-east-1}"
                 local environment="${ENVIRONMENT:-dev}"
-                local deployment_type="${DEPLOYMENT_TYPE:-ecs-full}"
+                local container_type="${CONTAINER_TYPE:-ecs}"
                 
                 # Write base variables to cache (non-fatal)
-                write_cache_value "ALB_DNS" "$environment" "$deployment_type" "$aws_region" "${ALB_DNS:-}" "" || true
-                write_cache_value "CLOUDFRONT_DOMAIN" "$environment" "$deployment_type" "$aws_region" "${CLOUDFRONT_DOMAIN:-}" "" || true
-                write_cache_value "ECS_CLUSTER_ID" "$environment" "$deployment_type" "$aws_region" "${ECS_CLUSTER_ID:-}" "" || true
-                write_cache_value "ECS_SERVICE_NAME" "$environment" "$deployment_type" "$aws_region" "${ECS_SERVICE_NAME:-}" "" || true
+                write_cache_value "ALB_DNS" "$environment" "$container_type" "$aws_region" "${ALB_DNS:-}" "" || true
+                write_cache_value "CLOUDFRONT_DOMAIN" "$environment" "$container_type" "$aws_region" "${CLOUDFRONT_DOMAIN:-}" "" || true
+                write_cache_value "ECS_CLUSTER_ID" "$environment" "$container_type" "$aws_region" "${ECS_CLUSTER_ID:-}" "" || true
+                write_cache_value "ECS_SERVICE_NAME" "$environment" "$container_type" "$aws_region" "${ECS_SERVICE_NAME:-}" "" || true
             fi
         fi
     fi

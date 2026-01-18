@@ -15,12 +15,15 @@ source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 load_env_file || log_warning "Could not load .env"
 
 # Get parameters
-DEPLOYMENT_TYPE="${1:-ecs-full}"
+# CONTAINER_TYPE is used (set via environment variable from run.sh)
 ENVIRONMENT="${2:-dev}"
 DRY_RUN="${3:-false}"
 
+# Determine container type from CONTAINER_TYPE (exported by run.sh)
+CONTAINER_TYPE="${CONTAINER_TYPE:-ecs}"  # Default to ecs if not set
+
 # Export for child scripts
-export DEPLOYMENT_TYPE ENVIRONMENT DRY_RUN REPO_ROOT
+export CONTAINER_TYPE ENVIRONMENT DRY_RUN REPO_ROOT
 
 echo ""
 log_step "═══════════════════════════════════════════════════════════════════════════════"

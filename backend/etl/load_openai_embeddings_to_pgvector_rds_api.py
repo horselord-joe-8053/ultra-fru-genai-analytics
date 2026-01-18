@@ -151,10 +151,18 @@ def main():
     
     print(f"Processing {total_rows} rows in batches of {batch_size}...")
     
+    # Track errors for fail-fast detection
+    error_messages = {}
+    consecutive_errors = 0
+    max_consecutive_errors = 10  # Fail fast if we see 10 consecutive identical errors
+    
     for i in range(0, len(rows), batch_size):
         batch = rows[i:i+batch_size]
         texts = [r.get("CUSTOMER_FEEDBACK") or "" for r in batch]
         embeddings = embed_texts(openai_client, texts)
+        
+        batch_success = 0
+        batch_errors = 0
         
         for row_data, embedding in zip(batch, embeddings):
             # Convert pandas NaN to None for proper handling
@@ -171,14 +179,43 @@ def main():
             
             if success:
                 success_count += 1
+                batch_success += 1
+                consecutive_errors = 0  # Reset on success
             else:
                 error_count += 1
+                batch_errors += 1
+                consecutive_errors += 1
+                
+                # Track error messages for fail-fast detection
+                error_key = error.split(':')[0] if ':' in error else error[:100]  # Use error type as key
+                error_messages[error_key] = error_messages.get(error_key, 0) + 1
+                
                 print(f"Error inserting row {cleaned_row['ID']}: {error}")
         
-        print(f"Processed batch [{i}..{i+len(batch)-1}]: {success_count} success, {error_count} errors")
+                # Fail fast if we see many consecutive identical errors (likely schema issue)
+                if consecutive_errors >= max_consecutive_errors:
+                    print(f"\n❌ FAIL-FAST: Detected {consecutive_errors} consecutive errors with same pattern")
+                    print(f"   Most common error: {error_key}")
+                    print(f"   This likely indicates a schema problem (e.g., missing 'embedding' column)")
+                    print(f"   Please verify schema initialization completed successfully")
+                    print(f"\n   Progress: {success_count} inserted, {error_count} errors out of {total_rows} rows")
+                    raise RuntimeError(f"Data loading failed due to repeated errors: {error_key}. "
+                                    f"Likely schema issue - verify 'embedding' column exists in 'fru_sales_embeddings' table.")
+        
+        print(f"Processed batch [{i}..{i+len(batch)-1}]: {batch_success} success, {batch_errors} errors")
         time.sleep(0.2)  # Rate limiting
     
     print(f"\nDone. Total: {success_count} inserted, {error_count} errors out of {total_rows} rows.")
+    
+    # Fail if we had any errors (strict mode)
+    if error_count > 0:
+        print(f"\n❌ FAILED: {error_count} errors occurred during data loading")
+        print(f"   Most common errors:")
+        for error_key, count in sorted(error_messages.items(), key=lambda x: x[1], reverse=True)[:3]:
+            print(f"     - {error_key}: {count} occurrences")
+        raise RuntimeError(f"Data loading completed with {error_count} errors. "
+                          f"This indicates a problem (likely schema mismatch). "
+                          f"Please verify the database schema is correct.")
 
 if __name__ == "__main__":
     main()

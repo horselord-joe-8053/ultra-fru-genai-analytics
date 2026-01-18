@@ -259,6 +259,69 @@ load_data_aws() {
         fi
     fi
     
+    # CRITICAL: Validate schema before attempting data load (fail-fast)
+    log_info "Validating database schema before data load..."
+    local table_exists=false
+    local embedding_column_exists=false
+    
+    # Check if table exists
+    if check_result=$(aws rds-data execute-statement \
+        --resource-arn "$db_cluster_arn" \
+        --secret-arn "$db_secret_arn" \
+        --database "$db_name" \
+        --sql "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fru_sales_embeddings');" \
+        --profile "$AWS_PROFILE" \
+        --region "$AWS_REGION" \
+        --output text \
+        --query 'records[0][0].booleanValue' 2>&1); then
+        if [ "$check_result" = "True" ] || [ "$check_result" = "true" ] || [ "$check_result" = "1" ]; then
+            table_exists=true
+            log_success "✓ Table 'fru_sales_embeddings' exists"
+            
+            # Check if embedding column exists
+            if embedding_check=$(aws rds-data execute-statement \
+                --resource-arn "$db_cluster_arn" \
+                --secret-arn "$db_secret_arn" \
+                --database "$db_name" \
+                --sql "SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'fru_sales_embeddings' AND column_name = 'embedding');" \
+                --profile "$AWS_PROFILE" \
+                --region "$AWS_REGION" \
+                --output text \
+                --query 'records[0][0].booleanValue' 2>&1); then
+                if [ "$embedding_check" = "True" ] || [ "$embedding_check" = "true" ] || [ "$embedding_check" = "1" ]; then
+                    embedding_column_exists=true
+                    log_success "✓ Column 'embedding' exists in 'fru_sales_embeddings' table"
+                else
+                    log_error "✗ Column 'embedding' does NOT exist in 'fru_sales_embeddings' table"
+                    log_error "  This will cause all INSERT statements to fail!"
+                    log_error "  Please run schema initialization first: init_schema_aws.sh"
+                    exit 1
+                fi
+            else
+                log_error "✗ Failed to verify 'embedding' column (check query failed)"
+                log_error "  Error: $(echo "$embedding_check" | head -c 200)"
+                log_error "  Cannot proceed with data load - schema validation failed"
+                exit 1
+            fi
+        else
+            log_error "✗ Table 'fru_sales_embeddings' does NOT exist"
+            log_error "  Please run schema initialization first: init_schema_aws.sh"
+            exit 1
+        fi
+    else
+        log_error "✗ Failed to verify table existence (check query failed)"
+        log_error "  Error: $(echo "$check_result" | head -c 200)"
+        log_error "  Cannot proceed with data load - schema validation failed"
+        exit 1
+    fi
+    
+    if [ "$table_exists" = true ] && [ "$embedding_column_exists" = true ]; then
+        log_success "Schema validation passed - ready to load data"
+    else
+        log_error "Schema validation failed - cannot proceed with data load"
+        exit 1
+    fi
+    
     # Set environment variables for RDS Data API ETL script
     export FRU_CSV_PATH="${FRU_CSV_PATH:-$CSV_FILE}"
     export DB_CLUSTER_ARN="$db_cluster_arn"

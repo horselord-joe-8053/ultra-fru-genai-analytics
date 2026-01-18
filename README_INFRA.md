@@ -398,13 +398,13 @@ EKS Deployment:
 **Recommended: Complete workflows**
 ```bash
 # Complete ECS deployment (build image → setup infra → deploy app)
-./run_scripts/aws/run.sh ecs-full dev
+./run_scripts/main_application_scripts/aws/run.sh deploy --container-type ecs dev
 
 # Complete EKS deployment (build image → setup infra → deploy app)
-./run_scripts/aws/run.sh eks-full dev
+./run_scripts/main_application_scripts/aws/run.sh deploy --container-type eks dev
 
 # Infrastructure only (no application)
-./run_scripts/aws/run.sh infrastructure dev
+./run_scripts/main_application_scripts/aws/run.sh infrastructure dev
 ```
 
 **Legacy: Direct Terraform control**

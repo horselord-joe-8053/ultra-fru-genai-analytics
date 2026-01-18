@@ -48,9 +48,12 @@ setup_database() {
     if [ "$FORCE_REFRESH_DATA" = "true" ]; then
         schema_cmd="$schema_cmd --force-refresh-data"
     fi
-    $schema_cmd || {
-        log_warning "Schema initialization had issues (tables may already exist)"
-    }
+    if ! $schema_cmd; then
+        log_error "Schema initialization FAILED"
+        log_error "This is critical - data loading will fail without a correct schema"
+        log_error "Please check the error messages above and fix the schema initialization"
+        exit 1
+    fi
     
     # Step 3: Load data
     log_info "Substep 3/3: Loading data..."
@@ -58,9 +61,11 @@ setup_database() {
     if [ "$FORCE_REFRESH_DATA" = "true" ]; then
         load_cmd="$load_cmd --force-refresh-data"
     fi
-    $load_cmd || {
-        log_warning "Data loading had issues (data may already exist)"
-    }
+    if ! $load_cmd; then
+        log_error "Data loading FAILED"
+        log_error "Please check the error messages above"
+        exit 1
+    fi
     
     log_success "Database setup completed"
 }

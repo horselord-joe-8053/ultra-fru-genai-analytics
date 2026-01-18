@@ -135,13 +135,20 @@ init_schema_aws() {
             --region "$AWS_REGION" >/dev/null 2>&1 || true
         
         log_info "Dropping fru_sales_embeddings table (if exists)..."
-        aws rds-data execute-statement \
+        if ! aws rds-data execute-statement \
             --resource-arn "$DB_CLUSTER_ARN" \
             --secret-arn "$DB_SECRET_ARN" \
             --database "$DB_NAME" \
             --sql "DROP TABLE IF EXISTS fru_sales_embeddings CASCADE;" \
             --profile "$AWS_PROFILE" \
-            --region "$AWS_REGION" >/dev/null 2>&1 || true
+            --region "$AWS_REGION" >/dev/null 2>&1; then
+            log_error "Failed to drop fru_sales_embeddings table"
+            log_error "This may be due to active connections or locks"
+            return 1
+        fi
+        
+        # Wait a moment for the DROP to be committed
+        sleep 2
         
         # Verify tables were dropped
         log_info "Verifying tables were dropped..."
@@ -157,13 +164,18 @@ init_schema_aws() {
             --query 'records[0][0].booleanValue' 2>&1); then
             if [ "$check_result" = "True" ] || [ "$check_result" = "true" ] || [ "$check_result" = "1" ]; then
                 table_exists=true
-                log_warning "⚠️  Table still exists after DROP - this may cause issues with CREATE TABLE IF NOT EXISTS"
+                log_error "✗ Table still exists after DROP - this will cause CREATE TABLE to fail"
+                log_error "  The DROP may have failed due to locks or active connections"
+                log_error "  Please manually drop the table or wait for connections to close"
+                return 1
             else
                 log_success "✓ Verified: fru_sales_embeddings table was dropped"
             fi
+        else
+            log_warning "Could not verify table drop (check failed), proceeding anyway..."
         fi
         
-        log_info "Tables dropped (if they existed). Proceeding with fresh schema initialization..."
+        log_info "Tables dropped. Proceeding with fresh schema initialization..."
     else
         # Check if schema is already initialized by checking for main tables AND structure
         log_info "Checking if database schema is already initialized..."
@@ -238,14 +250,57 @@ init_schema_aws() {
         elif [ "$table_exists" = true ] && [ "$schema_correct" = false ]; then
             log_warning "Database schema exists but is incomplete or incorrect"
             log_warning "Dropping existing tables to ensure clean schema initialization..."
-            # Drop tables before recreating
+            # Drop tables before recreating - drop separately and verify each one
+            log_info "Dropping batch_analytics table..."
             aws rds-data execute-statement \
                 --resource-arn "$DB_CLUSTER_ARN" \
                 --secret-arn "$DB_SECRET_ARN" \
                 --database "$DB_NAME" \
-                --sql "DROP TABLE IF EXISTS batch_analytics CASCADE; DROP TABLE IF EXISTS fru_sales_embeddings CASCADE;" \
+                --sql "DROP TABLE IF EXISTS batch_analytics CASCADE;" \
                 --profile "$AWS_PROFILE" \
-                --region "$AWS_REGION" >/dev/null 2>&1 || true
+                --region "$AWS_REGION" >/dev/null 2>&1 || log_warning "Failed to drop batch_analytics (may not exist)"
+            
+            log_info "Dropping fru_sales_embeddings table..."
+            if ! aws rds-data execute-statement \
+                --resource-arn "$DB_CLUSTER_ARN" \
+                --secret-arn "$DB_SECRET_ARN" \
+                --database "$DB_NAME" \
+                --sql "DROP TABLE IF EXISTS fru_sales_embeddings CASCADE;" \
+                --profile "$AWS_PROFILE" \
+                --region "$AWS_REGION" >/dev/null 2>&1; then
+                log_error "Failed to drop fru_sales_embeddings table"
+                log_error "This may be due to active connections or locks"
+                log_error "Please ensure no active queries are using this table"
+                return 1
+            fi
+            
+            # Wait a moment for the DROP to be committed
+            sleep 2
+            
+            # Verify the table was actually dropped
+            log_info "Verifying table was dropped..."
+            local verify_drop
+            if verify_drop=$(aws rds-data execute-statement \
+                --resource-arn "$DB_CLUSTER_ARN" \
+                --secret-arn "$DB_SECRET_ARN" \
+                --database "$DB_NAME" \
+                --sql "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fru_sales_embeddings');" \
+                --profile "$AWS_PROFILE" \
+                --region "$AWS_REGION" \
+                --output text \
+                --query 'records[0][0].booleanValue' 2>&1); then
+                if [ "$verify_drop" = "True" ] || [ "$verify_drop" = "true" ] || [ "$verify_drop" = "1" ]; then
+                    log_error "✗ Table still exists after DROP - this will cause CREATE TABLE to fail"
+                    log_error "  The DROP may have failed due to locks or active connections"
+                    log_error "  Please manually drop the table or wait for connections to close"
+                    return 1
+                else
+                    log_success "✓ Verified: fru_sales_embeddings table was successfully dropped"
+                fi
+            else
+                log_warning "Could not verify table drop (check failed), proceeding anyway..."
+            fi
+            
             log_info "Tables dropped. Proceeding with fresh schema initialization..."
             # Set flag to use CREATE TABLE (not IF NOT EXISTS) since we just dropped the table
             FORCE_TABLE_RECREATION=true
@@ -254,10 +309,8 @@ init_schema_aws() {
             # Table doesn't exist, so we can use CREATE TABLE (not IF NOT EXISTS) to ensure proper creation
             FORCE_TABLE_RECREATION=true
         fi
-    else
-        # If FORCE_REFRESH_DATA is true, we've already dropped tables, so use CREATE TABLE
-        FORCE_TABLE_RECREATION=true
     fi
+    # Note: If FORCE_REFRESH_DATA is true, tables were already dropped above, so FORCE_TABLE_RECREATION is already set
     
     # Read schema file and split into individual statements
     # RDS Data API requires executing one statement at a time
@@ -380,7 +433,62 @@ init_schema_aws() {
     
     if [ $success_count -gt 0 ]; then
         log_success "Database schema initialization completed: $success_count/$statement_count statements executed successfully."
+        
+        # CRITICAL: Verify schema was created correctly (fail-fast)
+        log_info "Verifying schema was created correctly..."
+        local verification_passed=false
+        
+        # Check if table exists
+        if table_check=$(aws rds-data execute-statement \
+            --resource-arn "$DB_CLUSTER_ARN" \
+            --secret-arn "$DB_SECRET_ARN" \
+            --database "$DB_NAME" \
+            --sql "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fru_sales_embeddings');" \
+            --profile "$AWS_PROFILE" \
+            --region "$AWS_REGION" \
+            --output text \
+            --query 'records[0][0].booleanValue' 2>&1); then
+            if [ "$table_check" = "True" ] || [ "$table_check" = "true" ] || [ "$table_check" = "1" ]; then
+                # Check if embedding column exists
+                if embedding_check=$(aws rds-data execute-statement \
+                    --resource-arn "$DB_CLUSTER_ARN" \
+                    --secret-arn "$DB_SECRET_ARN" \
+                    --database "$DB_NAME" \
+                    --sql "SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'fru_sales_embeddings' AND column_name = 'embedding');" \
+                    --profile "$AWS_PROFILE" \
+                    --region "$AWS_REGION" \
+                    --output text \
+                    --query 'records[0][0].booleanValue' 2>&1); then
+                    if [ "$embedding_check" = "True" ] || [ "$embedding_check" = "true" ] || [ "$embedding_check" = "1" ]; then
+                        verification_passed=true
+                        log_success "✓ Schema verification passed: table and 'embedding' column exist"
+                    else
+                        log_error "✗ Schema verification FAILED: 'embedding' column does NOT exist"
+                        log_error "  This will cause data loading to fail!"
+                        log_error "  The schema initialization may have failed silently."
+                        return 1
+                    fi
+                else
+                    log_error "✗ Schema verification FAILED: Could not check 'embedding' column"
+                    log_error "  Error: $(echo "$embedding_check" | head -c 200)"
+                    return 1
+                fi
+            else
+                log_error "✗ Schema verification FAILED: 'fru_sales_embeddings' table does NOT exist"
+                log_error "  The schema initialization may have failed silently."
+                return 1
+            fi
+        else
+            log_error "✗ Schema verification FAILED: Could not check table existence"
+            log_error "  Error: $(echo "$table_check" | head -c 200)"
+            return 1
+        fi
+        
+        if [ "$verification_passed" = true ]; then
         return 0
+        else
+            return 1
+        fi
     else
         log_error "Failed to execute any statements. Schema may already be initialized."
         return 1

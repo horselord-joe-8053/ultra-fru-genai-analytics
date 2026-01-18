@@ -161,16 +161,19 @@ check_api_health_basic() {
 
 # Main function to check service status
 check_service_status() {
-    local deployment_type="${1:-${DEPLOYMENT_TYPE:-ecs-full}}"
+    local container_type="${1:-${CONTAINER_TYPE:-ecs}}"  # Accept container type directly
     local environment="${2:-${ENVIRONMENT:-dev}}"
     
+    # Default to ecs if not specified
+    container_type="${container_type:-ecs}"
+    
     # Check ECS service status
-    if [ "$deployment_type" = "ecs-full" ] || [ "$deployment_type" = "ecs" ]; then
+    if [ "$container_type" = "ecs" ]; then
         check_ecs_service_status "$environment"
     fi
     
     # Check EKS pod status
-    if [ "$deployment_type" = "eks-full" ] || [ "$deployment_type" = "eks" ]; then
+    if [ "$container_type" = "eks" ]; then
         check_eks_pod_status
     fi
     

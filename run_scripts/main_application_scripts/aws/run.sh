@@ -3,11 +3,11 @@
 # Orchestrates end-to-end deployment workflows for ECS, EKS, and Terraform
 # Usage: ./run.sh [workflow] [environment] [options...]
 #
-# Default: ecs-full dev (complete ECS deployment to dev environment)
+# Default: deploy --container-type ecs dev (complete ECS deployment to dev environment)
 #
 # Workflows:
-#   ecs-full        → Complete ECS deployment (build image → setup infra → deploy app + verification)
-#   eks-full        → Complete EKS deployment (build image → setup infra → deploy app + verification)
+#   deploy --container-type ecs  → Complete ECS deployment (build image → setup infra → deploy app + verification)
+#   deploy --container-type eks  → Complete EKS deployment (build image → setup infra → deploy app + verification)
 #   infrastructure  → Infrastructure only (via terraform/deploy.sh infrastructure: VPC, networking, DB, S3, ECS/EKS infra; no app rollout)
 #
 # Environment:
@@ -46,7 +46,7 @@ log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (aws/run.sh)"
 # ============================================================================
 # DEFAULT VALUES (can be overridden via arguments or environment variables)
 # ============================================================================
-DEFAULT_DEPLOYMENT_TYPE="ecs-full"
+DEFAULT_CONTAINER_TYPE="ecs"  # Default container type for AWS (ecs or eks)
 DEFAULT_ENVIRONMENT="dev"
 DEFAULT_AWS_REGION="us-east-1"
 DEFAULT_ECR_REPO_NAME="fru-api"
@@ -60,40 +60,81 @@ DRY_RUN=false
 SKIP_DATA_LAKE=false
 PREEMPT=false
 FORCE_REFRESH_DATA=false
+CONTAINER_TYPE=""
+DEPLOY_COMMAND=""
 REMAINING_ARGS=()
 
-# First, extract flags if present
+# First, extract flags and --container-type parameter
+# Use shift-based parsing for bash 3.2 compatibility (macOS default)
 ARGS_TO_PARSE=()
-for arg in "$@"; do
-    if [ "$arg" = "--dry-run" ]; then
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dry-run)
         DRY_RUN=true
-    elif [ "$arg" = "--skip-data-lake" ]; then
+            shift
+            ;;
+        --skip-data-lake)
         SKIP_DATA_LAKE=true
-    elif [ "$arg" = "--preempt" ]; then
+            shift
+            ;;
+        --preempt)
         PREEMPT=true
-        # When preempting, also force refresh data resources to ensure a clean state
         FORCE_REFRESH_DATA=true
-    elif [ "$arg" = "--force-refresh-data" ]; then
+            shift
+            ;;
+        --force-refresh-data)
         FORCE_REFRESH_DATA=true
-    else
-        ARGS_TO_PARSE+=("$arg")
-    fi
+            shift
+            ;;
+        --container-type)
+            # Extract container type value
+            if [ $# -ge 2 ]; then
+                CONTAINER_TYPE="$2"
+                # Validate container type for AWS provider
+                if [[ "$CONTAINER_TYPE" != "ecs" && "$CONTAINER_TYPE" != "eks" ]]; then
+                    log_error "Invalid container type for AWS: $CONTAINER_TYPE (must be ecs or eks)"
+                    exit 1
+                fi
+                shift 2  # Skip both --container-type and its value
+            else
+                log_error "--container-type requires a value (ecs or eks)"
+                exit 1
+            fi
+            ;;
+        deploy)
+            DEPLOY_COMMAND="deploy"
+            shift
+            ;;
+        infrastructure)
+            DEPLOY_COMMAND="infrastructure"
+            shift
+            ;;
+        help|-h|--help)
+            DEPLOY_COMMAND="help"
+            shift
+            ;;
+        *)
+            ARGS_TO_PARSE+=("$1")
+            shift
+            ;;
+    esac
 done
 
-# Parse remaining arguments (matching original logic)
+# Parse remaining arguments for environment
 if [ ${#ARGS_TO_PARSE[@]} -eq 0 ]; then
-    DEPLOYMENT_TYPE="$DEFAULT_DEPLOYMENT_TYPE"
     ENVIRONMENT="$DEFAULT_ENVIRONMENT"
-elif [[ "${ARGS_TO_PARSE[0]}" =~ ^(ecs-full|eks-full|infrastructure|help|-h|--help)$ ]]; then
-    DEPLOYMENT_TYPE="${ARGS_TO_PARSE[0]}"
-    ENVIRONMENT="${ARGS_TO_PARSE[1]:-$DEFAULT_ENVIRONMENT}"
-    REMAINING_ARGS=("${ARGS_TO_PARSE[@]:2}")
 else
-    # First arg might be environment (legacy support)
-    DEPLOYMENT_TYPE="$DEFAULT_DEPLOYMENT_TYPE"
     ENVIRONMENT="${ARGS_TO_PARSE[0]:-$DEFAULT_ENVIRONMENT}"
     REMAINING_ARGS=("${ARGS_TO_PARSE[@]:1}")
 fi
+
+# Set default container type if deploy command is used without --container-type
+if [ "$DEPLOY_COMMAND" = "deploy" ] && [ -z "$CONTAINER_TYPE" ]; then
+    CONTAINER_TYPE="$DEFAULT_CONTAINER_TYPE"  # Default to ecs for AWS
+fi
+
+# Export container type for child scripts
+export CONTAINER_TYPE
 
 # Export flags for sub-scripts
 export DRY_RUN SKIP_DATA_LAKE PREEMPT FORCE_REFRESH_DATA
@@ -104,56 +145,56 @@ show_usage() {
 ${GREEN}AWS Deployment Orchestrator${NC}
 
 ${BLUE}Usage:${NC}
-  $0 [workflow] [environment] [options...]
+  $0 deploy --container-type <type> [environment] [options...]
+  $0 infrastructure [environment] [options...]
 
 ${BLUE}Workflows:${NC}
-  ${GREEN}ecs-full${NC}        Complete ECS deployment
+  ${GREEN}deploy${NC}          Deploy application (requires --container-type)
                               → Build container image
                               → Setup Terraform state bucket
                               → Deploy infrastructure (VPC, Aurora, IAM, Secrets)
-                              → Deploy application (ECS, ALB, Frontend)
+                              → Deploy application (container-specific)
 
-         ${GREEN}eks-full${NC}        Complete EKS deployment
-                                   → Build container image
+  ${GREEN}infrastructure${NC}  Infrastructure only
                                    → Setup Terraform state bucket
                                    → Deploy infrastructure (VPC, Aurora, IAM, Secrets)
+                              → No application deployment
+
+${BLUE}Container Types (for --container-type):${NC}
+  ecs     ECS deployment (default for AWS)
+          → Deploy application (ECS, ALB, CloudFront)
+  eks     EKS deployment
                                    → Deploy EKS layer (EKS cluster, node groups, OIDC)
                                    → Configure kubectl
                                    → Deploy Kubernetes manifests
-
-  ${GREEN}infrastructure${NC}  Infrastructure only
-                              → Setup Terraform state bucket
-                              → Deploy infrastructure (VPC, Aurora, IAM, Secrets)
-                              → No application deployment
 
 ${BLUE}Environments:${NC}
   dev     Development environment (default: $DEFAULT_ENVIRONMENT)
   prod    Production environment
 
   ${BLUE}Options:${NC}
+  ${GREEN}--container-type <ecs|eks>${NC}  Container orchestration type (required for deploy)
   ${GREEN}--dry-run${NC}          Preview changes without modifying AWS resources
   ${GREEN}--preempt${NC}          Destroy existing infrastructure before deployment (clean slate)
   ${GREEN}--skip-data-lake${NC}   Skip data-lake setup even if analytics scheduler is enabled
   ${GREEN}--force-refresh-data${NC} Force refresh of data resources (database schema, data, Delta tables) without destroying infrastructure
 
 ${BLUE}Examples:${NC}
-  ${GREEN}Basic Deployments:${NC}
-  $0                                    # Default: $DEFAULT_DEPLOYMENT_TYPE to dev
-  $0 ecs-full dev                      # Complete ECS deployment to dev
-  $0 ecs-full                          # Same as above (dev is default)
-  $0 eks-full prod                     # Complete EKS deployment to prod
-  $0 infrastructure dev                # Infrastructure only to dev
+  $0 deploy --container-type ecs dev          # Complete ECS deployment to dev
+  $0 deploy --container-type ecs              # Same as above (dev is default)
+  $0 deploy --container-type eks prod         # Complete EKS deployment to prod
+  $0 infrastructure dev                        # Infrastructure only to dev
 
   ${GREEN}Data-Lake Scenarios:${NC}
   # With analytics enabled in .env (ENABLE_ANALYTICS_SCHEDULER=true)
-  $0 ecs-full dev                      # Delta-lake set up automatically in Phase 5: Step 5.1
+  $0 deploy --container-type ecs dev   # Delta-lake set up automatically in Phase 5: Step 5.1
 
   # With analytics disabled in .env (ENABLE_ANALYTICS_SCHEDULER=false)
-  $0 ecs-full dev                      # Delta-lake setup skipped
-  $0 ecs-full dev --skip-data-lake     # Force skip (even if analytics enabled)
+  $0 deploy --container-type ecs dev   # Delta-lake setup skipped
+  $0 deploy --container-type ecs dev --skip-data-lake  # Force skip (even if analytics enabled)
 
   ${GREEN}Other Options:${NC}
-  $0 ecs-full dev --dry-run            # Preview changes without deploying
+  $0 deploy --container-type ecs dev --dry-run  # Preview changes without deploying
 
 ${BLUE}Data-Lake Setup:${NC}
   The data-lake (S3 + Delta table) is automatically set up when:
@@ -290,9 +331,37 @@ format_elapsed_time() {
     fi
 }
 
+# Container type deployment workflow (wrapper for deploy_ecs_full and deploy_eks_full)
+# Routes to the appropriate deployment function based on CONTAINER_TYPE
+deploy_with_container_type() {
+    # Ensure CONTAINER_TYPE is set
+    CONTAINER_TYPE="${CONTAINER_TYPE:-ecs}"
+    
+    # Validate container type for AWS
+    if [[ "$CONTAINER_TYPE" != "ecs" && "$CONTAINER_TYPE" != "eks" ]]; then
+        log_error "Invalid container type for AWS: $CONTAINER_TYPE (must be ecs or eks)"
+        exit 1
+    fi
+    
+    # Call container-specific deployment function
+    case "$CONTAINER_TYPE" in
+        ecs)
+            deploy_ecs_full
+            ;;
+        eks)
+            deploy_eks_full
+            ;;
+        *)
+            log_error "Unknown container type: $CONTAINER_TYPE"
+            exit 1
+            ;;
+    esac
+}
+
 # Complete ECS deployment workflow
 # Handles Phase 1-7: Environment Preparation → Infrastructure Setup → Database Setup → Application Infrastructure → Data Lake → Frontend Deployment → Verification
 # (Phase 0 is handled in main() above)
+# NOTE: This function is called by deploy_with_container_type() when CONTAINER_TYPE=ecs
 deploy_ecs_full() {
     local deploy_start_time=$(date +%s)
     log_step "Starting complete ECS deployment workflow"
@@ -300,7 +369,7 @@ deploy_ecs_full() {
     
     # Get step information from main() (accounts for Phase 0 steps and preempt if enabled)
     local step_num="${CURRENT_STEP:-5}"  # Default to 5 (after Phase 0.1-0.4, or 0.5 if preempt)
-    local total_steps="${TOTAL_STEPS:-13}"  # Default for ecs-full
+    local total_steps="${TOTAL_STEPS:-13}"  # Default for ecs
     
     # ============================================================================
     # Phase 1: Environment Preparation - Step 1.3: Prepare container image
@@ -519,7 +588,7 @@ deploy_eks_full() {
     
     # Get step information from main() (accounts for Phase 0 steps and preempt if enabled)
     local step_num="${CURRENT_STEP:-5}"  # Default to 5 (after Phase 0.1-0.4, or 0.5 if preempt)
-    local total_steps="${TOTAL_STEPS:-11}"  # Default for eks-full
+    local total_steps="${TOTAL_STEPS:-11}"  # Default for eks
     
     # ============================================================================
     # Phase 1: Environment Preparation - Step 1.3: Prepare container image
@@ -772,13 +841,15 @@ deploy_infrastructure() {
     
     local total_elapsed=$(( $(date +%s) - deploy_start_time ))
     log_success "Infrastructure deployment finished successfully!"
-    log_info "Infrastructure is ready. Deploy application with: $0 ecs-full or $0 eks-full"
+    log_info "Infrastructure is ready. Deploy application with:"
+    log_info "  $0 deploy --container-type ecs dev"
+    log_info "  $0 deploy --container-type eks dev"
     log_info "Total deployment time: $(format_elapsed_time $total_elapsed)"
 }
 
 main() {
     # Handle help first (doesn't require AWS credentials)
-    if [ "$DEPLOYMENT_TYPE" = "help" ] || [ "$DEPLOYMENT_TYPE" = "-h" ] || [ "$DEPLOYMENT_TYPE" = "--help" ]; then
+    if [ "$DEPLOY_COMMAND" = "help" ]; then
         show_usage
         exit 0
     fi
@@ -804,19 +875,22 @@ main() {
     # Initialize performance tracking
     perf_init
     
-    # Calculate total steps based on deployment type
+    # Calculate total steps based on deployment command and container type
     # Base steps: 4 (Phase 0.1-0.4) + deployment steps + 1 (Phase 7)
-    local total_steps=13  # Default for ecs-full: 4 (Phase 0) + 8 (deploy) + 1 (Phase 7)
+    local container_type_for_steps="${CONTAINER_TYPE:-ecs}"  # Default to ecs
+    local total_steps=13  # Default for ecs: 4 (Phase 0) + 8 (deploy) + 1 (Phase 7)
     local current_step=1  # Start at step 1
     
-    if [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
+    if [ "$DEPLOY_COMMAND" = "deploy" ]; then
+        if [ "$container_type_for_steps" = "eks" ]; then
         total_steps=11  # 4 (Phase 0) + 6 (deploy) + 1 (Phase 7)
-    elif [ "$DEPLOYMENT_TYPE" = "infrastructure" ]; then
+        fi
+    elif [ "$DEPLOY_COMMAND" = "infrastructure" ]; then
         total_steps=6  # 4 (Phase 0) + 2 (infrastructure only)
     fi
     
     # If preempt is enabled for full workflows, add 1 to total steps
-    if [ "$PREEMPT" = "true" ] && ([ "$DEPLOYMENT_TYPE" = "ecs-full" ] || [ "$DEPLOYMENT_TYPE" = "eks-full" ]); then
+    if [ "$PREEMPT" = "true" ] && [ "$DEPLOY_COMMAND" = "deploy" ] && [ -n "$CONTAINER_TYPE" ]; then
         total_steps=$((total_steps + 1))  # Add preempt step to total
     fi
     
@@ -900,7 +974,8 @@ main() {
     # ============================================================================
     # If preempt is enabled, execute preempt teardown
     if [ "$PREEMPT" = "true" ]; then
-        if [ "$DEPLOYMENT_TYPE" = "ecs-full" ] || [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
+        # PREEMPT only applies to full deployments (deploy command)
+        if [ "$DEPLOY_COMMAND" = "deploy" ] && [ -n "$CONTAINER_TYPE" ]; then
             # Note: total_steps already includes preempt step from calculation above
             perf_step_start 0 "0.5" "Destroying existing infrastructure (PREEMPT)"
             step_start_time=$(date +%s)
@@ -964,8 +1039,8 @@ main() {
                 exit 1
             fi
         else
-            log_warning "PREEMPT mode is only supported for full workflows (ecs-full, eks-full)"
-            log_info "Skipping preempt destruction for deployment type: $DEPLOYMENT_TYPE"
+            log_warning "PREEMPT mode is only supported for 'deploy' command"
+            log_info "Skipping preempt destruction for command: ${DEPLOY_COMMAND:-<not set>}"
             echo ""
         fi
     fi
@@ -980,49 +1055,54 @@ main() {
     # (Phase 1 - 6 are handled in the respective deployment functions)
     # ============================================================================
     
-    # Handle deployment types
-    case "$DEPLOYMENT_TYPE" in
-        ecs-full)
-            deploy_ecs_full
+    # Handle deployment commands
+    if [ "$DEPLOY_COMMAND" = "deploy" ]; then
+        if [ -z "$CONTAINER_TYPE" ]; then
+            log_error "Missing required --container-type parameter for deploy command"
             echo ""
-            ;;
-        eks-full)
-            deploy_eks_full
+            show_usage
+            exit 1
+        fi
+        deploy_with_container_type
             echo ""
-            ;;
-        infrastructure)
+    elif [ "$DEPLOY_COMMAND" = "infrastructure" ]; then
             deploy_infrastructure
             echo ""
-                ;;
-            *)
-            log_error "Unknown deployment type: $DEPLOYMENT_TYPE"
+    elif [ "$DEPLOY_COMMAND" = "help" ] || [ ${#ARGS_TO_PARSE[@]} -eq 0 ]; then
+        # Show help if no arguments or help requested
+        show_usage
+        exit 0
+    else
+        log_error "Unknown command: ${DEPLOY_COMMAND:-<not set>}"
+        log_error "Container type: ${CONTAINER_TYPE:-<not set>}"
             echo ""
             show_usage
                 exit 1
-                ;;
-        esac
+    fi
     
     # ============================================================================
     # Phase 7: Validation and Verification
     # ============================================================================
     # Step 7.1: Post-deployment verification (full workflows only)
-    # Note: Phase 7 only runs for full deployment workflows (ecs-full, eks-full)
-    # Infrastructure-only and legacy workflows skip this phase
-    if [ "$DEPLOYMENT_TYPE" = "ecs-full" ] || [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
+    # Note: Phase 7 only runs for full deployment workflows (deploy with container type)
+    # Infrastructure-only workflows skip this phase
+    if [ "$DEPLOY_COMMAND" = "deploy" ] && [ -n "$CONTAINER_TYPE" ]; then
         # Use step number from deployment function (accounts for Phase 0 and preempt)
+        local container_type_for_steps="${CONTAINER_TYPE:-ecs}"  # Default to ecs
         local step_num="${CURRENT_STEP:-13}"  # Default: after Phase 0 (4) + deploy (8) + 1 = 13
-        local total_steps="${TOTAL_STEPS:-13}"  # Default for ecs-full
-        if [ "$DEPLOYMENT_TYPE" = "eks-full" ]; then
-            # Defaults for eks-full if not set
+        local total_steps="${TOTAL_STEPS:-13}"  # Default for ecs
+        if [ "$container_type_for_steps" = "eks" ]; then
+            # Defaults for eks if not set
             step_num="${CURRENT_STEP:-11}"  # Default: after Phase 0 (4) + deploy (6) + 1 = 11
-            total_steps="${TOTAL_STEPS:-11}"  # Default for eks-full
+            total_steps="${TOTAL_STEPS:-11}"  # Default for eks
         fi
         perf_phase_start 7 "Validation and Verification"
         perf_step_start 7 "7.1" "Verifying deployment and generating test instructions"
         step_start_time=$(date +%s)
         log_step "Phase 7: Step 7.1 - Step ${step_num}/${total_steps}: Verifying deployment and generating test instructions"
         echo ""
-        if "$SCRIPT_DIR/verification/auto_verify_and_manual_hint.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "$DRY_RUN"; then
+        # Pass empty string - verification script uses CONTAINER_TYPE env var
+        if "$SCRIPT_DIR/verification/auto_verify_and_manual_hint.sh" "" "$ENVIRONMENT" "$DRY_RUN"; then
             elapsed=$(( $(date +%s) - step_start_time ))
             perf_step_end 7 "7.1" "SUCCESS" "Verification completed"
             log_success "Phase 7: Step 7.1 - Step ${step_num}/${total_steps} PASSED: Verification completed (took $(format_elapsed_time $elapsed))"

@@ -554,14 +554,15 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     
     # If URLs are not set, try to fetch them from Terraform
     if [ -z "${API_URL:-}" ] && [ -z "${ALB_DNS:-}" ] && [ -z "${FRONTEND_URL:-}" ] && [ -z "${CLOUDFRONT_DOMAIN:-}" ]; then
-        DEPLOYMENT_TYPE="${DEPLOYMENT_TYPE:-ecs-full}"
+        # Use CONTAINER_TYPE (set via environment variable from run.sh)
+        CONTAINER_TYPE="${CONTAINER_TYPE:-ecs}"  # Default to ecs if not set
         ENVIRONMENT="${ENVIRONMENT:-dev}"
         
         log_info "No URLs provided. Fetching from Terraform outputs..."
         # fetch-deployment-info.sh is in the same directory as this script
         FETCH_SCRIPT="$SCRIPT_DIR/fetch-deployment-info.sh"
         if [ -f "$FETCH_SCRIPT" ]; then
-            source "$FETCH_SCRIPT" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "${DRY_RUN:-false}"
+            source "$FETCH_SCRIPT" "" "$ENVIRONMENT" "${DRY_RUN:-false}"  # Pass empty string, CONTAINER_TYPE is set via env var
         else
             log_warning "fetch-deployment-info.sh not found at $FETCH_SCRIPT"
             log_warning "Cannot automatically discover API_URL and FRONTEND_URL from Terraform outputs."

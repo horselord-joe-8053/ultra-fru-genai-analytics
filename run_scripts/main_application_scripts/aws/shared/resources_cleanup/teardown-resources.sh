@@ -45,7 +45,7 @@
 #      - Prevents subnet deletion timeouts from lingering ENIs
 #
 #   2.5.2. Wait for Aurora Cluster
-#      - Waits for Aurora cluster and instances to fully delete (up to 25 minutes)
+#      - Waits for Aurora cluster and instances to fully delete (up to 15 minutes)
 #      - Aurora deletion can take 10-20+ minutes (normal AWS behavior)
 #      - Prevents Terraform timeout on subnet deletion (subnets blocked by DB subnet group)
 #
@@ -596,7 +596,7 @@ wait_for_vpc_endpoints_deletion() {
 # - Aurora instances take 10-20+ minutes to delete (normal AWS behavior)
 # - DB subnet groups block private subnet deletion until Aurora is fully deleted
 # - Terraform destroy will timeout on subnet deletion if Aurora is still deleting
-# - This step waits up to 25 minutes for Aurora cluster and instances to fully delete
+# - This step waits up to 15 minutes for Aurora cluster and instances to fully delete
 wait_for_aurora_deletion() {
     log_step "Substep 2.5.2: Checking Aurora Cluster Status"
     
@@ -624,9 +624,9 @@ wait_for_aurora_deletion() {
     log_info "This prevents Terraform destroy from timing out on subnet deletion"
     echo ""
     
-    local max_wait_minutes=25  # Wait up to 25 minutes (150 attempts * 10 seconds)
+    local max_wait_minutes=15  # Wait up to 15 minutes (90 attempts * 10 seconds)
     local wait_attempt=0
-    local wait_attempts=$((max_wait_minutes * 6))  # 25 minutes = 150 * 10 seconds
+    local wait_attempts=$((max_wait_minutes * 6))  # 15 minutes = 90 * 10 seconds
     
     while [ $wait_attempt -lt $wait_attempts ]; do
         # Check cluster status

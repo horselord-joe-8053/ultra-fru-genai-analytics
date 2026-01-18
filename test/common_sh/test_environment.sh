@@ -4,11 +4,16 @@
 # Setup AWS test environment
 # Sets: API_BASE_URL
 # Also performs service status check (fail-fast if not ready)
+# Supports both ECS and EKS deployments via CONTAINER_TYPE (new) or DEPLOYMENT_TYPE (backward compatibility)
 setup_aws_environment() {
-    # Set required variables that fetch-deployment-info.sh expects
-    DEPLOYMENT_TYPE="${DEPLOYMENT_TYPE:-ecs-full}"
+    # Determine container type from CONTAINER_TYPE
+    local container_type="${CONTAINER_TYPE:-ecs}"  # Default to ecs if not specified
+    
     ENVIRONMENT="${ENVIRONMENT:-dev}"
     DRY_RUN="${DRY_RUN:-false}"
+    
+    # Export CONTAINER_TYPE for child scripts
+    export CONTAINER_TYPE="$container_type"
     
     # Source the same utilities as auto_verify_and_manual_hint.sh does
     # shellcheck source=/dev/null
@@ -54,10 +59,11 @@ setup_aws_environment() {
         }
         
         # Get test_env from environment (set by run_test_suite.sh)
-        local test_env="${TEST_ENV:-aws}"  # Default to 'aws' for backward compatibility
+        local test_env="${TEST_ENV:-aws}"  # Default to 'aws'
         
-        # Try to load cached values
-        if load_cached_values "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env"; then
+        # Try to load cached values (cache key uses container type for consistency)
+        local cache_key="${container_type}-full"  # Use format for cache compatibility
+        if load_cached_values "$ENVIRONMENT" "$cache_key" "$aws_region" "$test_env"; then
             # Compute derived variables from cached base variables
             if [ -n "${ALB_DNS:-}" ]; then
                 API_URL="http://$ALB_DNS"
@@ -93,9 +99,13 @@ setup_aws_environment() {
         log_info "Before sourcing fetch-deployment-info.sh:"
         log_info "  TF_STATE_BUCKET=[${TF_STATE_BUCKET:-NOT SET}]"
         log_info "  AWS_PROFILE=[${AWS_PROFILE:-NOT SET}]"
+        log_info "  CONTAINER_TYPE=[${CONTAINER_TYPE:-NOT SET}]"
+        
+        # Export CONTAINER_TYPE for fetch-deployment-info.sh
+        export CONTAINER_TYPE="$container_type"
         
         # shellcheck source=/dev/null
-        source "$REPO_ROOT/run_scripts/aws/verification/fetch-deployment-info.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "$DRY_RUN" 2>/dev/null || {
+        source "$REPO_ROOT/run_scripts/main_application_scripts/aws/verification/fetch-deployment-info.sh" "" "$ENVIRONMENT" "$DRY_RUN" 2>/dev/null || {
             log_error "Failed to source fetch-deployment-info.sh"
             exit 1
         }
@@ -108,10 +118,38 @@ setup_aws_environment() {
         # fetch-deployment-info.sh already calls fetch_terraform_outputs() when sourced (line 243)
         # No need to call it again explicitly - it's redundant
         # Verify API_URL was set after sourcing
+        # For EKS, also check K8S_INGRESS_HOST or K8S_SERVICE_IP if API_URL is not set  
+        if [[ -z "${API_URL:-}" ]]; then
+            if [ "$container_type" = "eks" ] && [ -n "${K8S_INGRESS_HOST:-}" ]; then
+                API_URL="https://$K8S_INGRESS_HOST"
+                log_info "Using EKS ingress host for API URL: $API_URL"
+            elif [ "$container_type" = "eks" ] && [ -n "${K8S_SERVICE_IP:-}" ]; then
+                API_URL="http://$K8S_SERVICE_IP"
+                log_info "Using EKS service IP for API URL: $API_URL"
+            elif [ "$container_type" = "eks" ]; then
+                # Try to get from kubectl if available
+                if command -v kubectl >/dev/null 2>&1 && kubectl config current-context >/dev/null 2>&1; then
+                    log_info "Attempting to fetch API URL from Kubernetes ingress/service..."
+                    local k8s_ingress=$(kubectl get ingress fru-api-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+                    if [ -n "$k8s_ingress" ]; then
+                        API_URL="https://$k8s_ingress"
+                        log_info "Found EKS ingress host: $API_URL"
+                    else
+                        local k8s_service=$(kubectl get svc fru-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+                        if [ -n "$k8s_service" ]; then
+                            API_URL="http://$k8s_service"
+                            log_info "Found EKS service host: $API_URL"
+                        fi
+                    fi
+                fi
+            fi
+            
         if [[ -z "${API_URL:-}" ]]; then
             log_error "Could not determine API URL from Terraform outputs for aws test env."
             log_error "fetch-deployment-info.sh did not populate API_URL properly"
+                log_error "Container type: $container_type"
             exit 1
+            fi
         fi
         API_BASE_URL="$API_URL"
         
@@ -124,13 +162,16 @@ setup_aws_environment() {
         
         # Write cached values (non-fatal - log warning if fails)
         # Get test_env from environment (set by run_test_suite.sh)
-        local test_env="${TEST_ENV:-aws}"  # Default to 'aws' for backward compatibility
+        local test_env="${TEST_ENV:-aws}"  # Default to 'aws'
+        
+        # Use cache key format for compatibility
+        local cache_key="${container_type}-full"  # Use format for cache compatibility
         
         if command -v write_cache_value >/dev/null 2>&1; then
-            write_cache_value "ALB_DNS" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${ALB_DNS:-}" "" || true
-            write_cache_value "CLOUDFRONT_DOMAIN" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${CLOUDFRONT_DOMAIN:-}" "" || true
-            write_cache_value "ECS_CLUSTER_ID" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${ECS_CLUSTER_ID:-}" "" || true
-            write_cache_value "ECS_SERVICE_NAME" "$ENVIRONMENT" "$DEPLOYMENT_TYPE" "$aws_region" "$test_env" "${ECS_SERVICE_NAME:-}" "" || true
+            write_cache_value "ALB_DNS" "$ENVIRONMENT" "$cache_key" "$aws_region" "$test_env" "${ALB_DNS:-}" "" || true
+            write_cache_value "CLOUDFRONT_DOMAIN" "$ENVIRONMENT" "$cache_key" "$aws_region" "$test_env" "${CLOUDFRONT_DOMAIN:-}" "" || true
+            write_cache_value "ECS_CLUSTER_ID" "$ENVIRONMENT" "$cache_key" "$aws_region" "$test_env" "${ECS_CLUSTER_ID:-}" "" || true
+            write_cache_value "ECS_SERVICE_NAME" "$ENVIRONMENT" "$cache_key" "$aws_region" "$test_env" "${ECS_SERVICE_NAME:-}" "" || true
             if [[ "$use_cache" == "true" ]]; then
                 log_info "Updated cache with fetched AWS values"
             fi
@@ -147,9 +188,13 @@ setup_aws_environment() {
     }
     
     # Check service status - fail-fast if it returns non-zero
-    if ! check_service_status "$DEPLOYMENT_TYPE" "$ENVIRONMENT"; then
+    if ! check_service_status "$container_type" "$ENVIRONMENT"; then
         log_error "Service status check failed. Services are not ready for testing."
+        if [ "$container_type" = "ecs" ]; then
         log_error "Please ensure ECS tasks are running and API is healthy before running tests."
+        elif [ "$container_type" = "eks" ]; then
+            log_error "Please ensure EKS pods are running and API is healthy before running tests."
+        fi
         exit 1
     fi
     log_success "Service status check passed"
