@@ -2,13 +2,15 @@
 # Complete infrastructure destruction - leaves blank slate for fresh Terraform apply
 #
 # SYNOPSIS:
-#   ./teardown-resources.sh [ENVIRONMENT] [OPTIONS]
+#   ./teardown-resources.sh <ENVIRONMENT> --container-type <ecs|eks> [OPTIONS]
 #
 # DESCRIPTION:
 #   This script completely destroys AWS infrastructure for a specified environment,
 #   handling dependencies and resource deletion in the correct order to prevent
 #   timeouts and ensure clean teardown. It also optionally cleans up local Docker
 #   images that were built for ECR push.
+#
+#   REQUIRED: --container-type parameter (ecs or eks) - no auto-detection
 #
 # ARGUMENTS:
 #   ENVIRONMENT          Environment name (dev, staging, prod) - defaults to 'dev'
@@ -109,6 +111,7 @@ DRY_RUN="false"
 FORCE_DELETE="false"
 SKIP_CONFIRMATION="false"
 CLEAN_LOCAL_ONLY="false"
+CONTAINER_TYPE=""
 AWS_PROFILE="${AWS_PROFILE:-admin}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 ENVIRONMENT="${1:-dev}"
@@ -136,9 +139,22 @@ while [[ $# -gt 0 ]]; do
             CLEAN_LOCAL_ONLY="true"
             shift
             ;;
+        --container-type)
+            if [ $# -ge 2 ]; then
+                CONTAINER_TYPE="$2"
+                if [[ "$CONTAINER_TYPE" != "ecs" && "$CONTAINER_TYPE" != "eks" ]]; then
+                    log_error "Invalid container type: $CONTAINER_TYPE (must be ecs or eks)"
+                    exit 1
+                fi
+                shift 2
+            else
+                log_error "--container-type requires a value (ecs or eks)"
+                exit 1
+            fi
+            ;;
         --help|-h)
             cat << EOF
-Usage: $0 [dev|prod] [--force] [--skip-confirmation] [--dry-run] [--clean-local-only]
+Usage: $0 <environment> --container-type <ecs|eks> [options...]
 
 Complete infrastructure destruction - leaves blank slate for fresh Terraform apply.
 
@@ -153,21 +169,33 @@ This script destroys AWS infrastructure in the correct dependency order:
 
 WARNING: This will DESTROY ALL infrastructure for the specified environment!
 
+Required Arguments:
+  <environment>         Environment name (dev, staging, prod) - defaults to 'dev'
+  --container-type       Container type: ecs or eks (REQUIRED for AWS teardown)
+
 Options:
-  <environment>         Environment name (dev, prod) - defaults to 'dev'
   --dry-run             Show what would be destroyed without actually destroying (default: false)
   --force               Skip confirmation prompts and actually destroy (default: requires confirmation)
   --skip-confirmation   Alias for --force
   --clean-local-only    Only clean up local Docker images (skip all AWS teardown steps)
+                        Note: --container-type is still required for consistency, but value doesn't affect local cleanup
   --help                Show this help message
 
 Examples:
-  $0 dev --dry-run                    # Preview what would be destroyed
-  $0 dev                              # Destroy with confirmation prompt
-  $0 dev --force                      # Destroy without confirmation
-  $0 dev --force --clean-local-only   # Only clean local Docker images (skip AWS teardown)
+  # ECS teardown
+  $0 dev --container-type ecs --dry-run                    # Preview what would be destroyed
+  $0 dev --container-type ecs                              # Destroy with confirmation prompt
+  $0 dev --container-type ecs --force                      # Destroy without confirmation
+  
+  # EKS teardown
+  $0 dev --container-type eks --dry-run                    # Preview what would be destroyed
+  $0 dev --container-type eks --force                     # Destroy without confirmation
+  
+  # Clean local images only (container type doesn't matter for this)
+  $0 dev --container-type ecs --force --clean-local-only   # Only clean local Docker images (skip AWS teardown)
 
 Notes:
+  - --container-type is REQUIRED for AWS teardown (no auto-detection)
   - By default, this script requires confirmation before destroying and cleans AWS resources.
   - Use --force to skip confirmation prompts.
   - Use --clean-local-only to skip AWS teardown and only clean local Docker images.
@@ -189,6 +217,16 @@ done
 if [[ ! "$ENVIRONMENT" =~ ^(dev|staging|prod)$ ]]; then
     log_error "Invalid environment: $ENVIRONMENT"
     log_info "Must be: dev, staging, or prod"
+    exit 1
+fi
+
+# Validate container type (required unless --clean-local-only is used)
+# Note: Even with --clean-local-only, we require --container-type for consistency
+# (though the value doesn't affect local cleanup)
+if [ -z "$CONTAINER_TYPE" ]; then
+    log_error "--container-type parameter is required"
+    log_info "Usage: $0 <environment> --container-type <ecs|eks> [options...]"
+    log_info "Specify which container type to tear down: ecs or eks"
     exit 1
 fi
 
@@ -237,145 +275,25 @@ fi
 # - Security groups cannot be deleted while still referenced by running tasks
 #
 # Process:
-# 1.1. Scale down all ECS services to desired count 0
-# 1.2. Stop all running tasks (including one-off tasks, retry up to 30 times)
-# 1.3. Wait for all tasks to fully stop (up to 5 minutes for RUNNING/STOPPING tasks)
+# 1.1. Scale down all ECS services to desired count 0 (or EKS deployments to 0)
+# 1.2. Stop all running tasks/pods (including one-off tasks, retry up to 30 times)
+# 1.3. Wait for all tasks/pods to fully stop (up to 5 minutes)
 stop_services() {
-    log_step "Substep 1: Stopping ECS/EKS Services and Tasks"
+    log_step "Substep 1: Stopping ${CONTAINER_TYPE^^} Services and Tasks"
     
-    # Try to detect container system
     local cluster_name="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
-    local cont_sys=""
+    local helpers_dir="$SCRIPT_DIR/../helpers"
     
-    # Check for ECS cluster
-    if aws ecs describe-clusters --clusters "$cluster_name" --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null 2>&1; then
-        cont_sys="ecs"
-        log_info "Detected ECS cluster: $cluster_name"
-        
-        if [ "$DRY_RUN" = "true" ]; then
-            log_info "[DRY-RUN] Would stop ECS services and tasks in cluster: $cluster_name"
-        else
-            # Step 1: Scale down all services to 0
-            log_info "  Step 1.1: Scaling down ECS services to 0..."
-            local services_json
-            services_json=$(aws ecs list-services --cluster "$cluster_name" --profile "$AWS_PROFILE" --region "$AWS_REGION" --output json 2>/dev/null || echo '{"serviceArns":[]}')
-            local service_arns
-            service_arns=$(echo "$services_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(' '.join(data.get('serviceArns', [])))" 2>/dev/null || echo "")
-            
-            for service_arn in $service_arns; do
-                if [ -z "$service_arn" ]; then
-                    continue
-                fi
-                local service_name
-                service_name=$(echo "$service_arn" | sed 's|.*/||')
-                log_info "    Scaling down service: $service_name"
-                aws ecs update-service \
-                    --cluster "$cluster_name" \
-                    --service "$service_name" \
-                    --desired-count 0 \
-                    --profile "$AWS_PROFILE" \
-                    --region "$AWS_REGION" >/dev/null 2>&1 || {
-                    log_warning "      Failed to scale down service: $service_name (may already be stopped)"
-                }
-            done
-            
-            # Step 2: Stop all running tasks (including one-off tasks not part of services)
-            log_info "  Step 1.2: Stopping all running tasks..."
-            local max_attempts=30
-            local attempt=0
-            local running_tasks=""
-            
-            while [ $attempt -lt $max_attempts ]; do
-                # List all running tasks in the cluster
-                running_tasks=$(aws ecs list-tasks \
-                    --cluster "$cluster_name" \
-                    --desired-status RUNNING \
-                    --profile "$AWS_PROFILE" \
-                    --region "$AWS_REGION" \
-                    --query 'taskArns[]' \
-                    --output text 2>/dev/null || echo "")
-                
-                if [ -z "$running_tasks" ] || [ "$running_tasks" = "None" ]; then
-                    log_info "    No running tasks found"
-                    break
-                fi
-                
-                # Stop each running task
-                for task_arn in $running_tasks; do
-                    if [ -z "$task_arn" ] || [ "$task_arn" = "None" ]; then
-                        continue
-                    fi
-                    log_info "    Stopping task: $(echo "$task_arn" | sed 's|.*/||')"
-                    aws ecs stop-task \
-                        --cluster "$cluster_name" \
-                        --task "$task_arn" \
-                        --reason "Teardown: Stopping task before cluster destruction" \
-                        --profile "$AWS_PROFILE" \
-                        --region "$AWS_REGION" >/dev/null 2>&1 || {
-                        log_warning "      Failed to stop task (may already be stopping)"
-                    }
-                done
-                
-                # Wait a bit and check again
-                attempt=$((attempt + 1))
-                if [ $attempt -lt $max_attempts ]; then
-                    log_info "    Waiting for tasks to stop... (attempt $attempt/$max_attempts)"
-                    sleep 5
-                fi
-            done
-            
-            # Step 3: Wait for all tasks to fully stop (including services scaling down)
-            log_info "  Step 1.3: Waiting for all tasks to fully stop..."
-            local wait_attempts=60  # Wait up to 5 minutes (60 * 5 seconds)
-            local wait_attempt=0
-            
-            while [ $wait_attempt -lt $wait_attempts ]; do
-                # Check for any running or stopping tasks
-                local active_tasks
-                active_tasks=$(aws ecs list-tasks \
-                    --cluster "$cluster_name" \
-                    --desired-status RUNNING \
-                    --profile "$AWS_PROFILE" \
-                    --region "$AWS_REGION" \
-                    --query 'length(taskArns[])' \
-                    --output text 2>/dev/null || echo "0")
-                
-                local stopping_tasks
-                stopping_tasks=$(aws ecs list-tasks \
-                    --cluster "$cluster_name" \
-                    --desired-status STOPPING \
-                    --profile "$AWS_PROFILE" \
-                    --region "$AWS_REGION" \
-                    --query 'length(taskArns[])' \
-                    --output text 2>/dev/null || echo "0")
-                
-                local total_active=$((active_tasks + stopping_tasks))
-                
-                if [ "${total_active:-0}" -eq 0 ]; then
-                    log_success "    All tasks have stopped"
-                    break
-                fi
-                
-                wait_attempt=$((wait_attempt + 1))
-                if [ $((wait_attempt % 6)) -eq 0 ]; then
-                    log_info "    Still waiting... ($total_active tasks: $active_tasks running, $stopping_tasks stopping)"
-                fi
-                sleep 5
-            done
-            
-            if [ $wait_attempt -ge $wait_attempts ]; then
-                log_warning "    Timeout waiting for all tasks to stop (some tasks may still be stopping)"
-                log_warning "    Terraform destroy may still proceed, but may timeout if tasks are blocking"
-            fi
-        fi
-    # Check for EKS cluster
-    elif aws eks describe-cluster --name "$cluster_name" --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null 2>&1; then
-        cont_sys="eks"
-        log_info "Detected EKS cluster: $cluster_name"
-        log_info "  Note: EKS deployments should be scaled down manually with kubectl"
-        log_info "  Or they will be cleaned up when Terraform destroys the cluster"
+    # Source appropriate helper based on container type
+    if [ "$CONTAINER_TYPE" = "ecs" ]; then
+        source "$helpers_dir/stop-ecs-services.sh"
+        stop_ecs_services "$cluster_name" "$AWS_PROFILE" "$AWS_REGION" "$DRY_RUN"
+    elif [ "$CONTAINER_TYPE" = "eks" ]; then
+        source "$helpers_dir/stop-eks-services.sh"
+        stop_eks_services "$cluster_name" "$AWS_PROFILE" "$AWS_REGION" "$DRY_RUN"
     else
-        log_info "No container clusters found (ECS/EKS)"
+        log_error "Invalid container type: $CONTAINER_TYPE (should not reach here - validation should have caught this)"
+        exit 1
     fi
     
     echo ""
@@ -864,15 +782,9 @@ cleanup_local_images() {
 cleanup_orphaned() {
     log_step "Substep 5: Cleaning Up Orphaned AWS Resources"
     
-    # Detect container system for cleanup
+    # Use CONTAINER_TYPE parameter (no auto-detection)
     local cluster_name="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
-    local cont_sys=""
-    
-    if aws ecs describe-clusters --clusters "$cluster_name" --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null 2>&1; then
-        cont_sys="ecs"
-    elif aws eks describe-cluster --name "$cluster_name" --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null 2>&1; then
-        cont_sys="eks"
-    fi
+    local cont_sys="$CONTAINER_TYPE"
     
     local cleanup_cmd="$SCRIPT_DIR/helpers/cleanup-orphaned-resources.sh --environment $ENVIRONMENT"
     if [ -n "$cont_sys" ]; then

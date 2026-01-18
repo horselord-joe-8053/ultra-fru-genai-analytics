@@ -31,18 +31,18 @@ print_manual_test_hints() {
         if [ "$DRY_RUN" = "true" ]; then
             log_info "   ${GREEN}cd $REPO_ROOT/infra/terraform/environments/$ENVIRONMENT/application${NC}"
             log_info "   ${GREEN}terragrunt output alb_dns_name${NC}        # API endpoint"
-            log_info "   ${GREEN}terragrunt output cloudfront_domain_name${NC}  # Frontend URL"
+            log_info "   ${GREEN}terragrunt output cloudfront_domain_name${NC}  # ECS Frontend URL (CloudFront distribution)"
         else
             if [ -n "$ALB_DNS" ]; then
                 log_info "   ${GREEN}API endpoint: http://$ALB_DNS${NC}"
             fi
             if [ -n "$CLOUDFRONT_DOMAIN" ]; then
-                log_info "   ${GREEN}Frontend URL: https://$CLOUDFRONT_DOMAIN${NC}"
+                log_info "   ${GREEN}ECS Frontend URL: https://$CLOUDFRONT_DOMAIN${NC}${YELLOW} (CloudFront distribution for ECS deployment)${NC}"
             fi
             if [ -z "$ALB_DNS" ] || [ -z "$CLOUDFRONT_DOMAIN" ]; then
                 log_info "   ${GREEN}cd $REPO_ROOT/infra/terraform/environments/$ENVIRONMENT/application${NC}"
                 log_info "   ${GREEN}terragrunt output alb_dns_name${NC}        # API endpoint"
-                log_info "   ${GREEN}terragrunt output cloudfront_domain_name${NC}  # Frontend URL"
+                log_info "   ${GREEN}terragrunt output cloudfront_domain_name${NC}  # ECS Frontend URL (CloudFront distribution)"
             fi
         fi
         echo ""
@@ -66,15 +66,28 @@ print_manual_test_hints() {
     fi
     
     if [ "$container_type" = "eks" ]; then
-        log_info "${GREEN}1. Check Pod Status:${NC}"
+        log_info "${GREEN}1. Get Deployment URLs:${NC}"
+        if [ -n "$CLOUDFRONT_DOMAIN" ]; then
+            log_info "   ${GREEN}EKS Frontend URL: https://$CLOUDFRONT_DOMAIN${NC}${YELLOW} (CloudFront distribution for EKS deployment)${NC}"
+        fi
+        if [ "$DRY_RUN" = "true" ]; then
+            log_info "   ${GREEN}cd $REPO_ROOT/infra/terraform/environments/$ENVIRONMENT/application${NC}"
+            log_info "   ${GREEN}terragrunt output cloudfront_domain_name${NC}  # EKS Frontend URL (CloudFront distribution)"
+        fi
+        if [ -z "$CLOUDFRONT_DOMAIN" ] && [ "$DRY_RUN" != "true" ]; then
+            log_info "   ${GREEN}cd $REPO_ROOT/infra/terraform/environments/$ENVIRONMENT/application${NC}"
+            log_info "   ${GREEN}CONTAINER_TYPE=eks terragrunt output cloudfront_domain_name${NC}  # EKS Frontend URL"
+        fi
+        echo ""
+        log_info "${GREEN}2. Check Pod Status:${NC}"
         log_info "   ${GREEN}kubectl get pods -l app=fru-api${NC}"
         log_info "   ${GREEN}kubectl get svc fru-api${NC}"
         log_info "   ${GREEN}kubectl get ingress fru-api-ingress${NC}"
         echo ""
-        log_info "${GREEN}2. View Pod Logs:${NC}"
+        log_info "${GREEN}3. View Pod Logs:${NC}"
         log_info "   ${GREEN}kubectl logs -l app=fru-api --tail=100 -f${NC}"
         echo ""
-        log_info "${GREEN}3. Get Service Endpoint:${NC}"
+        log_info "${GREEN}4. Get Service Endpoint:${NC}"
         if [ "$DRY_RUN" = "true" ]; then
             log_info "   ${GREEN}kubectl get svc fru-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'${NC}"
         else
@@ -124,15 +137,34 @@ print_manual_test_hints() {
     
     log_info "${GREEN}6. Access Frontend:${NC}"
     if [ -n "$FRONTEND_URL" ]; then
+        local frontend_label="Frontend URL"
+        if [ "$container_type" = "ecs" ]; then
+            frontend_label="ECS Frontend URL (CloudFront distribution for ECS deployment)"
+        elif [ "$container_type" = "eks" ]; then
+            frontend_label="EKS Frontend URL (CloudFront distribution for EKS deployment)"
+        fi
+        log_info "   ${YELLOW}${frontend_label}:${NC} ${GREEN}$FRONTEND_URL${NC}"
         log_info "   Open in browser: ${GREEN}$FRONTEND_URL${NC}"
     elif [ "$DRY_RUN" = "true" ]; then
         log_info "   ${GREEN}cd $REPO_ROOT/infra/terraform/environments/$ENVIRONMENT/application${NC}"
-        log_info "   ${GREEN}terragrunt output cloudfront_domain_name${NC}"
+        if [ "$container_type" = "ecs" ]; then
+            log_info "   ${GREEN}CONTAINER_TYPE=ecs terragrunt output cloudfront_domain_name${NC}  # ECS Frontend URL"
+        elif [ "$container_type" = "eks" ]; then
+            log_info "   ${GREEN}CONTAINER_TYPE=eks terragrunt output cloudfront_domain_name${NC}  # EKS Frontend URL"
+        else
+            log_info "   ${GREEN}terragrunt output cloudfront_domain_name${NC}"
+        fi
         log_info "   - Open https://<cloudfront-domain> in your browser"
     else
         log_info "   ${GREEN}cd $REPO_ROOT/infra/terraform/environments/$ENVIRONMENT/application${NC}"
-        log_info "   ${GREEN}terragrunt output cloudfront_domain_name${NC}"
-        log_info "   - Or if shown above, open: https://<cloudfront-domain> in your browser"
+        if [ "$container_type" = "ecs" ]; then
+            log_info "   ${GREEN}CONTAINER_TYPE=ecs terragrunt output cloudfront_domain_name${NC}  # ECS Frontend URL"
+        elif [ "$container_type" = "eks" ]; then
+            log_info "   ${GREEN}CONTAINER_TYPE=eks terragrunt output cloudfront_domain_name${NC}  # EKS Frontend URL"
+        else
+            log_info "   ${GREEN}terragrunt output cloudfront_domain_name${NC}"
+        fi
+        log_info "   - Or if shown above, open the ${container_type^^} frontend URL in your browser"
     fi
     log_info "   - Try asking questions like: 'What is the overall average customer rating?'"
     echo ""

@@ -1004,7 +1004,8 @@ main() {
                 exit 1
             fi
             
-            local destroy_cmd="$SCRIPT_DIR/shared/resources_cleanup/teardown-resources.sh $ENVIRONMENT"
+            # Pass CONTAINER_TYPE explicitly to teardown (required parameter)
+            local destroy_cmd="$SCRIPT_DIR/shared/resources_cleanup/teardown-resources.sh $ENVIRONMENT --container-type $CONTAINER_TYPE"
             # --dry-run and --force are NOT mutually exclusive
             # --dry-run: preview what would be destroyed
             # --force: skip confirmation prompts
