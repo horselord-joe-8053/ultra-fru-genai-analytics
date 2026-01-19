@@ -1,7 +1,8 @@
 #!/bin/bash
 # Fetch deployment information from Terraform outputs
 # Exports: ALB_DNS, CLOUDFRONT_DOMAIN, ECS_*, EKS_*, API_URL, FRONTEND_URL
-# Usage: source fetch-deployment-info.sh <deployment-type> <environment> [dry-run]
+# Usage: source fetch-deployment-info.sh <environment> [dry-run]
+# Note: CONTAINER_TYPE must be set via environment variable (from run.sh --container-type parameter)
 
 # Get parameters
 # CONTAINER_TYPE is used (set via environment variable from run.sh)
@@ -71,7 +72,7 @@ fetch_terraform_outputs() {
     
     # Fetch ECS/ALB outputs (for ECS container type)
     if [ "${CONTAINER_TYPE:-ecs}" = "ecs" ]; then
-        APP_DIR="$TERRAFORM_DIR/application"
+        APP_DIR="$TERRAFORM_DIR/application-ecs"
         if [ -d "$APP_DIR" ] && command_exists terragrunt; then
             ORIG_DIR=$(pwd)
             cd "$APP_DIR" 2>/dev/null || return 0
@@ -222,12 +223,50 @@ fetch_terraform_outputs() {
     
     # Fetch EKS outputs
     if [ "${CONTAINER_TYPE:-ecs}" = "eks" ]; then
+        # Fetch EKS cluster name from EKS terraform outputs
         EKS_DIR="$TERRAFORM_DIR/eks"
         if [ -d "$EKS_DIR" ] && command_exists terragrunt; then
             ORIG_DIR=$(pwd)
             cd "$EKS_DIR" 2>/dev/null || return 0
-            EKS_CLUSTER_NAME=$(terragrunt output -raw cluster_name 2>/dev/null || echo "")
+            if [ -z "${EKS_CLUSTER_NAME:-}" ]; then
+                log_info "Fetching Terraform output: cluster_name (from EKS module)"
+                EKS_CLUSTER_NAME=$(terragrunt output -raw cluster_name 2>/dev/null || echo "")
+                if [ -n "$EKS_CLUSTER_NAME" ]; then
+                    log_info "Output retrieved: cluster_name=$EKS_CLUSTER_NAME"
+                else
+                    log_warning "Could not read Terraform output 'cluster_name' from EKS module"
+                fi
+            fi
             cd "$ORIG_DIR" 2>/dev/null || true
+        fi
+        
+        # Fetch CloudFront domain from application-eks terraform outputs (for EKS frontend)
+        APP_DIR="$TERRAFORM_DIR/application-eks"
+        if [ -d "$APP_DIR" ] && command_exists terragrunt; then
+            ORIG_DIR=$(pwd)
+            cd "$APP_DIR" 2>/dev/null || return 0
+            
+            if [ -z "${CLOUDFRONT_DOMAIN:-}" ]; then
+                log_info "Fetching Terraform output: cloudfront_domain_name (from application-eks module, for EKS)"
+                # Fetch from application-eks module which has separate CloudFront distribution
+                if ! CLOUDFRONT_DOMAIN=$(terragrunt output -raw cloudfront_domain_name 2>&1); then
+                    terragrunt_error="$CLOUDFRONT_DOMAIN"
+                    CLOUDFRONT_DOMAIN=""
+                    log_warning "Could not read Terraform output 'cloudfront_domain_name' via terragrunt (for EKS); frontend URL may be unavailable"
+                    if command -v log_info >/dev/null 2>&1 && [ -n "$terragrunt_error" ]; then
+                        log_info "Terragrunt error: ${terragrunt_error:0:200}"
+                    fi
+                else
+                    log_info "Output retrieved: cloudfront_domain_name=$CLOUDFRONT_DOMAIN"
+                fi
+            fi
+            
+            cd "$ORIG_DIR" 2>/dev/null || true
+        fi
+        
+        # Set FRONTEND_URL from discovered CloudFront domain
+        if [ -n "$CLOUDFRONT_DOMAIN" ]; then
+            FRONTEND_URL="https://$CLOUDFRONT_DOMAIN"
         fi
         
         # Try to get service endpoint from kubectl if available

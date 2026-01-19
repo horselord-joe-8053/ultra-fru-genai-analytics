@@ -71,7 +71,7 @@ teardown_terragrunt() {
     if [ "$LAYER" = "application" ] || [ "$LAYER" = "all" ]; then
         log_step "Destroying application layer (ECS, ALB, Frontend)"
         
-        cd "$ENV_DIR/application"
+        cd "$ENV_DIR/application-ecs"
         
         # Check if terragrunt state exists (resources may have been destroyed already)
         if [ -f ".terragrunt-cache" ] || terragrunt state list >/dev/null 2>&1; then

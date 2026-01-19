@@ -299,6 +299,42 @@ EKS Deployment:
 
 **Key Insight**: ECS doesn't have its own folder because it's bundled with ALB and Frontend in the application layer. EKS needs its own layer because it uses a different orchestration platform with different networking requirements.
 
+#### Deployment Access: ECS vs EKS
+
+**Why EKS needs public endpoint access (unlike ECS):**
+
+| Aspect | ECS | EKS |
+|--------|-----|-----|
+| **Deployment Mechanism** | AWS APIs (`ecs.amazonaws.com`) | `kubectl` (direct network to API server) |
+| **Endpoint Type** | AWS public APIs (always accessible) | Kubernetes API server endpoint (can be private/public) |
+| **Network Access Required** | ❌ No (AWS APIs are public) | ✅ Yes (if private endpoint, needs VPC access) |
+| **Works From** | Anywhere with AWS credentials | Anywhere if public endpoint, VPC if private endpoint |
+
+**ECS Deployment Flow:**
+```
+Your Laptop → AWS API (public) → AWS manages VPC → ECS Tasks (private)
+✅ Works from anywhere - AWS APIs are public but authenticated
+```
+
+**EKS Deployment Flow (Public Endpoint):**
+```
+Your Laptop → kubectl → API Server (public endpoint) → Pods (private)
+✅ Works from anywhere - API server public but IAM-authenticated
+```
+
+**EKS Deployment Flow (Private Endpoint):**
+```
+Your Laptop → kubectl → ❌ Can't reach private endpoint
+EC2 Runner (in VPC) → kubectl → API Server (private endpoint) → Pods (private)
+⚠️ Requires EC2 runner/VPN inside VPC for kubectl access
+```
+
+**Security Note:**
+- Both ECS and EKS workloads run in private subnets
+- ECS uses public AWS APIs (authenticated via IAM)
+- EKS with public endpoint uses public API server (authenticated via IAM)
+- Public endpoint for EKS is secure: IAM auth required, pods remain private
+
 ---
 
 # 🔒 4. Security Best Practices

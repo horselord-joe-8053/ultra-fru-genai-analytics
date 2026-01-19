@@ -1,5 +1,5 @@
-# Application Layer
-# Combines: ECS, ALB, Frontend
+# Application Layer - ECS
+# Combines: ECS, ALB, Frontend (for ECS deployments)
 
 # ALB Module
 module "alb" {

@@ -1,7 +1,8 @@
 #!/bin/bash
 # Quick service status checks (ECS/EKS running status, basic API health)
 # Usage: source check-service-status.sh
-#        check_service_status <deployment-type> <environment>
+#        check_service_status <container-type> <environment>
+# Note: container-type should be 'ecs' or 'eks' (set via CONTAINER_TYPE environment variable)
 
 # Helper function to check if command exists
 command_exists() {

@@ -38,8 +38,14 @@ deploy_frontend() {
     log_info "Using AWS profile: $AWS_PROFILE (for infrastructure operations)"
     
     # Get S3 bucket name from Terraform outputs
+    # Use application-eks for EKS, application-ecs for ECS
     TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT"
-    APP_DIR="$TERRAFORM_DIR/application"
+    CONTAINER_TYPE="${CONTAINER_TYPE:-ecs}"
+    if [ "$CONTAINER_TYPE" = "eks" ]; then
+        APP_DIR="$TERRAFORM_DIR/application-eks"
+    else
+        APP_DIR="$TERRAFORM_DIR/application-ecs"
+    fi
     
     local s3_bucket_name=""
     if [ -d "$APP_DIR" ] && command_exists terragrunt; then
@@ -144,11 +150,19 @@ deploy_frontend() {
         fi
         
         # Build frontend (uses relative URLs - CloudFront proxies API requests to ALB)
+        # BUILD_TIME is injected automatically by vite.config.ts using Date.now()
+        # VITE_PROVIDER, VITE_CONTAINER_TYPE, VITE_ENVIRONMENT are passed to Vite for version label
+        # This ensures the version (V_YYMMDD-HHMMSS_PROVIDER_CONTAINER_ENV) reflects build context
         if [ "$DRY_RUN" = "true" ]; then
             log_info "[DRY-RUN] Would run: npm run build"
             log_info "[DRY-RUN] Frontend will use relative URLs (/query, /analytics)"
             log_info "[DRY-RUN] CloudFront will proxy these requests to ALB"
         else
+            # Export build context variables for Vite (will be injected via vite.config.ts define)
+            export VITE_PROVIDER="${VITE_PROVIDER:-aws}"
+            export VITE_CONTAINER_TYPE="${CONTAINER_TYPE:-ecs}"
+            export VITE_ENVIRONMENT="${ENVIRONMENT:-dev}"
+            log_info "Building frontend with context: provider=$VITE_PROVIDER, container=$VITE_CONTAINER_TYPE, env=$VITE_ENVIRONMENT"
             npm run build || {
                 log_error "Failed to build frontend"
                 exit 1

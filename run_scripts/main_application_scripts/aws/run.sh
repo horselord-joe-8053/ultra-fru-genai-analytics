@@ -43,6 +43,9 @@ load_env_file || true
 SCRIPT_DIR="$AWS_SCRIPT_DIR"
 log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (aws/run.sh)"
 
+# Source shared deployment phases (common logic for ECS/EKS)
+source "$SCRIPT_DIR/shared/container-deploy-common.sh"
+
 # ============================================================================
 # DEFAULT VALUES (can be overridden via arguments or environment variables)
 # ============================================================================
@@ -373,104 +376,19 @@ deploy_ecs_full() {
     
     # ============================================================================
     # Phase 1: Environment Preparation - Step 1.3: Prepare container image
+    # Phase 2: Infrastructure Setup - Steps 2.2, 2.3
     # ============================================================================
-    perf_phase_start 1 "Environment Preparation"
-    perf_step_start 1 "1.3" "Checking container image availability"
-    local step_start_time=$(date +%s)
-    log_step "Phase 1: Step 1.3 - Step ${step_num}/${total_steps}: Checking container image availability"
-    if ! check_or_build_image; then
-        local elapsed=$(( $(date +%s) - step_start_time ))
-        log_error "Phase 1: Step 1.3 - Step ${step_num}/${total_steps} FAILED: Container image check/build failed (took $(format_elapsed_time $elapsed))"
-        log_info "Reason: Unable to check ECR for existing image or build/push new image"
-        log_info "Check AWS credentials, ECR permissions, and Docker availability"
-        exit 1
-    fi
-    local elapsed=$(( $(date +%s) - step_start_time ))
-    log_success "Phase 1: Step 1.3 - Step ${step_num}/${total_steps} PASSED: Container image ready (took $(format_elapsed_time $elapsed))"
-    step_num=$((step_num + 1))
-    
-    # ============================================================================
-    # Phase 2: Infrastructure Setup
-    # ============================================================================
-    step_start_time=$(date +%s)
-    log_step "Phase 2: Step 2.2 - Step ${step_num}/${total_steps}: Setting up Terraform state bucket"
-    if ! "$SCRIPT_DIR/terraform/setup-s3-bucket.sh"; then
-        elapsed=$(( $(date +%s) - step_start_time ))
-        log_error "Phase 2: Step 2.2 - Step ${step_num}/${total_steps} FAILED: Terraform state bucket setup failed (took $(format_elapsed_time $elapsed))"
-        log_info "Reason: Unable to create or configure S3 bucket for Terraform state"
-        log_info "Check AWS credentials, S3 permissions, and TF_STATE_BUCKET in .env"
-        exit 1
-    fi
-    elapsed=$(( $(date +%s) - step_start_time ))
-    log_success "Phase 2: Step 2.2 - Step ${step_num}/${total_steps} PASSED: Terraform state bucket ready (took $(format_elapsed_time $elapsed))"
-    step_num=$((step_num + 1))
-    
-    # ============================================================================
-    # Phase 2: Infrastructure Setup - Step 2.3: Deploy infrastructure layer
-    # ============================================================================
-    step_start_time=$(date +%s)
-    log_step "Phase 2: Step 2.3 - Step ${step_num}/${total_steps}: Deploying infrastructure layer"
-    if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" infrastructure; then
-        elapsed=$(( $(date +%s) - step_start_time ))
-        perf_step_end 2 "2.3" "FAILED" "Infrastructure deployment failed"
-        log_error "Phase 2: Step 2.3 - Step ${step_num}/${total_steps} FAILED: Infrastructure deployment failed (took $(format_elapsed_time $elapsed))"
-        log_info "Reason: Terraform plan or apply failed for infrastructure layer"
-        log_info "Check Terraform configuration, AWS permissions, and plan output above"
-        exit 1
-    fi
-    elapsed=$(( $(date +%s) - step_start_time ))
-    perf_step_end 2 "2.3" "SUCCESS" "Infrastructure layer deployed"
-    log_success "Phase 2: Step 2.3 - Step ${step_num}/${total_steps} PASSED: Infrastructure layer deployed (took $(format_elapsed_time $elapsed))"
-    step_num=$((step_num + 1))
-    perf_phase_end 2
+    # Use shared phase functions to reduce duplication
+    # Note: Functions return step_num via echo (stdout), logs go to stderr
+    # Extract only numeric value from output (filter out any log output that leaks to stdout)
+    step_num=$(deploy_phase_check_image "$step_num" "$total_steps" 2>&1 | grep -E '^[0-9]+$' | tail -1)
+    step_num=$(deploy_phase_setup_state_bucket "$step_num" "$total_steps" "$SCRIPT_DIR" 2>&1 | grep -E '^[0-9]+$' | tail -1)
+    step_num=$(deploy_phase_deploy_infrastructure "$step_num" "$total_steps" "$SCRIPT_DIR" "$ENVIRONMENT" 2>&1 | grep -E '^[0-9]+$' | tail -1)
 
     # ============================================================================
-    # Phase 3: Database Setup - Step 3.3: Setup database (includes 3.1, 3.2, pgvector)
+    # Phase 3: Database Setup (ECS only - EKS uses Kubernetes manifests)
     # ============================================================================
-    perf_phase_start 3 "Database Setup"
-    if [ "$DRY_RUN" != "true" ]; then
-        perf_step_start 3 "3.3" "Setting up database (pgvector, schema, data)"
-        step_start_time=$(date +%s)
-        log_step "Phase 3: Step 3.3 - Step ${step_num}/${total_steps}: Setting up database (pgvector, schema, data)"
-        local db_setup_cmd="$SCRIPT_DIR/database/setup-database.sh $ENVIRONMENT"
-        if [ "$FORCE_REFRESH_DATA" = "true" ]; then
-            db_setup_cmd="$db_setup_cmd --force-refresh-data"
-        fi
-        if $db_setup_cmd; then
-            elapsed=$(( $(date +%s) - step_start_time ))
-            perf_step_end 3 "3.3" "SUCCESS" "Database setup completed"
-            log_success "Phase 3: Step 3.3 - Step ${step_num}/${total_steps} PASSED: Database setup completed (took $(format_elapsed_time $elapsed))"
-        else
-            elapsed=$(( $(date +%s) - step_start_time ))
-            perf_step_end 3 "3.3" "FAILED" "Database setup had issues"
-            log_warning "Phase 3: Step 3.3 - Step ${step_num}/${total_steps} had issues (may already be set up) (took $(format_elapsed_time $elapsed))"
-        fi
-        step_num=$((step_num + 1))
-    else
-        perf_step_start 3 "3.3" "Setting up database (pgvector, schema, data)"
-        perf_step_end 3 "3.3" "SKIPPED" "Database setup skipped (DRY-RUN)"
-        log_info "[DRY-RUN] Skipping database setup"
-    fi
-    
-    # ============================================================================
-    # Phase 3: Database Setup - Step 3.4: Validate infrastructure outputs
-    # ============================================================================
-    perf_step_start 3 "3.4" "Validating infrastructure outputs"
-    step_start_time=$(date +%s)
-    log_step "Phase 3: Step 3.4 - Step ${step_num}/${total_steps}: Validating infrastructure outputs"
-    if ! "$SCRIPT_DIR/database/validate-infra-outputs.sh" "$ENVIRONMENT"; then
-        elapsed=$(( $(date +%s) - step_start_time ))
-        perf_step_end 3 "3.4" "FAILED" "Infrastructure outputs validation failed"
-        log_error "Phase 3: Step 3.4 - Step ${step_num}/${total_steps} FAILED: Infrastructure outputs validation failed (took $(format_elapsed_time $elapsed))"
-        log_info "Reason: Required infrastructure outputs are missing"
-        log_info "Fix infrastructure deployment issues before deploying application layer"
-        exit 1
-    fi
-    elapsed=$(( $(date +%s) - step_start_time ))
-    perf_step_end 3 "3.4" "SUCCESS" "Infrastructure outputs validated"
-    log_success "Phase 3: Step 3.4 - Step ${step_num}/${total_steps} PASSED: Infrastructure outputs validated (took $(format_elapsed_time $elapsed))"
-    step_num=$((step_num + 1))
-    perf_phase_end 3
+    step_num=$(deploy_phase_setup_database "$step_num" "$total_steps" "$SCRIPT_DIR" "$ENVIRONMENT" "${FORCE_REFRESH_DATA:-false}" "${DRY_RUN:-false}" 2>&1 | grep -E '^[0-9]+$' | tail -1)
     
     # ============================================================================
     # Phase 4: Application Infrastructure Deployment
@@ -495,79 +413,14 @@ deploy_ecs_full() {
     perf_phase_end 4
     
     # ============================================================================
-    # Phase 5: Data Lake Setup
+    # Phase 5: Data Lake Setup (optional, conditional)
     # ============================================================================
-    perf_phase_start 5 "Data Lake Setup"
-    # Step 5.1: Setup data-lake [CONDITIONAL]
-    if should_setup_data_lake; then
-        perf_step_start 5 "5.1" "Setting up data-lake (S3 + Delta table)"
-        step_start_time=$(date +%s)
-        log_step "Phase 5: Step 5.1 - Step ${step_num}/${total_steps}: Setting up data-lake (S3 + Delta table)"
-        if [ "$DRY_RUN" = "true" ]; then
-            log_info "[DRY-RUN] Would run: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
-            if [ "$PREEMPT" = "true" ]; then
-                log_info "[DRY-RUN] Would pass --preempt flag to teardown Delta tables first"
-            fi
-        else
-            export ENVIRONMENT="$ENVIRONMENT"
-            export DRY_RUN="$DRY_RUN"
-            local setup_cmd="$REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
-            if [ "$PREEMPT" = "true" ]; then
-                setup_cmd="$setup_cmd --preempt"
-            fi
-            if [ "$FORCE_REFRESH_DATA" = "true" ]; then
-                setup_cmd="$setup_cmd --force-refresh-data"
-            fi
-            if ! $setup_cmd; then
-                elapsed=$(( $(date +%s) - step_start_time ))
-                # If analytics scheduler is enabled, Delta table is REQUIRED - fail fast
-                if [ "${ENABLE_ANALYTICS_SCHEDULER:-false}" = "true" ]; then
-                    perf_step_end 5 "5.1" "FAILED" "Delta-lake setup failed"
-                    log_error "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} FAILED: Delta-lake setup failed (took $(format_elapsed_time $elapsed))"
-                    log_error "Reason: Delta table creation failed, but ENABLE_ANALYTICS_SCHEDULER=true requires Delta tables"
-                    log_error "Analytics scheduler will not work without Delta tables - deployment cannot proceed"
-                    log_info "Fix Delta table setup issues before continuing, or set ENABLE_ANALYTICS_SCHEDULER=false to skip"
-                    log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
-                    exit 1
-                else
-                    perf_step_end 5 "5.1" "FAILED" "Delta-lake setup had issues"
-                    log_warning "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} had issues (application may still work without Delta tables) (took $(format_elapsed_time $elapsed))"
-                    log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
-                fi
-            else
-                elapsed=$(( $(date +%s) - step_start_time ))
-                perf_step_end 5 "5.1" "SUCCESS" "Delta-lake ready"
-                log_success "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} PASSED: Delta-lake ready (took $(format_elapsed_time $elapsed))"
-            fi
-            step_num=$((step_num + 1))
-        fi
-    else
-        perf_step_start 5 "5.1" "Setting up data-lake (S3 + Delta table)"
-        perf_step_end 5 "5.1" "SKIPPED" "Data-lake setup skipped"
-        log_info "Skipping data-lake setup (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"
-    fi
-    perf_phase_end 5
+    step_num=$(deploy_phase_setup_data_lake "$step_num" "$total_steps" "$REPO_ROOT" "$ENVIRONMENT" "${PREEMPT:-false}" "${FORCE_REFRESH_DATA:-false}" "${DRY_RUN:-false}" "${ENABLE_ANALYTICS_SCHEDULER:-false}" "${SKIP_DATA_LAKE:-false}" 2>&1 | grep -E '^[0-9]+$' | tail -1)
     
     # ============================================================================
     # Phase 6: Frontend Deployment
     # ============================================================================
-    perf_phase_start 6 "Frontend Deployment"
-    perf_step_start 6 "6.1" "Deploying frontend to S3"
-    step_start_time=$(date +%s)
-    log_step "Phase 6: Step 6.1 - Step ${step_num}/${total_steps}: Deploying frontend to S3"
-    export ENVIRONMENT="$ENVIRONMENT"
-    if ! "$SCRIPT_DIR/shared/deploy-frontend.sh"; then
-        elapsed=$(( $(date +%s) - step_start_time ))
-        perf_step_end 6 "6.1" "FAILED" "Frontend deployment failed"
-        log_error "Phase 6: Step 6.1 - Step ${step_num}/${total_steps} FAILED: Frontend deployment failed (took $(format_elapsed_time $elapsed))"
-        log_info "Reason: Failed to build frontend or sync to S3"
-        log_info "Check frontend build, AWS credentials, S3 permissions, and Terraform outputs"
-        exit 1
-    fi
-    elapsed=$(( $(date +%s) - step_start_time ))
-    perf_step_end 6 "6.1" "SUCCESS" "Frontend deployed to S3"
-    log_success "Phase 6: Step 6.1 - Step ${step_num}/${total_steps} PASSED: Frontend deployed to S3 (took $(format_elapsed_time $elapsed))"
-    perf_phase_end 6
+    step_num=$(deploy_phase_deploy_frontend "$step_num" "$total_steps" "$SCRIPT_DIR" "$ENVIRONMENT" 2>&1 | grep -E '^[0-9]+$' | tail -1)
     
     # Export updated step number for Phase 7 in main()
     export CURRENT_STEP=$((step_num + 1))
@@ -592,140 +445,52 @@ deploy_eks_full() {
     
     # ============================================================================
     # Phase 1: Environment Preparation - Step 1.3: Prepare container image
+    # Phase 2: Infrastructure Setup - Steps 2.2, 2.3
     # ============================================================================
-    local step_start_time=$(date +%s)
-    log_step "Phase 1: Step 1.3 - Step ${step_num}/${total_steps}: Checking container image availability"
-    if ! check_or_build_image; then
-        local elapsed=$(( $(date +%s) - step_start_time ))
-        log_error "Phase 1: Step 1.3 - Step ${step_num}/${total_steps} FAILED: Container image check/build failed (took $(format_elapsed_time $elapsed))"
-        log_info "Reason: Unable to check ECR for existing image or build/push new image"
-        log_info "Check AWS credentials, ECR permissions, and Docker availability"
-        exit 1
-    fi
-    local elapsed=$(( $(date +%s) - step_start_time ))
-    log_success "Phase 1: Step 1.3 - Step ${step_num}/${total_steps} PASSED: Container image ready (took $(format_elapsed_time $elapsed))"
-    step_num=$((step_num + 1))
-    
-    # ============================================================================
-    # Phase 2: Infrastructure Setup
-    # ============================================================================
-    step_start_time=$(date +%s)
-    log_step "Phase 2: Step 2.2 - Step ${step_num}/${total_steps}: Setting up Terraform state bucket"
-    if ! "$SCRIPT_DIR/terraform/setup-s3-bucket.sh"; then
-        elapsed=$(( $(date +%s) - step_start_time ))
-        log_error "Phase 2: Step 2.2 - Step ${step_num}/${total_steps} FAILED: Terraform state bucket setup failed (took $(format_elapsed_time $elapsed))"
-        log_info "Reason: Unable to create or configure S3 bucket for Terraform state"
-        log_info "Check AWS credentials, S3 permissions, and TF_STATE_BUCKET in .env"
-        exit 1
-    fi
-    elapsed=$(( $(date +%s) - step_start_time ))
-    log_success "Phase 2: Step 2.2 - Step ${step_num}/${total_steps} PASSED: Terraform state bucket ready (took $(format_elapsed_time $elapsed))"
-    step_num=$((step_num + 1))
-    
-    # ============================================================================
-    # Phase 2: Infrastructure Setup - Step 2.3: Deploy infrastructure layer
-    # ============================================================================
-    step_start_time=$(date +%s)
-    log_step "Phase 2: Step 2.3 - Step ${step_num}/${total_steps}: Deploying infrastructure layer"
-    if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" infrastructure; then
-        elapsed=$(( $(date +%s) - step_start_time ))
-        perf_step_end 2 "2.3" "FAILED" "Infrastructure deployment failed"
-        log_error "Phase 2: Step 2.3 - Step ${step_num}/${total_steps} FAILED: Infrastructure deployment failed (took $(format_elapsed_time $elapsed))"
-        log_info "Reason: Terraform plan or apply failed for infrastructure layer"
-        log_info "Check Terraform configuration, AWS permissions, and plan output above"
-        exit 1
-    fi
-    elapsed=$(( $(date +%s) - step_start_time ))
-    perf_step_end 2 "2.3" "SUCCESS" "Infrastructure layer deployed"
-    log_success "Phase 2: Step 2.3 - Step ${step_num}/${total_steps} PASSED: Infrastructure layer deployed (took $(format_elapsed_time $elapsed))"
-    step_num=$((step_num + 1))
-    perf_phase_end 2
+    # Use shared phase functions to reduce duplication
+    # Note: Functions return step_num via echo (stdout), logs go to stderr
+    # Extract only numeric value from output (filter out any log output that leaks to stdout)
+    step_num=$(deploy_phase_check_image "$step_num" "$total_steps" 2>&1 | grep -E '^[0-9]+$' | tail -1)
+    step_num=$(deploy_phase_setup_state_bucket "$step_num" "$total_steps" "$SCRIPT_DIR" 2>&1 | grep -E '^[0-9]+$' | tail -1)
+    step_num=$(deploy_phase_deploy_infrastructure "$step_num" "$total_steps" "$SCRIPT_DIR" "$ENVIRONMENT" 2>&1 | grep -E '^[0-9]+$' | tail -1)
     
     # ============================================================================
     # (Phase 3: Database Setup is handled via Kubernetes manifests for EKS)
     # ============================================================================
     
     # ============================================================================
-    # Phase 4: Data Lake Setup
+    # Phase 4: Data Lake Setup (optional, conditional)
     # ============================================================================
-    perf_phase_start 4 "Data Lake Setup"
-    # Step 4.1: Setup data-lake [CONDITIONAL]
-    if should_setup_data_lake; then
-        perf_step_start 4 "4.1" "Setting up data-lake (S3 + Delta table)"
-        step_start_time=$(date +%s)
-        log_step "Phase 4: Step 4.1 - Step ${step_num}/${total_steps}: Setting up data-lake (S3 + Delta table)"
-        if [ "$DRY_RUN" = "true" ]; then
-            log_info "[DRY-RUN] Would run: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
-            if [ "$PREEMPT" = "true" ]; then
-                log_info "[DRY-RUN] Would pass --preempt flag to teardown Delta tables first"
-            fi
-        else
-            export ENVIRONMENT="$ENVIRONMENT"
-            export DRY_RUN="$DRY_RUN"
-            local setup_cmd="$REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
-            if [ "$PREEMPT" = "true" ]; then
-                setup_cmd="$setup_cmd --preempt"
-            fi
-            if [ "$FORCE_REFRESH_DATA" = "true" ]; then
-                setup_cmd="$setup_cmd --force-refresh-data"
-            fi
-            if ! $setup_cmd; then
-                elapsed=$(( $(date +%s) - step_start_time ))
-                # If analytics scheduler is enabled, Delta table is REQUIRED - fail fast
-                if [ "${ENABLE_ANALYTICS_SCHEDULER:-false}" = "true" ]; then
-                    perf_step_end 4 "4.1" "FAILED" "Delta-lake setup failed"
-                    log_error "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} FAILED: Delta-lake setup failed (took $(format_elapsed_time $elapsed))"
-                    log_error "Reason: Delta table creation failed, but ENABLE_ANALYTICS_SCHEDULER=true requires Delta tables"
-                    log_error "Analytics scheduler will not work without Delta tables - deployment cannot proceed"
-                    log_info "Fix Delta table setup issues before continuing, or set ENABLE_ANALYTICS_SCHEDULER=false to skip"
-                    log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
-                    exit 1
-                else
-                    perf_step_end 4 "4.1" "FAILED" "Delta-lake setup had issues"
-                    log_warning "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} had issues (application may still work without Delta tables) (took $(format_elapsed_time $elapsed))"
-                    log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
-                fi
-            else
-                elapsed=$(( $(date +%s) - step_start_time ))
-                perf_step_end 4 "4.1" "SUCCESS" "Delta-lake ready"
-                log_success "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} PASSED: Delta-lake ready (took $(format_elapsed_time $elapsed))"
-            fi
-            step_num=$((step_num + 1))
-        fi
-    else
-        perf_step_start 4 "4.1" "Setting up data-lake (S3 + Delta table)"
-        perf_step_end 4 "4.1" "SKIPPED" "Data-lake setup skipped"
-        log_info "Skipping data-lake setup (ENABLE_ANALYTICS_SCHEDULER=false or --skip-data-lake flag)"
-    fi
-    perf_phase_end 4
+    step_num=$(deploy_phase_setup_data_lake "$step_num" "$total_steps" "$REPO_ROOT" "$ENVIRONMENT" "${PREEMPT:-false}" "${FORCE_REFRESH_DATA:-false}" "${DRY_RUN:-false}" "${ENABLE_ANALYTICS_SCHEDULER:-false}" "${SKIP_DATA_LAKE:-false}" 2>&1 | grep -E '^[0-9]+$' | tail -1)
     
     # ============================================================================
     # Phase 5: Application Deployment
     # ============================================================================
     perf_phase_start 5 "Application Deployment"
-    # Step 5.1: Deploy EKS layer
-    perf_step_start 5 "5.1" "Deploying EKS layer (EKS cluster, node groups, OIDC provider)"
+    # Step 5.1: Deploy application-eks layer (EKS cluster + Frontend)
+    # Note: EKS cluster and Frontend are now combined in application-eks layer (matching ECS pattern)
+    perf_step_start 5 "5.1" "Deploying application-eks layer (EKS cluster + Frontend)"
     step_start_time=$(date +%s)
-    log_step "Phase 5: Step 5.1 - Step ${step_num}/${total_steps}: Deploying EKS layer (EKS cluster, node groups, OIDC provider)"
-    if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" eks; then
+    log_step "Phase 5: Step 5.1 - Step ${step_num}/${total_steps}: Deploying application-eks layer (EKS cluster, node groups, OIDC provider, Frontend)"
+    if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" application-eks; then
         elapsed=$(( $(date +%s) - step_start_time ))
-        perf_step_end 5 "5.1" "FAILED" "EKS layer deployment failed"
-        log_error "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} FAILED: EKS layer deployment failed (took $(format_elapsed_time $elapsed))"
-        log_info "Reason: Terraform plan or apply failed for EKS layer"
+        perf_step_end 5 "5.1" "FAILED" "Application-eks layer deployment failed"
+        log_error "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} FAILED: Application-eks layer deployment failed (took $(format_elapsed_time $elapsed))"
+        log_info "Reason: Terraform plan or apply failed for application-eks layer"
         log_info "Check Terraform configuration, AWS permissions, EKS quotas, and plan output above"
         exit 1
     fi
     elapsed=$(( $(date +%s) - step_start_time ))
-    perf_step_end 5 "5.1" "SUCCESS" "EKS layer deployed"
-    log_success "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} PASSED: EKS layer deployed (took $(format_elapsed_time $elapsed))"
+    perf_step_end 5 "5.1" "SUCCESS" "Application-eks layer deployed"
+    log_success "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} PASSED: Application-eks layer deployed (took $(format_elapsed_time $elapsed))"
     step_num=$((step_num + 1))
     
     # ============================================================================
-    # Phase 5: Application Deployment - Step 5.3: Deploy Kubernetes manifests
+    # Phase 5: Application Deployment - Step 5.2: Deploy Kubernetes manifests
     # ============================================================================
-    perf_step_start 5 "5.3" "Configuring kubectl and deploying Kubernetes manifests"
+    perf_step_start 5 "5.2" "Configuring kubectl and deploying Kubernetes manifests"
     step_start_time=$(date +%s)
-    log_step "Phase 5: Step 5.3 - Step ${step_num}/${total_steps}: Configuring kubectl and deploying Kubernetes manifests"
+    log_step "Phase 5: Step 5.2 - Step ${step_num}/${total_steps}: Configuring kubectl and deploying Kubernetes manifests"
     log_info "Using container image: $CONTAINER_IMAGE"
     
     # Get cluster name from Terraform output
@@ -739,7 +504,7 @@ deploy_eks_full() {
     else
         # Configure kubectl
         log_info "Configuring kubectl for EKS cluster..."
-        cd "$ENV_DIR/eks"
+        cd "$ENV_DIR/application-eks"
         log_info "Fetching Terraform output: cluster_name"
         if ! CLUSTER_NAME=$(terragrunt output -raw cluster_name 2>&1); then
             log_error "Failed to fetch Terraform output 'cluster_name'"
@@ -752,7 +517,7 @@ deploy_eks_full() {
         
         if [ -z "$CLUSTER_NAME" ]; then
             log_error "Failed to get EKS cluster name from Terraform output"
-            log_info "Try running: cd $ENV_DIR/eks && terragrunt output"
+            log_info "Try running: cd $ENV_DIR/application-eks && terragrunt output"
             exit 1
         fi
         
@@ -770,19 +535,24 @@ deploy_eks_full() {
         fi
         log_success "kubectl configured for cluster: $CLUSTER_NAME"
         
+        # Ensure AWS_PROFILE is exported for eks/deploy.sh subprocess
+        # This is critical because eks/deploy.sh calls kubectl which uses AWS_PROFILE
+        export AWS_PROFILE="${AWS_PROFILE:-admin}"
+        log_info "Exported AWS_PROFILE=$AWS_PROFILE for eks/deploy.sh subprocess"
+        
         # Deploy Kubernetes manifests
         if ! "$SCRIPT_DIR/eks/deploy.sh"; then
             elapsed=$(( $(date +%s) - step_start_time ))
-            perf_step_end 5 "5.3" "FAILED" "Kubernetes manifest deployment failed"
-            log_error "Phase 5: Step 5.3 - Step ${step_num}/${total_steps} FAILED: Kubernetes manifest deployment failed (took $(format_elapsed_time $elapsed))"
+            perf_step_end 5 "5.2" "FAILED" "Kubernetes manifest deployment failed"
+            log_error "Phase 5: Step 5.2 - Step ${step_num}/${total_steps} FAILED: Kubernetes manifest deployment failed (took $(format_elapsed_time $elapsed))"
             log_info "Reason: Kubernetes manifest application or verification failed"
             log_info "Check Kubernetes manifests, EKS cluster status, and kubectl output above"
             exit 1
         fi
     fi
     elapsed=$(( $(date +%s) - step_start_time ))
-    perf_step_end 5 "5.3" "SUCCESS" "Kubernetes manifests deployed"
-    log_success "Phase 5: Step 5.3 - Step ${step_num}/${total_steps} PASSED: Kubernetes manifests deployed (took $(format_elapsed_time $elapsed))"
+    perf_step_end 5 "5.2" "SUCCESS" "Kubernetes manifests deployed"
+    log_success "Phase 5: Step 5.2 - Step ${step_num}/${total_steps} PASSED: Kubernetes manifests deployed (took $(format_elapsed_time $elapsed))"
     perf_phase_end 5
     
     # Export updated step number for Phase 7 in main()

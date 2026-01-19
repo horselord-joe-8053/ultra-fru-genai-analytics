@@ -1,11 +1,12 @@
+# Project/Environment
 variable "project_name" {
   type        = string
-  description = "Project name prefix"
+  description = "Project name"
 }
 
 variable "environment" {
   type        = string
-  description = "Environment (dev/prod)"
+  description = "Environment"
 }
 
 variable "aws_region" {
@@ -13,6 +14,7 @@ variable "aws_region" {
   description = "AWS region"
 }
 
+# Infrastructure Dependencies (from infrastructure layer)
 variable "vpc_id" {
   type        = string
   description = "VPC ID (from infrastructure layer)"
@@ -28,6 +30,7 @@ variable "public_subnet_ids" {
   description = "Public subnet IDs (for load balancers)"
 }
 
+# EKS Cluster Configuration
 variable "cluster_version" {
   type        = string
   description = "Kubernetes version"
@@ -74,7 +77,7 @@ variable "node_group_disk_size" {
 # Fargate Profile Configuration (if enable_fargate = true)
 variable "fargate_profiles" {
   type = list(object({
-    name          = string
+    name      = string
     selectors = list(object({
       namespace = string
       labels    = map(string)
@@ -112,13 +115,13 @@ variable "endpoint_private_access" {
 variable "endpoint_public_access" {
   type        = bool
   description = "Enable public API endpoint. Required for kubectl access from deployment machines outside VPC (unlike ECS which uses AWS APIs). Default true for dev/staging, consider false for production with EC2 runner."
-  default     = true  # Changed default to true - EKS needs this for kubectl deployment (unlike ECS)
+  default     = true
 }
 
 variable "endpoint_public_access_cidrs" {
   type        = list(string)
-  description = "CIDR blocks allowed to access public endpoint. Default ['0.0.0.0/0'] = all IPs (still requires IAM auth). Can restrict to specific IPs for additional security (e.g., office/home IPs)."
-  default     = ["0.0.0.0/0"]  # Default = open to all IPs (still authenticated via IAM); can restrict if needed
+  description = "CIDR blocks allowed to access public endpoint. Default ['0.0.0.0/0'] = all IPs (still requires IAM auth). Can restrict to specific IPs for additional security."
+  default     = ["0.0.0.0/0"]
 }
 
 # Cluster Logging
@@ -138,6 +141,37 @@ variable "enable_secrets_encryption" {
 variable "kms_key_id" {
   type        = string
   description = "KMS key ID for secrets encryption (optional, creates one if not provided)"
+  default     = null
+}
+
+# Frontend Configuration
+variable "enable_frontend_versioning" {
+  type        = bool
+  description = "Enable S3 versioning for frontend"
+  default     = false
+}
+
+variable "cloudfront_price_class" {
+  type        = string
+  description = "CloudFront price class"
+  default     = "PriceClass_100"
+}
+
+variable "frontend_certificate_arn" {
+  type        = string
+  description = "CloudFront certificate ARN (must be in us-east-1)"
+  default     = null
+}
+
+variable "frontend_api_origin_id" {
+  type        = string
+  description = "API origin ID for CloudFront"
+  default     = null
+}
+
+variable "alb_dns_name" {
+  type        = string
+  description = "ALB DNS name for API origin (optional - for EKS, comes from Kubernetes Ingress)"
   default     = null
 }
 

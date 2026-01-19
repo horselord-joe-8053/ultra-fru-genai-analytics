@@ -11,7 +11,7 @@ include "env" {
 }
 
 terraform {
-  source = "${get_terragrunt_dir()}/../../../modules//application"
+  source = "${get_terragrunt_dir()}/../../../modules//application-ecs"
 }
 
 # Set custom cache directory location for this configuration

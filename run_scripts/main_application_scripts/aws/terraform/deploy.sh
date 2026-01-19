@@ -1,7 +1,7 @@
 #!/bin/bash
 # Deploy infrastructure using Terragrunt
 # Idempotent: terragrunt apply is safe to run multiple times
-# Usage: ./deploy.sh [dev|prod] [infrastructure|application|eks|all]
+# Usage: ./deploy.sh [dev|prod] [infrastructure|application-ecs|application-eks|all]
 
 set -e
 
@@ -25,9 +25,9 @@ if [[ ! "$ENVIRONMENT" =~ ^(dev|prod)$ ]]; then
     exit 1
 fi
 
-if [[ ! "$LAYER" =~ ^(infrastructure|application|eks|all)$ ]]; then
+if [[ ! "$LAYER" =~ ^(infrastructure|application|application-ecs|application-eks|all)$ ]]; then
     log_error "Invalid layer: $LAYER"
-    log_info "Usage: $0 [dev|prod] [infrastructure|application|eks|all]"
+    log_info "Usage: $0 [dev|prod] [infrastructure|application|application-ecs|application-eks|all]"
     exit 1
 fi
 
@@ -590,7 +590,7 @@ deploy_terragrunt() {
             log_info "      and create a new task definition, triggering ECS to deploy the new image"
         fi
         
-        cd "$ENV_DIR/application"
+        cd "$ENV_DIR/application-ecs"
         
         # Refresh state before planning to ensure we have latest state
         log_info "Refreshing Terraform state to ensure latest state..."
@@ -622,15 +622,15 @@ deploy_terragrunt() {
         fi
     fi
     
-    # Deploy EKS layer
-    if [ "$LAYER" = "eks" ] || [ "$LAYER" = "all" ]; then
-        log_step "Deploying EKS layer (EKS cluster, node groups, OIDC provider)"
+    # Deploy application-eks layer (EKS cluster + Frontend for EKS)
+    if [ "$LAYER" = "application-eks" ] || [ "$LAYER" = "all" ]; then
+        log_step "Deploying application-eks layer (EKS cluster, node groups, OIDC provider, Frontend)"
         
-        cd "$ENV_DIR/eks"
+        cd "$ENV_DIR/application-eks"
         
-        log_info "Running terragrunt plan for EKS layer..."
-        if ! terragrunt plan; then
-            log_error "Terraform plan failed for EKS layer"
+        log_info "Running terragrunt plan for application-eks layer..."
+        if ! run_with_lock_retry "plan (application-eks)" terragrunt plan -lock-timeout=30s -refresh=true; then
+            log_error "Terraform plan failed for application-eks layer"
             log_info "Check the plan output above for errors"
             exit 1
         fi
@@ -639,13 +639,14 @@ deploy_terragrunt() {
             log_info "[DRY-RUN] Would run: terragrunt apply"
             log_info "[DRY-RUN] Plan output shown above. No changes will be made."
         else
-            log_info "Applying Terragrunt configuration for EKS layer..."
-            if ! terragrunt apply -auto-approve; then
-                log_error "Terraform apply failed for EKS layer"
+            log_info "Applying Terragrunt configuration for application-eks layer..."
+            if ! run_with_lock_retry "apply (application-eks)" terragrunt apply -auto-approve -lock-timeout=30s; then
+                log_error "Terraform apply failed for application-eks layer"
                 log_info "Check the apply output above for errors"
                 exit 1
             fi
-            log_success "EKS layer deployed successfully!"
+            log_success "Application-eks layer deployed successfully!"
+            log_info "Frontend CloudFront distribution and S3 bucket are now ready"
         fi
     fi
     

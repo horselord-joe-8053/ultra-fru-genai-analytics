@@ -12,6 +12,23 @@ This module creates an Amazon EKS (Elastic Kubernetes Service) cluster with eith
 - Configurable endpoint access (private/public)
 - Security groups for cluster and nodes
 
+## Endpoint Access: EKS vs ECS
+
+**Why EKS needs public endpoint (unlike ECS):**
+
+- **ECS Deployment**: Uses AWS APIs (`ecs.amazonaws.com`) - public endpoints accessible from anywhere with AWS credentials. No VPC network access needed for deployment.
+
+- **EKS Deployment**: Uses `kubectl` - direct network connection to Kubernetes API server endpoint. If endpoint is private (in VPC), `kubectl` from outside VPC cannot access it.
+
+**Implications:**
+- **ECS**: Works from anywhere (AWS APIs are public but authenticated)
+- **EKS with public endpoint**: Works from anywhere (`kubectl` can reach API server, still authenticated via IAM)
+- **EKS with private endpoint**: Requires EC2 runner/VPN inside VPC for `kubectl` access (adds complexity)
+
+**Security Note:**
+- Public endpoint is still secure: IAM authentication required, pods remain in private subnets
+- Consider restricting `endpoint_public_access_cidrs` to specific IPs for additional security
+
 ## Usage
 
 ```hcl

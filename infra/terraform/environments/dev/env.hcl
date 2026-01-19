@@ -33,14 +33,21 @@ inputs = {
   ecs_task_memory = 4096
   
   # EKS configuration
-  eks_cluster_version = "1.28"
+  eks_cluster_version = "1.29"  # Updated to match current cluster version (can't downgrade)
   eks_enable_fargate = true  # Use Fargate for dev (simpler, no node management)
   eks_node_group_instance_types = ["t3.medium"]  # Only used if enable_fargate = false
   eks_node_group_desired_size = 2
   eks_node_group_min_size = 1
   eks_node_group_max_size = 3
-  eks_endpoint_private_access = true
-  eks_endpoint_public_access = false  # Private only for security
+  # EKS endpoint access configuration
+  # NOTE: Unlike ECS, EKS requires public endpoint for kubectl access from deployment machines
+  # - ECS: Uses AWS APIs (ecs.amazonaws.com) - public endpoints, works from anywhere with AWS credentials
+  # - EKS: Uses kubectl - direct network connection to API server endpoint (requires public endpoint for remote access)
+  # - Private endpoint would require EC2 runner/VPN inside VPC, which adds complexity
+  # - Public endpoint is still secure: IAM authentication required, pods remain in private subnets
+  eks_endpoint_private_access = true   # Can keep both for flexibility
+  eks_endpoint_public_access = true    # Required for kubectl deployment from outside VPC (unlike ECS)
+  eks_endpoint_public_access_cidrs = ["0.0.0.0/0"] # Open to all IPs (still requires IAM auth); can restrict to specific IPs if needed
   eks_enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
   
   # Secrets (should be provided via terraform.tfvars or environment variables)

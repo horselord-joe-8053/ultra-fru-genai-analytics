@@ -2,6 +2,12 @@
 # Main EKS deployment orchestrator
 # This script orchestrates the full EKS deployment process
 # Usage: ./deploy.sh [--skip-build] [--skip-frontend] [--manifests-dir <path>]
+#
+# NOTE: Unlike ECS, EKS deployment requires kubectl access to the cluster API server endpoint
+# - ECS: Uses AWS APIs (public endpoints) - works from anywhere with AWS credentials, no VPC access needed
+# - EKS: Uses kubectl - requires network access to API server (needs public endpoint or VPC access for private endpoint)
+# - With public endpoint: Works from anywhere (still IAM-authenticated), pods remain private
+# - With private endpoint: Requires EC2 runner/VPN inside VPC for kubectl access (adds complexity)
 
 set -e
 

@@ -43,7 +43,14 @@ echo ""
 # ============================================================================
 log_step "1. Terraform Outputs"
 TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT"
-APP_DIR="$TERRAFORM_DIR/application"
+# Check application-ecs by default (for ECS deployments)
+# For EKS, use application-eks
+CONTAINER_TYPE="${CONTAINER_TYPE:-ecs}"
+if [ "$CONTAINER_TYPE" = "eks" ]; then
+    APP_DIR="$TERRAFORM_DIR/application-eks"
+else
+    APP_DIR="$TERRAFORM_DIR/application-ecs"
+fi
 
 terraform_bucket=""
 if [ -d "$APP_DIR" ] && command -v terragrunt >/dev/null 2>&1; then

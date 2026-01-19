@@ -279,7 +279,7 @@ fi
 # 1.2. Stop all running tasks/pods (including one-off tasks, retry up to 30 times)
 # 1.3. Wait for all tasks/pods to fully stop (up to 5 minutes)
 stop_services() {
-    log_step "Substep 1: Stopping ${CONTAINER_TYPE^^} Services and Tasks"
+    log_step "Substep 1: Stopping $(echo "$CONTAINER_TYPE" | tr '[:lower:]' '[:upper:]') Services and Tasks"
     
     local cluster_name="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
     local helpers_dir="$SCRIPT_DIR/../helpers"

@@ -59,7 +59,14 @@ build_frontend_if_needed() {
         fi
         
         # Build frontend
-        log_info "Running frontend build..."
+        # BUILD_TIME is injected automatically by vite.config.ts using Date.now()
+        # VITE_PROVIDER, VITE_CONTAINER_TYPE, VITE_ENVIRONMENT are passed to Vite for version label
+        # This ensures the version (V_YYMMDD-HHMMSS_PROVIDER_CONTAINER_ENV) reflects build context
+        # If CONTAINER_TYPE/ENVIRONMENT are not set, defaults will be used (from vite.config.ts)
+        export VITE_PROVIDER="${VITE_PROVIDER:-aws}"
+        export VITE_CONTAINER_TYPE="${CONTAINER_TYPE:-${VITE_CONTAINER_TYPE:-ecs}}"
+        export VITE_ENVIRONMENT="${ENVIRONMENT:-${VITE_ENVIRONMENT:-dev}}"
+        log_info "Running frontend build (provider=$VITE_PROVIDER, container=$VITE_CONTAINER_TYPE, env=$VITE_ENVIRONMENT)..."
         npm run build || {
             log_error "Failed to build frontend"
             return 1

@@ -882,10 +882,10 @@ print_summary() {
     # Next steps
     if [ $pending_count -gt 0 ]; then
         log_warning "⚠ Some resources are still deleting (Aurora, CloudFront may take 10-20+ minutes)"
-        log_info "   Wait for deletions to complete before running 'run.sh ecs-full dev'"
+        log_info "   Wait for deletions to complete before running 'run.sh deploy --container-type ecs dev'"
         log_info "   Or run immediately and let Terraform refresh handle state sync"
     else
-        log_info "You can now run 'run.sh ecs-full dev' to recreate all resources."
+        log_info "You can now run 'run.sh deploy --container-type ecs dev' to recreate all resources."
     fi
     echo ""
 }

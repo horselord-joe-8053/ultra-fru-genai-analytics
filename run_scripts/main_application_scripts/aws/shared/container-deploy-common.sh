@@ -30,13 +30,14 @@ deploy_phase_check_image() {
     local step_num="$1"
     local total_steps="$2"
     
-    perf_phase_start 1 "Environment Preparation"
-    perf_step_start 1 "1.3" "Checking container image availability"
+    perf_phase_start 1 "Environment Preparation" >&2
+    perf_step_start 1 "1.3" "Checking container image availability" >&2
     local step_start_time=$(date +%s)
-    log_step "Phase 1: Step 1.3 - Step ${step_num}/${total_steps}: Checking container image availability"
+    log_step "Phase 1: Step 1.3 - Step ${step_num}/${total_steps}: Checking container image availability" >&2
     
     # Call check_or_build_image function (defined in run.sh when this is sourced)
-    if ! check_or_build_image; then
+    # Redirect all output from check_or_build_image to stderr to prevent interfering with return value
+    if ! check_or_build_image >&2; then
         local elapsed=$(( $(date +%s) - step_start_time ))
         log_error "Phase 1: Step 1.3 - Step ${step_num}/${total_steps} FAILED: Container image check/build failed (took $(format_elapsed_time $elapsed))"
         log_info "Reason: Unable to check ECR for existing image or build/push new image"
@@ -45,9 +46,9 @@ deploy_phase_check_image() {
     fi
     
     local elapsed=$(( $(date +%s) - step_start_time ))
-    log_success "Phase 1: Step 1.3 - Step ${step_num}/${total_steps} PASSED: Container image ready (took $(format_elapsed_time $elapsed))"
+    log_success "Phase 1: Step 1.3 - Step ${step_num}/${total_steps} PASSED: Container image ready (took $(format_elapsed_time $elapsed))" >&2
     
-    # Return incremented step number
+    # Return incremented step number (to stdout, separate from log output)
     echo $((step_num + 1))
 }
 

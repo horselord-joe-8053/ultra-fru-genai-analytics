@@ -1,7 +1,8 @@
 #!/bin/bash
 # Auto-verify deployment and show manual test hints
 # Replaces: post_run_verify.sh + manual_test_hint.sh
-# Usage: ./auto_verify_and_manual_hint.sh <deployment-type> <environment> [dry-run]
+# Usage: ./auto_verify_and_manual_hint.sh <environment> [dry-run]
+# Note: CONTAINER_TYPE must be set via environment variable (from run.sh --container-type parameter)
 
 set -e
 
@@ -33,13 +34,14 @@ echo ""
 
 # Step 1: Fetch deployment information
 log_step "Substep 1/4: Fetching deployment information from Terraform..."
-source "$VERIFICATION_DIR/fetch-deployment-info.sh" "$DEPLOYMENT_TYPE" "$ENVIRONMENT" "$DRY_RUN"
+# CONTAINER_TYPE is already exported from run.sh
+source "$VERIFICATION_DIR/fetch-deployment-info.sh" "" "$ENVIRONMENT" "$DRY_RUN"
 
 # Step 2: Quick service status checks (lightweight, no retry)
 if [ "$DRY_RUN" != "true" ]; then
     log_step "Substep 2/4: Checking service status..."
     source "$VERIFICATION_DIR/check-service-status.sh"
-    check_service_status "$DEPLOYMENT_TYPE" "$ENVIRONMENT" || true  # Don't fail on status checks
+    check_service_status "$CONTAINER_TYPE" "$ENVIRONMENT" || true  # Don't fail on status checks
     echo ""
 fi
 
