@@ -10,7 +10,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 
-TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments"
+TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments"
 RESULTS_DIR="$REPO_ROOT/temp_terra_gen/validation_sh_results"
 TIMESTAMP=$(date +%y%m%d-%H%M%S)
 SCRIPT_PREFIX="terra_validation"

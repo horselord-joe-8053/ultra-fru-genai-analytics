@@ -13,7 +13,7 @@ ENVIRONMENT="${ENVIRONMENT:-dev}"
 
 # Get S3 bucket info from Terraform outputs
 if [ -z "$S3_BUCKET_ID" ]; then
-    INFRASTRUCTURE_DIR="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT/infrastructure"
+    INFRASTRUCTURE_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT/infrastructure"
     if [ -d "$INFRASTRUCTURE_DIR" ]; then
         cd "$INFRASTRUCTURE_DIR"
         S3_BUCKET_ID=$(AWS_PROFILE="${AWS_PROFILE:-admin}" terragrunt output -raw s3_data_bucket_id 2>/dev/null || echo "")

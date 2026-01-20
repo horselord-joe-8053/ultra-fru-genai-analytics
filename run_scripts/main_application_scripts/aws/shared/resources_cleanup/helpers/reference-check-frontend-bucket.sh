@@ -42,14 +42,14 @@ echo ""
 # 1. Check Terraform Outputs
 # ============================================================================
 log_step "1. Terraform Outputs"
-TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT"
-# Check application-ecs by default (for ECS deployments)
-# For EKS, use application-eks
+TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT"
+# Check ecs by default (for ECS deployments)
+# For EKS, use eks
 CONTAINER_TYPE="${CONTAINER_TYPE:-ecs}"
 if [ "$CONTAINER_TYPE" = "eks" ]; then
-    APP_DIR="$TERRAFORM_DIR/application-eks"
+    APP_DIR="$TERRAFORM_DIR/eks"
 else
-    APP_DIR="$TERRAFORM_DIR/application-ecs"
+    APP_DIR="$TERRAFORM_DIR/ecs"
 fi
 
 terraform_bucket=""

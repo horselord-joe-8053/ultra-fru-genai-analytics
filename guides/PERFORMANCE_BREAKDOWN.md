@@ -676,7 +676,7 @@ sequenceDiagram
 ### A.2 Test Environment
 
 - **Environment**: `dev`
-- **Deployment Type**: `ecs-full`
+- **Container Type**: `ecs-full`
 - **AWS Region**: `us-east-1`
 - **Cache TTL**: 1 hour (default)
 

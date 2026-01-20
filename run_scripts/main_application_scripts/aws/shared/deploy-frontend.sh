@@ -38,13 +38,13 @@ deploy_frontend() {
     log_info "Using AWS profile: $AWS_PROFILE (for infrastructure operations)"
     
     # Get S3 bucket name from Terraform outputs
-    # Use application-eks for EKS, application-ecs for ECS
-    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT"
+    # Use eks for EKS, ecs for ECS
+    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT"
     CONTAINER_TYPE="${CONTAINER_TYPE:-ecs}"
     if [ "$CONTAINER_TYPE" = "eks" ]; then
-        APP_DIR="$TERRAFORM_DIR/application-eks"
+        APP_DIR="$TERRAFORM_DIR/eks"
     else
-        APP_DIR="$TERRAFORM_DIR/application-ecs"
+        APP_DIR="$TERRAFORM_DIR/ecs"
     fi
     
     local s3_bucket_name=""

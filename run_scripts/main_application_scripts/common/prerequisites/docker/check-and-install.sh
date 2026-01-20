@@ -26,15 +26,62 @@ check_docker() {
         return 1
     fi
     
-    # Check if docker daemon is running (optional check, but useful)
-    if ! docker info >/dev/null 2>&1; then
-        log_warning "Docker is installed but daemon is not running"
-        log_info "Please start Docker Desktop (macOS) or Docker service (Linux)"
-        # Don't fail - user might start it manually
-    fi
-    
+    # Get Docker version (fast, doesn't require daemon)
     local docker_version=$(docker --version 2>&1)
     log_success "Docker is installed: $docker_version"
+    
+    # Check if docker daemon is running (with timeout to prevent hanging)
+    # Docker daemon MUST be running in both dry-run and non-dry-run modes
+    local docker_daemon_running=false
+    local docker_check_timeout=5
+    
+    # Use timeout if available to prevent hanging
+    if command_exists timeout; then
+        if timeout "$docker_check_timeout" docker info >/dev/null 2>&1; then
+            docker_daemon_running=true
+        fi
+    elif command_exists gtimeout; then
+        # macOS alternative: gtimeout from coreutils
+        if gtimeout "$docker_check_timeout" docker info >/dev/null 2>&1; then
+            docker_daemon_running=true
+        fi
+    else
+        # Fallback: try docker info with background process and kill after timeout
+        (docker info >/dev/null 2>&1) &
+        local docker_pid=$!
+        sleep "$docker_check_timeout"
+        if kill -0 "$docker_pid" 2>/dev/null; then
+            # Still running after timeout, likely hanging - kill it
+            kill "$docker_pid" 2>/dev/null || true
+            wait "$docker_pid" 2>/dev/null || true
+        else
+            # Process completed quickly, check exit code
+            if wait "$docker_pid" 2>/dev/null; then
+                docker_daemon_running=true
+            fi
+        fi
+    fi
+    
+    # Docker daemon MUST be running in both dry-run and non-dry-run modes
+    if [ "$docker_daemon_running" != "true" ]; then
+        log_error "Docker daemon is not running"
+        log_error ""
+        log_error "Docker daemon must be running for deployment operations:"
+        if [ "${DRY_RUN:-false}" = "true" ]; then
+            log_error "  - Dry-run mode requires Docker daemon to validate environment"
+        else
+            log_error "  - Non-dry-run mode requires Docker daemon to build container images"
+        fi
+        log_error ""
+        log_error "To fix this:"
+        log_error "  - Start Docker Desktop (macOS): Open Docker Desktop application"
+        log_error "  - Start Docker service (Linux): sudo systemctl start docker"
+        log_error ""
+        return 1
+    fi
+    
+    log_success "Docker daemon is running"
+    
     return 0
 }
 

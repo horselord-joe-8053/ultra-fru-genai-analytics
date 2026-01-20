@@ -68,11 +68,11 @@ fetch_terraform_outputs() {
     K8S_SERVICE_IP="${K8S_SERVICE_IP:-}"
     K8S_INGRESS_HOST="${K8S_INGRESS_HOST:-}"
     
-    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT"
+    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT"
     
     # Fetch ECS/ALB outputs (for ECS container type)
     if [ "${CONTAINER_TYPE:-ecs}" = "ecs" ]; then
-        APP_DIR="$TERRAFORM_DIR/application-ecs"
+        APP_DIR="$TERRAFORM_DIR/ecs"
         if [ -d "$APP_DIR" ] && command_exists terragrunt; then
             ORIG_DIR=$(pwd)
             cd "$APP_DIR" 2>/dev/null || return 0
@@ -240,15 +240,15 @@ fetch_terraform_outputs() {
             cd "$ORIG_DIR" 2>/dev/null || true
         fi
         
-        # Fetch CloudFront domain from application-eks terraform outputs (for EKS frontend)
-        APP_DIR="$TERRAFORM_DIR/application-eks"
+        # Fetch CloudFront domain from eks terraform outputs (for EKS frontend)
+        APP_DIR="$TERRAFORM_DIR/eks"
         if [ -d "$APP_DIR" ] && command_exists terragrunt; then
             ORIG_DIR=$(pwd)
             cd "$APP_DIR" 2>/dev/null || return 0
             
             if [ -z "${CLOUDFRONT_DOMAIN:-}" ]; then
-                log_info "Fetching Terraform output: cloudfront_domain_name (from application-eks module, for EKS)"
-                # Fetch from application-eks module which has separate CloudFront distribution
+                log_info "Fetching Terraform output: cloudfront_domain_name (from eks module, for EKS)"
+                # Fetch from eks module which has separate CloudFront distribution
                 if ! CLOUDFRONT_DOMAIN=$(terragrunt output -raw cloudfront_domain_name 2>&1); then
                     terragrunt_error="$CLOUDFRONT_DOMAIN"
                     CLOUDFRONT_DOMAIN=""

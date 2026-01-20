@@ -5,6 +5,20 @@
 # These functions extract common logic from deploy_ecs_full() and deploy_eks_full()
 # to reduce code duplication and improve maintainability.
 
+# Source progress indicator if available
+echo "[DEBUG] container-deploy-common.sh: Starting to source progress-indicator.sh at $(date)" >&2
+SCRIPT_DIR_COMMON="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT_COMMON="${REPO_ROOT:-$(cd "$SCRIPT_DIR_COMMON/../../../../.." && pwd)}"
+echo "[DEBUG] container-deploy-common.sh: SCRIPT_DIR_COMMON=$SCRIPT_DIR_COMMON, REPO_ROOT_COMMON=$REPO_ROOT_COMMON" >&2
+if [ -f "$REPO_ROOT_COMMON/run_scripts/shared/progress-indicator.sh" ]; then
+    echo "[DEBUG] container-deploy-common.sh: Found progress-indicator.sh, sourcing..." >&2
+    source "$REPO_ROOT_COMMON/run_scripts/shared/progress-indicator.sh"
+    echo "[DEBUG] container-deploy-common.sh: progress-indicator.sh sourced successfully" >&2
+else
+    echo "[DEBUG] container-deploy-common.sh: progress-indicator.sh not found at $REPO_ROOT_COMMON/run_scripts/shared/progress-indicator.sh" >&2
+fi
+echo "[DEBUG] container-deploy-common.sh: Finished sourcing, continuing..." >&2
+
 # Helper function to format elapsed time
 format_elapsed_time() {
     local seconds=$1
@@ -27,17 +41,48 @@ format_elapsed_time() {
 # Returns: New step_num (incremented by 1) via echo
 # Usage: step_num=$(deploy_phase_check_image "$step_num" "$total_steps")
 deploy_phase_check_image() {
+    # Log immediately when function is called (before any other operations)
+    echo "[DEBUG] deploy_phase_check_image: FUNCTION CALLED at $(date)" >&2
+    
     local step_num="$1"
     local total_steps="$2"
+    
+    log_info "[DEBUG] deploy_phase_check_image: Starting at $(date)" >&2
+    log_info "[DEBUG] deploy_phase_check_image: step_num=$step_num, total_steps=$total_steps" >&2
     
     perf_phase_start 1 "Environment Preparation" >&2
     perf_step_start 1 "1.3" "Checking container image availability" >&2
     local step_start_time=$(date +%s)
     log_step "Phase 1: Step 1.3 - Step ${step_num}/${total_steps}: Checking container image availability" >&2
     
+    log_info "[DEBUG] deploy_phase_check_image: About to start progress indicator..." >&2
+    # Start progress indicator for image check/build
+    if command -v progress_heartbeat_start >/dev/null 2>&1; then
+        log_info "[DEBUG] deploy_phase_check_image: Starting heartbeat..." >&2
+        progress_heartbeat_start "Checking/building container image" 10 >&2
+        log_info "[DEBUG] deploy_phase_check_image: Heartbeat started" >&2
+    else
+        log_info "[DEBUG] deploy_phase_check_image: progress_heartbeat_start not available" >&2
+    fi
+    
+    log_info "[DEBUG] deploy_phase_check_image: About to call check_or_build_image..." >&2
     # Call check_or_build_image function (defined in run.sh when this is sourced)
     # Redirect all output from check_or_build_image to stderr to prevent interfering with return value
+    local image_check_result=0
+    local check_start=$(date +%s)
     if ! check_or_build_image >&2; then
+        image_check_result=1
+    fi
+    local check_elapsed=$(( $(date +%s) - check_start ))
+    log_info "[DEBUG] deploy_phase_check_image: check_or_build_image completed in ${check_elapsed}s, result=$image_check_result" >&2
+    
+    # Stop progress indicator
+    if command -v progress_heartbeat_stop >/dev/null 2>&1; then
+        log_info "[DEBUG] deploy_phase_check_image: Stopping heartbeat..." >&2
+        progress_heartbeat_stop >&2
+    fi
+    
+    if [ "$image_check_result" -ne 0 ]; then
         local elapsed=$(( $(date +%s) - step_start_time ))
         log_error "Phase 1: Step 1.3 - Step ${step_num}/${total_steps} FAILED: Container image check/build failed (took $(format_elapsed_time $elapsed))"
         log_info "Reason: Unable to check ECR for existing image or build/push new image"
@@ -63,7 +108,22 @@ deploy_phase_setup_state_bucket() {
     local step_start_time=$(date +%s)
     log_step "Phase 2: Step 2.2 - Step ${step_num}/${total_steps}: Setting up Terraform state bucket"
     
+    # Start progress indicator
+    if command -v progress_heartbeat_start >/dev/null 2>&1; then
+        progress_heartbeat_start "Setting up Terraform state bucket" 10
+    fi
+    
+    local bucket_setup_result=0
     if ! "$script_dir/terraform/setup-s3-bucket.sh"; then
+        bucket_setup_result=1
+    fi
+    
+    # Stop progress indicator
+    if command -v progress_heartbeat_stop >/dev/null 2>&1; then
+        progress_heartbeat_stop
+    fi
+    
+    if [ "$bucket_setup_result" -ne 0 ]; then
         local elapsed=$(( $(date +%s) - step_start_time ))
         log_error "Phase 2: Step 2.2 - Step ${step_num}/${total_steps} FAILED: Terraform state bucket setup failed (took $(format_elapsed_time $elapsed))"
         log_info "Reason: Unable to create or configure S3 bucket for Terraform state"
@@ -89,7 +149,22 @@ deploy_phase_deploy_infrastructure() {
     local step_start_time=$(date +%s)
     log_step "Phase 2: Step 2.3 - Step ${step_num}/${total_steps}: Deploying infrastructure layer"
     
+    # Start progress indicator for Terraform operations (can take a long time)
+    if command -v progress_heartbeat_start >/dev/null 2>&1; then
+        progress_heartbeat_start "Deploying infrastructure layer (Terraform)" 10
+    fi
+    
+    local infra_deploy_result=0
     if ! "$script_dir/terraform/deploy.sh" "$environment" infrastructure; then
+        infra_deploy_result=1
+    fi
+    
+    # Stop progress indicator
+    if command -v progress_heartbeat_stop >/dev/null 2>&1; then
+        progress_heartbeat_stop
+    fi
+    
+    if [ "$infra_deploy_result" -ne 0 ]; then
         local elapsed=$(( $(date +%s) - step_start_time ))
         perf_step_end 2 "2.3" "FAILED" "Infrastructure deployment failed"
         log_error "Phase 2: Step 2.3 - Step ${step_num}/${total_steps} FAILED: Infrastructure deployment failed (took $(format_elapsed_time $elapsed))"

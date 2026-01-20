@@ -37,32 +37,32 @@ def run_spark_analytics():
         script_path = os.path.join(repo_root, "spark_jobs", "run_analytics.py")
         output_dir = os.path.join(repo_root, "data", "analytics")
         
-        # Detect deployment type from environment (set by Terraform for AWS)
-        # Local deployments don't set DEPLOYMENT_TYPE, so it will be empty
-        deployment_type = os.environ.get("DEPLOYMENT_TYPE", "").lower()
-        is_ecs_deployment = "ecs" in deployment_type
-        is_eks_deployment = "eks" in deployment_type
+        # Detect container type from environment (set by Terraform for AWS)
+        # Local deployments don't set CONTAINER_TYPE, so it will be empty
+        container_type = os.environ.get("CONTAINER_TYPE", "").lower()
+        is_ecs_deployment = "ecs" in container_type
+        is_eks_deployment = "eks" in container_type
         is_aws_deployment = is_ecs_deployment or is_eks_deployment
         
         # Detect if path is S3-based (AWS deployments use S3)
         is_s3_based = delta_path.startswith('s3://') or delta_path.startswith('s3a://')
         
-        # Validate: DEPLOYMENT_TYPE must match path type (fail-fast)
+        # Validate: CONTAINER_TYPE must match path type (fail-fast)
         if is_ecs_deployment != is_s3_based:
             if is_ecs_deployment and not is_s3_based:
                 error_msg = (
-                    f"Configuration mismatch: DEPLOYMENT_TYPE={deployment_type} indicates ECS deployment, "
+                    f"Configuration mismatch: CONTAINER_TYPE={container_type} indicates ECS deployment, "
                     f"but DELTA_TABLE_PATH={delta_path} is not an S3 path (should start with s3:// or s3a://). "
                     f"Please ensure DELTA_TABLE_PATH is set to an S3 path for ECS deployments."
                 )
             elif not is_ecs_deployment and is_s3_based:
                 error_msg = (
                     f"Configuration mismatch: DELTA_TABLE_PATH={delta_path} is an S3 path, "
-                    f"but DEPLOYMENT_TYPE={deployment_type or '(not set)'} does not indicate ECS deployment. "
-                    f"For ECS deployments, DEPLOYMENT_TYPE should be set to 'ecs' via Terraform."
+                    f"but CONTAINER_TYPE={container_type or '(not set)'} does not indicate ECS deployment. "
+                    f"For ECS deployments, CONTAINER_TYPE should be set to 'ecs' via Terraform."
                 )
             else:
-                error_msg = f"Configuration mismatch: DEPLOYMENT_TYPE={deployment_type}, DELTA_TABLE_PATH={delta_path}"
+                error_msg = f"Configuration mismatch: CONTAINER_TYPE={container_type}, DELTA_TABLE_PATH={delta_path}"
             
             logger.error(error_msg)
             raise ValueError(error_msg)

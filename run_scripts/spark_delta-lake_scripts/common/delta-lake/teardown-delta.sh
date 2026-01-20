@@ -127,7 +127,7 @@ fi
 # ============================================================================
 find_delta_tables_aws() {
     # Get S3 bucket from Terraform outputs
-    local infra_dir="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT/infrastructure"
+    local infra_dir="$REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT/infrastructure"
     local s3_bucket_id=""
     
     if [ -d "$infra_dir" ]; then

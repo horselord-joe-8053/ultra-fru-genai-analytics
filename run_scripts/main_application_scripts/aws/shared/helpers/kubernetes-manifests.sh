@@ -54,7 +54,15 @@ find_manifests_directory() {
 # Generate ConfigMap and Secret from templates
 generate_kubernetes_manifests() {
     local manifests_dir=$1
-    local repo_root="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)}"
+    # Resolve repo_root: use REPO_ROOT env var if set, otherwise resolve from script location
+    local repo_root="${REPO_ROOT:-}"
+    if [ -z "$repo_root" ]; then
+        repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)"
+    fi
+    # Ensure absolute path
+    if [[ "$repo_root" != /* ]]; then
+        repo_root="$(cd "$repo_root" && pwd)"
+    fi
     
     log_info "Generating ConfigMap and Secret from templates..."
     
@@ -71,11 +79,64 @@ generate_kubernetes_manifests() {
     if [ -f "$configmap_template" ]; then
         log_info "Generating ConfigMap from template..."
         if command_exists envsubst; then
-            # Most variables are now exported by load-env.sh (PGHOST, PGUSER, AWS_REGION, AWS_BEDROCK_MODEL_ID)
-            # Only export Kubernetes-specific variables that aren't in load-env.sh
+            # Most variables are now exported by load-env.sh (PGUSER, AWS_REGION, AWS_BEDROCK_MODEL_ID)
+            # For PGHOST, try to get from Terraform infrastructure outputs (for EKS deployments)
+            # This ensures we use the Aurora endpoint instead of localhost
+            # Try multiple possible paths for the Terraform infrastructure directory
+            local terraform_dir=""
+            local possible_paths=(
+                "${repo_root}/infra/terraform/providers/aws/environments/dev/infrastructure"
+                "${repo_root}/infra/terraform/environments/dev/infrastructure"
+                "$(cd "$repo_root" && find . -type d -path "*/infrastructure" -name "terragrunt.hcl" -o -name "*.hcl" | head -1 | xargs dirname 2>/dev/null)"
+            )
+            
+            for path in "${possible_paths[@]}"; do
+                if [ -d "$path" ] && [ -f "$path/terragrunt.hcl" ]; then
+                    terraform_dir="$path"
+                    break
+                fi
+            done
+            
+            if [ -n "$terraform_dir" ] && command_exists terragrunt; then
+                log_info "Fetching Aurora endpoint from Terraform infrastructure outputs..."
+                log_info "Terraform directory: $terraform_dir"
+                local aurora_endpoint
+                # Use AWS_PROFILE if set, otherwise terragrunt will use default credentials
+                local aws_profile="${AWS_PROFILE:-admin}"
+                if aurora_endpoint=$(cd "$terraform_dir" && AWS_PROFILE="$aws_profile" terragrunt output -raw aurora_endpoint 2>/dev/null); then
+                    if [ -n "$aurora_endpoint" ] && [ "$aurora_endpoint" != "null" ]; then
+                        export PGHOST="$aurora_endpoint"
+                        log_info "Using Aurora endpoint from Terraform: $PGHOST"
+                    else
+                        log_warning "Aurora endpoint from Terraform is empty, using PGHOST from environment or default"
+                        export PGHOST="${PGHOST:-localhost}"
+                    fi
+                else
+                    log_warning "Could not fetch Aurora endpoint from Terraform, using PGHOST from environment or default"
+                    export PGHOST="${PGHOST:-localhost}"
+                fi
+            else
+                # Fallback to environment variable or localhost
+                if [ -z "$terraform_dir" ]; then
+                    log_info "Terraform infrastructure directory not found, using PGHOST from environment or default"
+                else
+                    log_info "terragrunt not available, using PGHOST from environment or default"
+                fi
+                export PGHOST="${PGHOST:-localhost}"
+            fi
+            
+            # Export all variables with defaults BEFORE envsubst (envsubst doesn't understand ${VAR:-default} syntax)
+            export PGUSER="${PGUSER:-postgres}"
+            export AWS_REGION="${AWS_REGION:-us-east-1}"
+            export AWS_BEDROCK_INFERENCE_PROFILE_ID="${AWS_BEDROCK_INFERENCE_PROFILE_ID:-}"
+            export AWS_BEDROCK_MODEL_ID="${AWS_BEDROCK_MODEL_ID:-anthropic.claude-3-haiku-20240307-v1:0}"
             export OPENAI_EMBED_MODEL="${OPENAI_EMBED_MODEL:-text-embedding-3-small}"
             export USE_AGENT_QUERY="${USE_AGENT_QUERY:-false}"
             export LOG_LEVEL="${LOG_LEVEL:-INFO}"
+            export ENABLE_ANALYTICS_SCHEDULER="${ENABLE_ANALYTICS_SCHEDULER:-false}"
+            export ANALYTICS_SCHEDULER_INTERVAL_SECONDS="${ANALYTICS_SCHEDULER_INTERVAL_SECONDS:-3600}"
+            # Get CloudFront domain from Terraform output for CORS
+            export ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-https://d325mh0wy4je4e.cloudfront.net}"
             
             envsubst < "$configmap_template" > "$configmap_output"
             log_success "ConfigMap generated: configmap-generated.yaml"

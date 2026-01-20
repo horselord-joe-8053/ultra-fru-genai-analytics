@@ -10,7 +10,7 @@ Environment Variables:
     DELTA_TABLE_PATH - Path to Delta table (default: data/delta/fru_sales)
     REPO_ROOT - Repository root (auto-detected if not set)
     SPARK_HOME - Spark installation path (default: /opt/spark)
-    DEPLOYMENT_TYPE - Deployment type (ecs, eks, or empty for local)
+    CONTAINER_TYPE - Container type (ecs, eks, or empty for local)
     DELTA_LAKE_PACKAGE - Delta Lake Maven package (required)
     PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE - Database config (required)
 """

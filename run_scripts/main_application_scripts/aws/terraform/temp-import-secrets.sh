@@ -83,7 +83,7 @@ fi
 
 # Terraform directory for the specified environment's infrastructure layer
 # This is where the secrets_manager module is deployed
-TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT/infrastructure"
+TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT/infrastructure"
 
 log_step "Importing Secrets Manager secrets into Terraform state"
 log_info "Environment: $ENVIRONMENT"

@@ -17,6 +17,22 @@ spec:
         app: fru-api
         component: backend
     spec:
+      # DNS configuration for Fargate pods to resolve VPC DNS
+      # EKS Fargate pods need VPC DNS resolver to resolve RDS/Aurora endpoints
+      # Use Default policy to use VPC DNS directly (like ECS tasks do)
+      # This bypasses CoreDNS which may not be available in Fargate
+      dnsPolicy: Default
+      dnsConfig:
+        nameservers:
+        - "169.254.169.253"  # VPC DNS resolver (required for RDS/Aurora endpoint resolution)
+        searches:
+        - default.svc.cluster.local
+        - svc.cluster.local
+        - cluster.local
+        options:
+        - name: ndots
+          value: "2"
+        - name: edns0
       containers:
       - name: fru-api
         image: ${CONTAINER_IMAGE}
@@ -103,6 +119,23 @@ spec:
               name: fru-config
               key: log-level
               optional: true
+        - name: ENABLE_ANALYTICS_SCHEDULER
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: enable-analytics-scheduler
+              optional: true
+        - name: ANALYTICS_SCHEDULER_INTERVAL_SECONDS
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: analytics-scheduler-interval-seconds
+              optional: true
+        - name: ALLOWED_ORIGINS
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: allowed-origins
         resources:
           requests:
             memory: "512Mi"

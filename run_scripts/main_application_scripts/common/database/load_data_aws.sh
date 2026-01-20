@@ -48,7 +48,7 @@ load_data_aws() {
     log_step "Loading data into Aurora database"
     
     # Navigate to infrastructure directory
-    local infra_dir="$REPO_ROOT/infra/terraform/environments/$env/infrastructure"
+    local infra_dir="$REPO_ROOT/infra/terraform/providers/aws/environments/$env/infrastructure"
     if [ ! -d "$infra_dir" ]; then
         log_error "Infrastructure directory not found: $infra_dir"
         exit 1

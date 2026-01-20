@@ -22,7 +22,7 @@ print_test_header() {
     # AWS-specific fields
     if [[ "$test_env" == "aws" ]]; then
         echo "  Environment:     ${ENVIRONMENT:-dev}"
-        echo "  Deployment Type: ${DEPLOYMENT_TYPE:-ecs-full}"
+        echo "  Container Type: ${CONTAINER_TYPE:-ecs-full}"
         echo "  AWS Region:       ${AWS_REGION:-us-east-1}"
         
         # Cache status (always show for AWS, with conditional cache file location)

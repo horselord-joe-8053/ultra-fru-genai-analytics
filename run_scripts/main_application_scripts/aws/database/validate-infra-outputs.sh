@@ -12,7 +12,7 @@ ENVIRONMENT="${1:-dev}"
 
 validate_infrastructure_outputs() {
     local env="${1:-$ENVIRONMENT}"
-    local terraform_dir="$REPO_ROOT/infra/terraform/environments"
+    local terraform_dir="$REPO_ROOT/infra/terraform/providers/aws/environments"
     local infra_dir="$terraform_dir/$env/infrastructure"
     local required_outputs=(
         "db_password_secret_arn"

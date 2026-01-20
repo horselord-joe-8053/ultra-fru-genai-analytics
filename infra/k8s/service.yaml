@@ -6,6 +6,7 @@ metadata:
   labels:
     app: fru-api
 spec:
+  # Internal service only; external access is via NGINX Ingress
   type: ClusterIP
   ports:
   - port: 80
@@ -14,4 +15,3 @@ spec:
     name: http
   selector:
     app: fru-api
-

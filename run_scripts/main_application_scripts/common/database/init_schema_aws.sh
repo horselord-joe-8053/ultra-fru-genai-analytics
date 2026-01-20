@@ -40,7 +40,7 @@ init_schema_aws() {
     fi
     
     # Determine Terraform environment directory
-    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments"
+    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments"
     INFRA_DIR="$TERRAFORM_DIR/$env/infrastructure"
     SCHEMA_FILE="$REPO_ROOT/sql/schema_pgvector.sql"
     

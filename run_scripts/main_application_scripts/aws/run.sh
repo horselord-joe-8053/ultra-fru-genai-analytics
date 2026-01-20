@@ -35,6 +35,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$REPO_ROOT/run_scripts/shared/performance-tracker.sh"
+# Source progress indicator for heartbeat during long-running operations
+if [ -f "$REPO_ROOT/run_scripts/shared/progress-indicator.sh" ]; then
+    source "$REPO_ROOT/run_scripts/shared/progress-indicator.sh"
+fi
 # Save SCRIPT_DIR before sourcing load-env.sh (which sets its own SCRIPT_DIR)
 AWS_SCRIPT_DIR="$SCRIPT_DIR"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
@@ -246,28 +250,69 @@ should_setup_data_lake() {
 # Strategy: Auto-generate unique tags (git SHA) so Terraform detects code changes
 check_or_build_image() {
     log_step "Checking container image availability"
+    log_info "[DEBUG] check_or_build_image: Starting at $(date)"
     
     # Note: Environment variables (including IMAGE_PREFIX) are already loaded at script startup
     # Use admin profile for infrastructure operations (ECR)
     AWS_PROFILE="${AWS_PROFILE:-admin}"
+    log_info "[DEBUG] check_or_build_image: Using AWS_PROFILE=$AWS_PROFILE"
     
     # Generate CONTAINER_IMAGE using centralized function
     # For AWS deployments, this resolves IMAGE_PREFIX to actual ECR URI
-    CONTAINER_IMAGE=$(resolve_container_image_for_aws)
+    log_info "[DEBUG] check_or_build_image: About to call resolve_container_image_for_aws..."
+    local resolve_start=$(date +%s)
+    # Capture only stdout (the actual return value), redirect stderr to /dev/null to avoid mixing logs
+    CONTAINER_IMAGE=$(resolve_container_image_for_aws 2>/dev/null)
+    local resolve_elapsed=$(( $(date +%s) - resolve_start ))
+    log_info "[DEBUG] check_or_build_image: resolve_container_image_for_aws completed in ${resolve_elapsed}s"
+    log_info "[DEBUG] check_or_build_image: CONTAINER_IMAGE='$CONTAINER_IMAGE'"
+    log_info "[DEBUG] check_or_build_image: CONTAINER_IMAGE length: ${#CONTAINER_IMAGE}"
+    log_info "[DEBUG] check_or_build_image: CONTAINER_IMAGE contains colon: $(echo "$CONTAINER_IMAGE" | grep -c ':' || echo '0')"
+    
+    # Validate CONTAINER_IMAGE format before extracting
+    if [ -z "$CONTAINER_IMAGE" ]; then
+        log_error "CONTAINER_IMAGE is empty!"
+        exit 1
+    fi
+    
+    if [[ "$CONTAINER_IMAGE" != *":"* ]]; then
+        log_error "CONTAINER_IMAGE does not contain a colon separator: '$CONTAINER_IMAGE'"
+        log_error "Expected format: <repository>:<tag>"
+        exit 1
+    fi
+    
     export CONTAINER_IMAGE
     
     # Extract ECR_REPO_URI and IMAGE_TAG for build-push-ecr.sh
     # These are needed for ECR operations (check existence, push, etc.)
+    # Use a more robust extraction method
     ECR_REPO_URI="${CONTAINER_IMAGE%%:*}"
-    IMAGE_TAG="${CONTAINER_IMAGE##*:}"
+    IMAGE_TAG="${CONTAINER_IMAGE#*:}"
+    
+    # Remove any trailing whitespace or newlines that might have been captured
+    IMAGE_TAG=$(echo "$IMAGE_TAG" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    ECR_REPO_URI=$(echo "$ECR_REPO_URI" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    
+    log_info "[DEBUG] check_or_build_image: Extracted from CONTAINER_IMAGE='$CONTAINER_IMAGE':"
+    log_info "[DEBUG] check_or_build_image:   ECR_REPO_URI='$ECR_REPO_URI'"
+    log_info "[DEBUG] check_or_build_image:   IMAGE_TAG='$IMAGE_TAG'"
+    log_info "[DEBUG] check_or_build_image:   IMAGE_TAG length: ${#IMAGE_TAG}"
     export ECR_REPO_URI IMAGE_TAG
     
     # Get ECR repository name and region for AWS CLI operations
     ECR_REPO_NAME="${ECR_REPO_NAME:-fru-api}"
     AWS_REGION="${AWS_REGION:-$DEFAULT_AWS_REGION}"
     
+    # NOTE: We rely on ECR itself to validate IMAGE_TAG format.
+    # Our generators (generate_image_tag, ensure_image_tag) already produce
+    # ECR-safe tags; if anything is wrong, aws ecr describe-images will fail
+    # with a clear error from AWS. This avoids false negatives from shell regex.
+    log_info "[DEBUG] check_or_build_image: IMAGE_TAG value: '$IMAGE_TAG'"
+    log_info "[DEBUG] check_or_build_image: IMAGE_TAG length: ${#IMAGE_TAG}"
+    
     # Check if image already exists in ECR
     log_info "Checking if container image exists in ECR: $CONTAINER_IMAGE"
+    log_info "[DEBUG] check_or_build_image: About to call aws ecr describe-images with imageTag='$IMAGE_TAG'"
     local image_check_output
     if image_check_output=$(aws ecr describe-images \
         --profile "$AWS_PROFILE" \
@@ -398,7 +443,7 @@ deploy_ecs_full() {
     step_start_time=$(date +%s)
     log_step "Phase 4: Step 4.1 - Step ${step_num}/${total_steps}: Deploying application infrastructure (ECS, ALB, CloudFront)"
     log_info "Using container image: $CONTAINER_IMAGE"
-    if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" application; then
+    if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" "$CONTAINER_TYPE"; then
         elapsed=$(( $(date +%s) - step_start_time ))
         perf_step_end 4 "4.1" "FAILED" "Application infrastructure deployment failed"
         log_error "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} FAILED: Application infrastructure deployment failed (took $(format_elapsed_time $elapsed))"
@@ -438,21 +483,136 @@ deploy_eks_full() {
     local deploy_start_time=$(date +%s)
     log_step "Starting complete EKS deployment workflow"
     log_info "Environment: $ENVIRONMENT"
+    log_info "[DEBUG] Deployment start time: $(date)"
+    log_info "[DEBUG] Script directory: $SCRIPT_DIR"
+    log_info "[DEBUG] Repo root: $REPO_ROOT"
     
     # Get step information from main() (accounts for Phase 0 steps and preempt if enabled)
     local step_num="${CURRENT_STEP:-5}"  # Default to 5 (after Phase 0.1-0.4, or 0.5 if preempt)
     local total_steps="${TOTAL_STEPS:-11}"  # Default for eks
+    log_info "[DEBUG] Starting at step: $step_num/$total_steps"
     
     # ============================================================================
     # Phase 1: Environment Preparation - Step 1.3: Prepare container image
     # Phase 2: Infrastructure Setup - Steps 2.2, 2.3
     # ============================================================================
+    log_info "[DEBUG] About to start Phase 1: Checking container image..."
+    log_info "[DEBUG] Calling deploy_phase_check_image with step_num=$step_num, total_steps=$total_steps"
+    log_info "[DEBUG] Current time before function call: $(date)"
+    
     # Use shared phase functions to reduce duplication
     # Note: Functions return step_num via echo (stdout), logs go to stderr
     # Extract only numeric value from output (filter out any log output that leaks to stdout)
-    step_num=$(deploy_phase_check_image "$step_num" "$total_steps" 2>&1 | grep -E '^[0-9]+$' | tail -1)
+    local phase1_start=$(date +%s)
+    log_info "[DEBUG] phase1_start=$phase1_start, about to call function NOW..."
+    
+    # Call function and capture output separately to avoid pipe buffering issues
+    # Use a temp file to capture both stdout and stderr
+    local temp_output=$(mktemp)
+    log_info "[DEBUG] Created temp file: $temp_output"
+    log_info "[DEBUG] About to execute deploy_phase_check_image..."
+    
+    # Execute function with output redirection to temp file
+    deploy_phase_check_image "$step_num" "$total_steps" > "$temp_output" 2>&1 &
+    local func_pid=$!
+    log_info "[DEBUG] Function started in background with PID: $func_pid"
+    
+    # Wait for function with timeout and show progress
+    local wait_timeout=300  # 5 minutes max
+    local waited=0
+    local wait_interval=5
+    
+    while kill -0 "$func_pid" 2>/dev/null && [ $waited -lt $wait_timeout ]; do
+        sleep $wait_interval
+        waited=$((waited + wait_interval))
+        log_info "[DEBUG] Function still running... (waited ${waited}s/${wait_timeout}s)"
+        # Show last few lines of output
+        if [ -s "$temp_output" ]; then
+            log_info "[DEBUG] Last output from function:"
+            tail -3 "$temp_output" | while IFS= read -r line; do
+                log_info "[DEBUG]   $line"
+            done
+        fi
+    done
+    
+    # Check if function completed
+    if kill -0 "$func_pid" 2>/dev/null; then
+        log_error "[DEBUG] Function timed out after ${wait_timeout}s, killing..."
+        kill "$func_pid" 2>/dev/null || true
+        wait "$func_pid" 2>/dev/null || true
+        log_error "Function deploy_phase_check_image timed out"
+        cat "$temp_output"
+        rm -f "$temp_output"
+        exit 1
+    fi
+    
+    # Wait for function to complete and get exit code
+    wait "$func_pid"
+    local func_exit_code=$?
+    log_info "[DEBUG] Function completed with exit code: $func_exit_code"
+    
+    # Show all output
+    if [ -s "$temp_output" ]; then
+        log_info "[DEBUG] Full function output:"
+        cat "$temp_output"
+    fi
+    
+    # Extract step_num from output (should be the last number on its own line)
+    step_num=$(grep -E '^[0-9]+$' "$temp_output" | tail -1)
+    log_info "[DEBUG] Extracted step_num=$step_num from output"
+    
+    # Extract CONTAINER_IMAGE from output if it was logged
+    # The check_or_build_image function should have set CONTAINER_IMAGE, but since it ran in background,
+    # we need to re-export it in the main shell. Check if it's already set, otherwise extract from logs.
+    if [ -z "${CONTAINER_IMAGE:-}" ]; then
+        # Try to extract CONTAINER_IMAGE from the output logs
+        # Look for lines like: "CONTAINER_IMAGE='...'" or "Using container image: ..."
+        # Extract the full ECR URI with tag, removing any quotes
+        local extracted_image=$(grep -E "(CONTAINER_IMAGE=|Using container image:)" "$temp_output" | \
+            grep -oE "[0-9]+\.dkr\.ecr\.[^:']+:[^[:space:]']+" | head -1 | tr -d "'\"")
+        if [ -n "$extracted_image" ]; then
+            export CONTAINER_IMAGE="$extracted_image"
+            log_info "[DEBUG] Extracted CONTAINER_IMAGE from function output: $CONTAINER_IMAGE"
+        else
+            # If not found in logs, regenerate it (should be fast since image already exists)
+            log_info "[DEBUG] CONTAINER_IMAGE not found in output, regenerating..."
+            if command -v resolve_container_image_for_aws >/dev/null 2>&1; then
+                export CONTAINER_IMAGE=$(resolve_container_image_for_aws 2>/dev/null)
+                log_info "[DEBUG] Regenerated CONTAINER_IMAGE: $CONTAINER_IMAGE"
+            fi
+        fi
+    else
+        # Clean up any quotes that might have been included
+        CONTAINER_IMAGE=$(echo "$CONTAINER_IMAGE" | tr -d "'\"")
+        export CONTAINER_IMAGE
+        log_info "[DEBUG] CONTAINER_IMAGE already set (cleaned): $CONTAINER_IMAGE"
+    fi
+    
+    # Cleanup
+    rm -f "$temp_output"
+    
+    if [ -z "$step_num" ] || [ "$func_exit_code" -ne 0 ]; then
+        log_error "Function deploy_phase_check_image failed or returned invalid step_num"
+        exit 1
+    fi
+    
+    log_info "[DEBUG] Function call completed successfully, step_num=$step_num"
+    local phase1_elapsed=$(( $(date +%s) - phase1_start ))
+    log_info "[DEBUG] Phase 1 completed in $(format_elapsed_time $phase1_elapsed), new step_num=$step_num"
+    
+    log_info "[DEBUG] About to start Phase 2.2: Setting up Terraform state bucket..."
+    log_info "[DEBUG] Calling deploy_phase_setup_state_bucket with step_num=$step_num, total_steps=$total_steps"
+    local phase2_2_start=$(date +%s)
     step_num=$(deploy_phase_setup_state_bucket "$step_num" "$total_steps" "$SCRIPT_DIR" 2>&1 | grep -E '^[0-9]+$' | tail -1)
+    local phase2_2_elapsed=$(( $(date +%s) - phase2_2_start ))
+    log_info "[DEBUG] Phase 2.2 completed in $(format_elapsed_time $phase2_2_elapsed), new step_num=$step_num"
+    
+    log_info "[DEBUG] About to start Phase 2.3: Deploying infrastructure layer..."
+    log_info "[DEBUG] Calling deploy_phase_deploy_infrastructure with step_num=$step_num, total_steps=$total_steps, environment=$ENVIRONMENT"
+    local phase2_3_start=$(date +%s)
     step_num=$(deploy_phase_deploy_infrastructure "$step_num" "$total_steps" "$SCRIPT_DIR" "$ENVIRONMENT" 2>&1 | grep -E '^[0-9]+$' | tail -1)
+    local phase2_3_elapsed=$(( $(date +%s) - phase2_3_start ))
+    log_info "[DEBUG] Phase 2.3 completed in $(format_elapsed_time $phase2_3_elapsed), new step_num=$step_num"
     
     # ============================================================================
     # (Phase 3: Database Setup is handled via Kubernetes manifests for EKS)
@@ -467,22 +627,38 @@ deploy_eks_full() {
     # Phase 5: Application Deployment
     # ============================================================================
     perf_phase_start 5 "Application Deployment"
-    # Step 5.1: Deploy application-eks layer (EKS cluster + Frontend)
-    # Note: EKS cluster and Frontend are now combined in application-eks layer (matching ECS pattern)
-    perf_step_start 5 "5.1" "Deploying application-eks layer (EKS cluster + Frontend)"
+    # Step 5.1: Deploy eks layer (EKS cluster + Frontend)
+    # Note: EKS cluster and Frontend are now combined in eks layer (matching ECS pattern)
+    perf_step_start 5 "5.1" "Deploying eks layer (EKS cluster + Frontend)"
     step_start_time=$(date +%s)
-    log_step "Phase 5: Step 5.1 - Step ${step_num}/${total_steps}: Deploying application-eks layer (EKS cluster, node groups, OIDC provider, Frontend)"
-    if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" application-eks; then
+    log_step "Phase 5: Step 5.1 - Step ${step_num}/${total_steps}: Deploying eks layer (EKS cluster, node groups, OIDC provider, Frontend)" >&2
+    
+    # Start progress indicator for Terraform EKS deployment (can take 10-20 minutes)
+    if command -v progress_heartbeat_start >/dev/null 2>&1; then
+        progress_heartbeat_start "Deploying EKS layer (Terraform)" 10 >&2
+    fi
+    
+    local eks_deploy_result=0
+    if ! "$SCRIPT_DIR/terraform/deploy.sh" "$ENVIRONMENT" eks; then
+        eks_deploy_result=1
+    fi
+    
+    # Stop progress indicator
+    if command -v progress_heartbeat_stop >/dev/null 2>&1; then
+        progress_heartbeat_stop >&2
+    fi
+    
+    if [ "$eks_deploy_result" -ne 0 ]; then
         elapsed=$(( $(date +%s) - step_start_time ))
-        perf_step_end 5 "5.1" "FAILED" "Application-eks layer deployment failed"
-        log_error "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} FAILED: Application-eks layer deployment failed (took $(format_elapsed_time $elapsed))"
-        log_info "Reason: Terraform plan or apply failed for application-eks layer"
-        log_info "Check Terraform configuration, AWS permissions, EKS quotas, and plan output above"
+        perf_step_end 5 "5.1" "FAILED" "EKS layer deployment failed" >&2
+        log_error "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} FAILED: EKS layer deployment failed (took $(format_elapsed_time $elapsed))" >&2
+        log_info "Reason: Terraform plan or apply failed for eks layer" >&2
+        log_info "Check Terraform configuration, AWS permissions, EKS quotas, and plan output above" >&2
         exit 1
     fi
     elapsed=$(( $(date +%s) - step_start_time ))
-    perf_step_end 5 "5.1" "SUCCESS" "Application-eks layer deployed"
-    log_success "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} PASSED: Application-eks layer deployed (took $(format_elapsed_time $elapsed))"
+    perf_step_end 5 "5.1" "SUCCESS" "EKS layer deployed" >&2
+    log_success "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} PASSED: EKS layer deployed (took $(format_elapsed_time $elapsed))" >&2
     step_num=$((step_num + 1))
     
     # ============================================================================
@@ -494,7 +670,7 @@ deploy_eks_full() {
     log_info "Using container image: $CONTAINER_IMAGE"
     
     # Get cluster name from Terraform output
-    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments"
+    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments"
     ENV_DIR="$TERRAFORM_DIR/$ENVIRONMENT"
     
     if [ "$DRY_RUN" = "true" ]; then
@@ -504,7 +680,7 @@ deploy_eks_full() {
     else
         # Configure kubectl
         log_info "Configuring kubectl for EKS cluster..."
-        cd "$ENV_DIR/application-eks"
+            cd "$ENV_DIR/eks"
         log_info "Fetching Terraform output: cluster_name"
         if ! CLUSTER_NAME=$(terragrunt output -raw cluster_name 2>&1); then
             log_error "Failed to fetch Terraform output 'cluster_name'"
@@ -517,19 +693,36 @@ deploy_eks_full() {
         
         if [ -z "$CLUSTER_NAME" ]; then
             log_error "Failed to get EKS cluster name from Terraform output"
-            log_info "Try running: cd $ENV_DIR/application-eks && terragrunt output"
+            log_info "Try running: cd $ENV_DIR/eks && terragrunt output"
             exit 1
         fi
         
         log_info "Cluster name: $CLUSTER_NAME"
         
+        # Start progress indicator for kubectl configuration
+        if command -v progress_heartbeat_start >/dev/null 2>&1; then
+            progress_heartbeat_start "Configuring kubectl for EKS cluster" 10
+        fi
+        
         # Note: Environment variables (including AWS_REGION) are already loaded at script startup
         AWS_REGION="${AWS_REGION:-$DEFAULT_AWS_REGION}"
+        local kubeconfig_result=0
         if ! aws eks update-kubeconfig \
             --region "$AWS_REGION" \
             --name "$CLUSTER_NAME" \
             --profile admin; then
-            log_error "Failed to configure kubectl"
+            kubeconfig_result=1
+        fi
+        
+        # Stop progress indicator
+        if command -v progress_heartbeat_stop >/dev/null 2>&1; then
+            progress_heartbeat_stop
+        fi
+        
+        if [ "$kubeconfig_result" -ne 0 ]; then
+            elapsed=$(( $(date +%s) - step_start_time ))
+            perf_step_end 5 "5.2" "FAILED" "kubectl configuration failed"
+            log_error "Phase 5: Step 5.2 - Step ${step_num}/${total_steps} FAILED: kubectl configuration failed (took $(format_elapsed_time $elapsed))"
             log_info "Check AWS credentials, EKS cluster status, and permissions"
             exit 1
         fi
@@ -540,8 +733,34 @@ deploy_eks_full() {
         export AWS_PROFILE="${AWS_PROFILE:-admin}"
         log_info "Exported AWS_PROFILE=$AWS_PROFILE for eks/deploy.sh subprocess"
         
+        # Ensure CONTAINER_IMAGE is exported for eks/deploy.sh subprocess
+        # This is critical to prevent image tag regeneration (timestamp drift)
+        # CONTAINER_IMAGE should be set during Phase 1 (check_or_build_image)
+        export CONTAINER_IMAGE="${CONTAINER_IMAGE:-}"
+        if [ -z "$CONTAINER_IMAGE" ]; then
+            log_error "CONTAINER_IMAGE not set - cannot deploy Kubernetes manifests"
+            log_error "This should have been set during Phase 1 (container image check/build)"
+            exit 1
+        fi
+        log_info "Exported CONTAINER_IMAGE=$CONTAINER_IMAGE for eks/deploy.sh subprocess"
+        
+        # Start progress indicator for Kubernetes manifest deployment
+        if command -v progress_heartbeat_start >/dev/null 2>&1; then
+            progress_heartbeat_start "Deploying Kubernetes manifests" 10
+        fi
+        
         # Deploy Kubernetes manifests
+        local k8s_deploy_result=0
         if ! "$SCRIPT_DIR/eks/deploy.sh"; then
+            k8s_deploy_result=1
+        fi
+        
+        # Stop progress indicator
+        if command -v progress_heartbeat_stop >/dev/null 2>&1; then
+            progress_heartbeat_stop
+        fi
+        
+        if [ "$k8s_deploy_result" -ne 0 ]; then
             elapsed=$(( $(date +%s) - step_start_time ))
             perf_step_end 5 "5.2" "FAILED" "Kubernetes manifest deployment failed"
             log_error "Phase 5: Step 5.2 - Step ${step_num}/${total_steps} FAILED: Kubernetes manifest deployment failed (took $(format_elapsed_time $elapsed))"

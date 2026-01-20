@@ -40,7 +40,7 @@ ensure_pgvector() {
     fi
     
     # Determine Terraform environment directory
-    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments"
+    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments"
     INFRA_DIR="$TERRAFORM_DIR/$env/infrastructure"
     
     if [ ! -d "$INFRA_DIR" ]; then

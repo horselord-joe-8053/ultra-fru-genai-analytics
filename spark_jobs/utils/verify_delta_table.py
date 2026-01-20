@@ -45,7 +45,7 @@ def verify_delta_table_exists(delta_path: str, repo_root: str = None, is_ecs_dep
         computed_repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         repo_root = get_optional_env("REPO_ROOT", computed_repo_root)
     
-    # Determine deployment type
+    # Determine container type
     is_aws_deployment = is_ecs_deployment or is_eks_deployment
     
     # Resolve full path (absolute paths used as-is, relative paths joined with repo_root)

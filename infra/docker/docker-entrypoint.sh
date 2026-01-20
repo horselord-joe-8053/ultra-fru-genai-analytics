@@ -1,5 +1,6 @@
 #!/bin/bash
-set -e
+# Note: Removed 'set -e' to allow better error handling and logging
+# Exit codes are checked explicitly instead
 
 # Docker entrypoint for the FRU API container.
 # 
@@ -42,7 +43,58 @@ fi
 
 # Finally, start the Flask API (foreground).
 # This replaces the shell with the Python process (PID 1 in the container).
+echo "[entrypoint] ============================================================"
 echo "[entrypoint] Starting Flask API server..."
-exec python -m backend.api.app
+echo "[entrypoint] ============================================================"
+
+# Pre-flight checks and environment logging
+echo "[entrypoint] Pre-flight checks..."
+echo "[entrypoint]   Python executable: $(which python)"
+echo "[entrypoint]   Python version: $(python --version 2>&1)"
+echo "[entrypoint]   Working directory: $(pwd)"
+echo "[entrypoint]   PYTHONPATH: ${PYTHONPATH:-not set}"
+echo "[entrypoint]   PYTHONUNBUFFERED: ${PYTHONUNBUFFERED:-not set}"
+
+# Test Python import capability
+echo "[entrypoint] Testing Python import capability..."
+python -u -c "
+import sys
+sys.path.insert(0, '/app')
+try:
+    print('[entrypoint] Testing: import backend.api.app')
+    import backend.api.app
+    print('[entrypoint] SUCCESS: Module import test passed')
+except Exception as e:
+    print(f'[entrypoint] ERROR: Module import test failed: {e}')
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+" || {
+    exit_code=$?
+    echo "[entrypoint] CRITICAL: Module import test failed with exit code $exit_code" >&2
+    exit $exit_code
+}
+
+# Set environment variables for Python
+export PYTHONUNBUFFERED=1
+export PYTHONPATH=/app
+cd /app
+
+# Start Flask application with error capture
+echo "[entrypoint] Starting Flask application..."
+echo "[entrypoint] Command: python -u -m backend.api.app"
+echo "[entrypoint] ============================================================"
+
+# Run Python and capture exit code (don't use exec so we can capture exit code)
+python -u -m backend.api.app 2>&1
+python_exit_code=$?
+
+if [ $python_exit_code -ne 0 ]; then
+    echo "[entrypoint] ============================================================" >&2
+    echo "[entrypoint] CRITICAL: Python process exited with code $python_exit_code" >&2
+    echo "[entrypoint] Check logs above for error details" >&2
+    echo "[entrypoint] ============================================================" >&2
+    exit $python_exit_code
+fi
 
 

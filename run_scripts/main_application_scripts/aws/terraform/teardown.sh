@@ -1,7 +1,7 @@
 #!/bin/bash
 # Teardown infrastructure using Terragrunt
 # Idempotent: terragrunt destroy is safe to run multiple times
-# Usage: ./teardown.sh [dev|prod] [infrastructure|application|all]
+# Usage: ./teardown.sh [dev|prod] [infrastructure|ecs|eks|all]
 
 set -e
 
@@ -10,7 +10,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 
-TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments"
+TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments"
 
 # Parse arguments
 ENVIRONMENT="${1:-dev}"
@@ -22,9 +22,9 @@ if [[ ! "$ENVIRONMENT" =~ ^(dev|prod)$ ]]; then
     exit 1
 fi
 
-if [[ ! "$LAYER" =~ ^(infrastructure|application|all)$ ]]; then
+if [[ ! "$LAYER" =~ ^(infrastructure|ecs|eks|all)$ ]]; then
     log_error "Invalid layer: $LAYER"
-    log_info "Usage: $0 [dev|prod] [infrastructure|application|all]"
+    log_info "Usage: $0 [dev|prod] [infrastructure|ecs|eks|all]"
     exit 1
 fi
 
@@ -67,11 +67,11 @@ teardown_terragrunt() {
     # Destroy in reverse order: application first, then infrastructure
     # This is because application depends on infrastructure
     
-    # Destroy application layer
-    if [ "$LAYER" = "application" ] || [ "$LAYER" = "all" ]; then
-        log_step "Destroying application layer (ECS, ALB, Frontend)"
+    # Destroy ecs layer
+    if [ "$LAYER" = "ecs" ] || ([ "$LAYER" = "all" ] && [ "$CONTAINER_TYPE" = "ecs" ]); then
+        log_step "Destroying ecs layer (ECS, ALB, Frontend)"
         
-        cd "$ENV_DIR/application-ecs"
+        cd "$ENV_DIR/ecs"
         
         # Check if terragrunt state exists (resources may have been destroyed already)
         if [ -f ".terragrunt-cache" ] || terragrunt state list >/dev/null 2>&1; then
@@ -89,12 +89,12 @@ teardown_terragrunt() {
                 terragrunt destroy || {
                     log_warning "Destroy failed or no resources to destroy (idempotent)"
                 }
-                log_success "Application layer destroyed!"
+                log_success "ECS layer destroyed!"
             else
-                log_info "Application layer teardown cancelled"
+                log_info "ECS layer teardown cancelled"
             fi
         else
-            log_info "No Terraform state found for application layer (already destroyed or never deployed)"
+            log_info "No Terraform state found for ecs layer (already destroyed or never deployed)"
         fi
     fi
     

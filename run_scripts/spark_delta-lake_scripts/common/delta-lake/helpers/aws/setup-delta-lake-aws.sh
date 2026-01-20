@@ -9,7 +9,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../../.." && pwd)"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 
 ENVIRONMENT="${ENVIRONMENT:-dev}"
-INFRASTRUCTURE_DIR="$REPO_ROOT/infra/terraform/environments/$ENVIRONMENT/infrastructure"
+INFRASTRUCTURE_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT/infrastructure"
 
 if [ ! -d "$INFRASTRUCTURE_DIR" ]; then
     log_error "Infrastructure Terraform directory not found: $INFRASTRUCTURE_DIR"

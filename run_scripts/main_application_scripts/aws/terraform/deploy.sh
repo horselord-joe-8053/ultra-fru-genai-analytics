@@ -1,7 +1,7 @@
 #!/bin/bash
 # Deploy infrastructure using Terragrunt
 # Idempotent: terragrunt apply is safe to run multiple times
-# Usage: ./deploy.sh [dev|prod] [infrastructure|application-ecs|application-eks|all]
+# Usage: ./deploy.sh [dev|prod] [infrastructure|ecs|eks|all]
 
 set -e
 
@@ -10,7 +10,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../" && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 
-TERRAFORM_DIR="$REPO_ROOT/infra/terraform/environments"
+TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments"
 
 # Check for dry-run mode (from parent script)
 DRY_RUN="${DRY_RUN:-false}"
@@ -25,9 +25,9 @@ if [[ ! "$ENVIRONMENT" =~ ^(dev|prod)$ ]]; then
     exit 1
 fi
 
-if [[ ! "$LAYER" =~ ^(infrastructure|application|application-ecs|application-eks|all)$ ]]; then
+if [[ ! "$LAYER" =~ ^(infrastructure|ecs|eks|all)$ ]]; then
     log_error "Invalid layer: $LAYER"
-    log_info "Usage: $0 [dev|prod] [infrastructure|application|application-ecs|application-eks|all]"
+    log_info "Usage: $0 [dev|prod] [infrastructure|ecs|eks|all]"
     exit 1
 fi
 
@@ -590,7 +590,7 @@ deploy_terragrunt() {
             log_info "      and create a new task definition, triggering ECS to deploy the new image"
         fi
         
-        cd "$ENV_DIR/application-ecs"
+        cd "$ENV_DIR/ecs"
         
         # Refresh state before planning to ensure we have latest state
         log_info "Refreshing Terraform state to ensure latest state..."
@@ -622,16 +622,22 @@ deploy_terragrunt() {
         fi
     fi
     
-    # Deploy application-eks layer (EKS cluster + Frontend for EKS)
-    if [ "$LAYER" = "application-eks" ] || [ "$LAYER" = "all" ]; then
-        log_step "Deploying application-eks layer (EKS cluster, node groups, OIDC provider, Frontend)"
+    # Deploy eks layer (EKS cluster + Frontend for EKS)
+    if [ "$LAYER" = "eks" ] || ([ "$LAYER" = "all" ] && [ "$CONTAINER_TYPE" = "eks" ]); then
+        log_step "Deploying eks layer (EKS cluster, node groups, OIDC provider, Frontend)"
         
-        cd "$ENV_DIR/application-eks"
+        cd "$ENV_DIR/eks"
         
-        log_info "Running terragrunt plan for application-eks layer..."
-        if ! run_with_lock_retry "plan (application-eks)" terragrunt plan -lock-timeout=30s -refresh=true; then
-            log_error "Terraform plan failed for application-eks layer"
+        # Ensure AWS credentials are available for Terragrunt (needed for root.hcl get_aws_account_id)
+        export AWS_PROFILE="${AWS_PROFILE:-admin}"
+        log_info "Using AWS profile: $AWS_PROFILE for Terragrunt operations"
+        
+        log_info "Running terragrunt plan for eks layer..."
+        log_info "Note: If infrastructure dependency is not initialized, mock outputs will be used"
+        if ! run_with_lock_retry "plan (eks)" terragrunt plan -lock-timeout=30s -refresh=true; then
+            log_error "Terraform plan failed for eks layer"
             log_info "Check the plan output above for errors"
+            log_info "If dependency error occurs, try: cd $ENV_DIR/infrastructure && terragrunt init"
             exit 1
         fi
         
@@ -639,13 +645,13 @@ deploy_terragrunt() {
             log_info "[DRY-RUN] Would run: terragrunt apply"
             log_info "[DRY-RUN] Plan output shown above. No changes will be made."
         else
-            log_info "Applying Terragrunt configuration for application-eks layer..."
-            if ! run_with_lock_retry "apply (application-eks)" terragrunt apply -auto-approve -lock-timeout=30s; then
-                log_error "Terraform apply failed for application-eks layer"
+            log_info "Applying Terragrunt configuration for eks layer..."
+            if ! run_with_lock_retry "apply (eks)" terragrunt apply -auto-approve -lock-timeout=30s; then
+                log_error "Terraform apply failed for eks layer"
                 log_info "Check the apply output above for errors"
                 exit 1
             fi
-            log_success "Application-eks layer deployed successfully!"
+            log_success "EKS layer deployed successfully!"
             log_info "Frontend CloudFront distribution and S3 bucket are now ready"
         fi
     fi
