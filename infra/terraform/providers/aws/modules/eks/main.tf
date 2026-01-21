@@ -99,9 +99,9 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
   role       = aws_iam_role.eks_cluster.name
 }
 
-# IAM Role for EKS Node Group (if using managed nodes)
+# IAM Role for EKS Node Group (if using managed nodes OR ingress node group)
 resource "aws_iam_role" "eks_node_group" {
-  count = var.enable_fargate ? 0 : 1
+  count = var.enable_fargate && !var.enable_ingress_node_group ? 0 : 1
   name  = "${var.project_name}-${var.environment}-eks-node-group-role"
 
   assume_role_policy = jsonencode({
@@ -127,19 +127,19 @@ resource "aws_iam_role" "eks_node_group" {
 
 # Attach AWS managed policies for node group
 resource "aws_iam_role_policy_attachment" "eks_worker_node_policy" {
-  count      = var.enable_fargate ? 0 : 1
+  count      = var.enable_fargate && !var.enable_ingress_node_group ? 0 : 1
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
   role       = aws_iam_role.eks_node_group[0].name
 }
 
 resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
-  count      = var.enable_fargate ? 0 : 1
+  count      = var.enable_fargate && !var.enable_ingress_node_group ? 0 : 1
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
   role       = aws_iam_role.eks_node_group[0].name
 }
 
 resource "aws_iam_role_policy_attachment" "eks_container_registry_policy" {
-  count      = var.enable_fargate ? 0 : 1
+  count      = var.enable_fargate && !var.enable_ingress_node_group ? 0 : 1
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
   role       = aws_iam_role.eks_node_group[0].name
 }
@@ -267,11 +267,11 @@ resource "aws_iam_openid_connect_provider" "eks" {
   )
 }
 
-# Managed Node Group (if not using Fargate)
+# Managed Node Group (if not using Fargate OR if using ingress node group)
 resource "aws_eks_node_group" "main" {
-  count           = var.enable_fargate ? 0 : 1
+  count           = var.enable_fargate && !var.enable_ingress_node_group ? 0 : 1
   cluster_name    = aws_eks_cluster.main.name
-  node_group_name = "${var.project_name}-${var.environment}-node-group"
+  node_group_name = var.enable_ingress_node_group ? "${var.project_name}-${var.environment}-ingress-node-group" : "${var.project_name}-${var.environment}-node-group"
   node_role_arn   = aws_iam_role.eks_node_group[0].arn
   subnet_ids      = var.private_subnet_ids
 
@@ -288,6 +288,13 @@ resource "aws_eks_node_group" "main" {
     max_unavailable = 1
   }
 
+  # Labels for ingress isolation (if ingress node group)
+  # Note: Taints must be applied via kubectl after node group creation:
+  # kubectl taint nodes -l role=ingress ingress-only=true:NoSchedule
+  labels = var.enable_ingress_node_group ? {
+    role = "ingress"
+  } : {}
+
   # Ensure that IAM Role permissions are created before and deleted after EKS Node Group handling.
   # Otherwise, EKS will not be able to properly delete EC2 Instances and Elastic Network Interfaces.
   depends_on = [
@@ -299,7 +306,7 @@ resource "aws_eks_node_group" "main" {
   tags = merge(
     var.tags,
     {
-      Name = "${var.project_name}-${var.environment}-node-group"
+      Name = var.enable_ingress_node_group ? "${var.project_name}-${var.environment}-ingress-node-group" : "${var.project_name}-${var.environment}-node-group"
     }
   )
 }

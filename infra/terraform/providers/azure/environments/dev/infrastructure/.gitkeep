@@ -1,0 +1,4 @@
+# Azure Infrastructure Layer
+# Future implementation for Azure base infrastructure (VNet, Azure Database, etc.)
+# Will mirror AWS infrastructure layer structure
+

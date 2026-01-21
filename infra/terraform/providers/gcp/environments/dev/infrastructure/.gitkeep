@@ -1,0 +1,4 @@
+# GCP Infrastructure Layer
+# Future implementation for GCP base infrastructure (VPC, Cloud SQL, etc.)
+# Will mirror AWS infrastructure layer structure
+

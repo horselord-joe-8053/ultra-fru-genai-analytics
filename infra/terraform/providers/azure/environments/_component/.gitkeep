@@ -1,0 +1,4 @@
+# Azure Component Base Templates
+# Future implementation for shared Terragrunt base templates
+# Will mirror AWS _component structure
+

@@ -1,0 +1,17 @@
+# NGINX Ingress Controller Helm values for local Kubernetes (minikube/kind/Docker Desktop)
+# Uses NodePort service type (no LoadBalancer support in local K8s)
+
+controller:
+  service:
+    type: NodePort  # Local: use NodePort instead of LoadBalancer
+  ingressClassResource:
+    name: nginx
+  # No nodeSelector/tolerations (single node, no taints)
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+

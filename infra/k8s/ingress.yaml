@@ -5,7 +5,7 @@ metadata:
   namespace: default
   annotations:
     # NGINX Ingress (cloud-agnostic routing)
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    # No rewrite needed - paths match exactly
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
@@ -17,21 +17,21 @@ spec:
   rules:
   - http:
       paths:
-      - path: /query(/|$)(.*)
+      - path: /query
         pathType: Prefix
         backend:
           service:
             name: fru-api
             port:
               number: 80
-      - path: /query/stream(/|$)(.*)
+      - path: /query/stream
         pathType: Prefix
         backend:
           service:
             name: fru-api
             port:
               number: 80
-      - path: /analytics(/|$)(.*)
+      - path: /analytics
         pathType: Prefix
         backend:
           service:

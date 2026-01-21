@@ -218,7 +218,88 @@ deploy_frontend() {
     
     log_success "Frontend deployed to S3"
     log_info "  Bucket: $S3_BUCKET_NAME"
+    
+    # ============================================================================
+    # CloudFront Invalidation
+    # ============================================================================
+    # Get CloudFront distribution ID from Terraform outputs
+    local cloudfront_dist_id=""
+    local cloudfront_domain=""
+    
+    if [ -d "$APP_DIR" ] && command_exists terragrunt; then
+        ORIG_DIR=$(pwd)
+        cd "$APP_DIR" 2>/dev/null || {
+            log_warning "Could not access Terraform application directory for CloudFront outputs"
+            log_info "Skipping CloudFront invalidation - manual invalidation may be required"
+            cd "$ORIG_DIR" 2>/dev/null || true
+        }
+        
+        if [ -d "$APP_DIR" ]; then
+            # Try to get distribution ID
+            if cloudfront_dist_id=$(terragrunt output -raw cloudfront_distribution_id 2>/dev/null); then
+                if [ -n "$cloudfront_dist_id" ] && [ "$cloudfront_dist_id" != "null" ]; then
+                    log_info "Found CloudFront distribution ID: $cloudfront_dist_id"
+                    
+                    # Source invalidation helper
+                    local helper_script="$SCRIPT_DIR/helpers/cloudfront-invalidation.sh"
+                    if [ -f "$helper_script" ]; then
+                        source "$helper_script"
+                        
+                        # Create invalidation
+                        local invalidation_id
+                        if invalidation_id=$(create_cloudfront_invalidation "$cloudfront_dist_id" "/*"); then
+                            log_info "CloudFront invalidation created: $invalidation_id"
+                            
+                            # Wait for invalidation to complete (fail-fast on timeout)
+                            log_info "Waiting for CloudFront invalidation to complete..."
+                            if wait_for_invalidation "$cloudfront_dist_id" "$invalidation_id" 15; then
+                                log_success "CloudFront invalidation completed"
+                                
+                                # Optional: Verify frontend version (non-blocking)
+                                if cloudfront_domain=$(terragrunt output -raw cloudfront_domain_name 2>/dev/null); then
+                                    if [ -n "$cloudfront_domain" ] && [ "$cloudfront_domain" != "null" ]; then
+                                        verify_frontend_version "$cloudfront_domain" || true  # Non-blocking
+                                    fi
+                                fi
+                            else
+                                # wait_for_invalidation exits on timeout/error (fail-fast)
+                                # This code path should not be reached
+                                log_error "CloudFront invalidation failed or timed out"
+                                cd "$ORIG_DIR" 2>/dev/null || true
+                                exit 1
+                            fi
+                        else
+                            log_error "Failed to create CloudFront invalidation"
+                            log_error "Cannot proceed with deployment without CloudFront invalidation"
+                            cd "$ORIG_DIR" 2>/dev/null || true
+                            exit 1  # Fail-fast
+                        fi
+                    else
+                        log_warning "CloudFront invalidation helper not found: $helper_script"
+                        log_info "Skipping automatic invalidation"
+                    fi
+                else
+                    log_warning "CloudFront distribution ID not found in Terraform outputs"
+                    log_info "Skipping CloudFront invalidation"
+                fi
+            else
+                log_warning "Could not get CloudFront distribution ID from Terraform"
+                log_info "Skipping CloudFront invalidation - manual invalidation may be required"
+            fi
+            
+            cd "$ORIG_DIR" 2>/dev/null || true
+        fi
+    else
+        log_warning "Cannot access Terraform outputs for CloudFront invalidation"
+        log_info "Skipping CloudFront invalidation"
+    fi
+    
+    # Log completion
+    log_success "Frontend deployment complete"
     log_info "  Website URL: http://$S3_BUCKET_NAME.s3-website-$AWS_REGION.amazonaws.com"
+    if [ -n "$cloudfront_domain" ]; then
+        log_info "  CloudFront URL: https://$cloudfront_domain"
+    fi
     log_info ""
     log_info "Note: CloudFront distribution is managed by Terraform"
     log_info "  CloudFront will automatically serve content from this S3 bucket"

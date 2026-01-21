@@ -1,0 +1,4 @@
+# AKS Terraform Module
+# Future implementation for Azure Kubernetes Service cluster
+# Will mirror AWS EKS module structure
+

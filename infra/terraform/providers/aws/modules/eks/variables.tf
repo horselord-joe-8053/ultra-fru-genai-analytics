@@ -40,7 +40,13 @@ variable "enable_fargate" {
   default     = true
 }
 
-# Managed Node Group Configuration (if enable_fargate = false)
+variable "enable_ingress_node_group" {
+  type        = bool
+  description = "Enable small EC2 node group for ingress controllers (works alongside Fargate for app pods)"
+  default     = false
+}
+
+# Managed Node Group Configuration (if enable_fargate = false OR enable_ingress_node_group = true)
 variable "node_group_instance_types" {
   type        = list(string)
   description = "EC2 instance types for node groups"

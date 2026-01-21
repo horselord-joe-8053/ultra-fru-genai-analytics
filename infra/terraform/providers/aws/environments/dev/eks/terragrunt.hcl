@@ -48,10 +48,31 @@ inputs = {
   cluster_version = local.env_config.inputs.eks_cluster_version
   enable_fargate  = local.env_config.inputs.eks_enable_fargate
   
-  node_group_instance_types = local.env_config.inputs.eks_node_group_instance_types
-  node_group_desired_size   = local.env_config.inputs.eks_node_group_desired_size
-  node_group_min_size       = local.env_config.inputs.eks_node_group_min_size
-  node_group_max_size       = local.env_config.inputs.eks_node_group_max_size
+  # Enable ingress node group (works alongside Fargate for app pods)
+  enable_ingress_node_group = true
+  
+  # Fargate profiles: application + system (removed ingress-nginx - now uses node group)
+  fargate_profiles = [
+    {
+      name = "default"
+      selectors = [
+        {
+          namespace = "default"
+          labels    = {}
+        },
+        {
+          namespace = "kube-system"
+          labels    = {}
+        }
+      ]
+    }
+  ]
+  
+  # Ingress node group configuration (small instance for NGINX only)
+  node_group_instance_types = ["t3.small"]
+  node_group_desired_size   = 1
+  node_group_min_size       = 1
+  node_group_max_size       = 1
   
   endpoint_private_access = local.env_config.inputs.eks_endpoint_private_access
   endpoint_public_access  = local.env_config.inputs.eks_endpoint_public_access
