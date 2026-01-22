@@ -107,6 +107,15 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 
+# Source Docker image cleanup helper (DRY - reuse cleanup logic)
+CLEANUP_HELPER="$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/cleanup-local-docker-images.sh"
+if [ -f "$CLEANUP_HELPER" ]; then
+    source "$CLEANUP_HELPER"
+else
+    log_warning "Cleanup helper not found: $CLEANUP_HELPER"
+    log_warning "Falling back to inline cleanup logic"
+fi
+
 DRY_RUN="false"
 FORCE_DELETE="false"
 SKIP_CONFIRMATION="false"
@@ -677,6 +686,16 @@ terraform_destroy() {
 cleanup_local_images() {
     log_step "Substep 4: Cleaning Up Local Docker Images"
     
+    # Use helper function if available (DRY - reuse cleanup logic)
+    if type cleanup_local_images_by_pattern >/dev/null 2>&1; then
+        log_info "Using reusable cleanup helper function (DRY principle)"
+        cleanup_local_images_by_pattern "${ECR_REPO_NAME}" "${DRY_RUN:-false}"
+        return $?
+    else
+        # Fallback to inline logic if helper not available (backward compatibility)
+        log_warning "Cleanup helper function not available, using fallback logic"
+    fi
+    
     if [ "$DRY_RUN" = "true" ]; then
         log_info "[DRY-RUN] Would clean up local Docker images:"
         log_info "[DRY-RUN]   - Remove images matching pattern: ${ECR_REPO_NAME}:*"
@@ -764,6 +783,7 @@ cleanup_local_images() {
     fi
     
     echo ""
+    return 0
 }
 
 # ============================================================================

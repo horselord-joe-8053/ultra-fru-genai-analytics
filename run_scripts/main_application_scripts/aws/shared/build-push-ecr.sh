@@ -220,6 +220,44 @@ build_and_push_ecr() {
     log_success "Image pushed successfully: $ECR_REPO_URI:$IMAGE_TAG"
     log_info "Image URI for Terraform: $ECR_REPO_URI:$IMAGE_TAG"
     log_info "Note: Terraform will use the git SHA tag to detect changes automatically"
+    
+    # Clean up local Docker images after successful push
+    # Only cleanup if we actually built and pushed (not if image already existed)
+    if [ "$should_rebuild" = true ]; then
+        log_info "Cleaning up local Docker images after successful ECR push..."
+        
+        # Verify image exists in ECR before cleanup (safety check)
+        log_info "Verifying image exists in ECR before cleanup..."
+        if aws ecr describe-images \
+            --profile "$AWS_PROFILE" \
+            --repository-name "$ECR_REPO_NAME" \
+            --image-ids imageTag="$IMAGE_TAG" \
+            --region "$AWS_REGION" >/dev/null 2>&1; then
+            
+            log_success "ECR image verified, proceeding with local cleanup..."
+            
+            # Source cleanup helper function
+            local cleanup_helper="$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/cleanup-local-docker-images.sh"
+            if [ -f "$cleanup_helper" ]; then
+                source "$cleanup_helper"
+                
+                # Call cleanup function (non-fatal - errors are warnings)
+                cleanup_local_docker_images_after_ecr_push \
+                    "$ECR_REPO_NAME" "$ECR_REPO_URI" "$IMAGE_TAG" || {
+                    log_warning "Local image cleanup had issues (non-fatal - deployment will continue)"
+                }
+            else
+                log_warning "Cleanup helper script not found: $cleanup_helper"
+                log_warning "Skipping local image cleanup (images will remain on disk)"
+            fi
+        else
+            log_warning "ECR image verification failed - skipping cleanup for safety"
+            log_warning "  Image may not have been pushed successfully or tag may be incorrect"
+            log_warning "  Local images will remain on disk to prevent data loss"
+        fi
+    else
+        log_info "Skipping cleanup (image already existed, no new build/push occurred)"
+    fi
 }
 
 main() {
