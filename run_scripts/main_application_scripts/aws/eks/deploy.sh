@@ -12,7 +12,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+# Resolve repo root. Prefer existing REPO_ROOT if set (from parent orchestrator),
+# otherwise go up to the monorepo root from this script's directory.
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 
@@ -101,6 +103,12 @@ main() {
         log_info "Found manifests directory: $manifests_dir"
         apply_kubernetes_manifests "$manifests_dir"
         verify_kubernetes_deployment
+
+        # After backend is healthy and ingress is applied, wire CloudFront to the EKS LoadBalancer
+        # This updates the Terraform-managed CloudFront distribution so that /query, /query/stream,
+        # and /analytics are routed to the ingress NLB instead of the old ALB/placeholder.
+        log_step "Substep 5b: Updating CloudFront to point API paths to the EKS LoadBalancer"
+        "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/update-cloudfront-loadbalancer.sh" fru-api default || exit 1
     else
         log_warning "Kubernetes manifests directory not found"
         log_info "Searched in:"

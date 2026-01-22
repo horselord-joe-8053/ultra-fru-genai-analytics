@@ -34,8 +34,10 @@ if [ -z "$CF_DIST_ID" ]; then
 fi
 
 if [ -z "$CF_DIST_ID" ]; then
-    log_error "CloudFront distribution ID not found. Please provide as argument or ensure Terraform outputs are available."
-    exit 1
+    log_warning "CloudFront distribution ID not found. Skipping automatic CloudFront update."
+    log_warning "You can manually wire CloudFront to the EKS LoadBalancer later if needed."
+    # Do not fail the overall deployment just because CloudFront wiring is unavailable.
+    exit 0
 fi
 
 log_info "Waiting for LoadBalancer to be ready..."

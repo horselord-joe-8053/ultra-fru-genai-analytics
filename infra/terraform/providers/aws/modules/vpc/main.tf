@@ -38,6 +38,10 @@ resource "aws_subnet" "public" {
     {
       Name = "${var.project_name}-${var.environment}-public-${count.index + 1}"
       Type = "public"
+      # Tag public subnets for Kubernetes LoadBalancer (internet-facing NLB/ALB)
+      "kubernetes.io/role/elb" = "1"
+      # Associate subnets with the EKS cluster so the AWS service/LB controllers can discover them
+      "kubernetes.io/cluster/${var.project_name}-${var.environment}-cluster" = "shared"
     }
   )
 }
@@ -54,6 +58,10 @@ resource "aws_subnet" "private" {
     {
       Name = "${var.project_name}-${var.environment}-private-${count.index + 1}"
       Type = "private"
+      # Tag private subnets for internal LoadBalancers only
+      "kubernetes.io/role/internal-elb" = "1"
+      # Associate subnets with the EKS cluster for internal services
+      "kubernetes.io/cluster/${var.project_name}-${var.environment}-cluster" = "shared"
     }
   )
 }

@@ -230,16 +230,20 @@ apply_kubernetes_manifests() {
     
     # Add other YAML files (deployment, service, ingress, etc.)
     while IFS= read -r file; do
-        local basename_file=$(basename "$file")
-        # Skip templates and already-added files
-        if [[ "$basename_file" != "configmap.yaml" && \
-              "$basename_file" != "configmap-generated.yaml" && \
-              "$basename_file" != "secret.yaml.template" && \
-              "$basename_file" != "secret.yaml" && \
-              "$basename_file" != ".gitignore" && \
-              "$basename_file" != "README.md" ]]; then
-            yaml_files+=("$file")
+        local basename_file
+        basename_file=$(basename "$file")
+        # Skip templates, Helm values files, and already-added files
+        if [[ "$basename_file" == "configmap.yaml" || \
+              "$basename_file" == "configmap-generated.yaml" || \
+              "$basename_file" == "secret.yaml.template" || \
+              "$basename_file" == "secret.yaml" || \
+              "$basename_file" == ".gitignore" || \
+              "$basename_file" == "README.md" || \
+              "$basename_file" == "ingress-nginx-values-cloud.yaml" || \
+              "$basename_file" == "ingress-nginx-values-local.yaml" ]]; then
+            continue
         fi
+        yaml_files+=("$file")
     done < <(find "$manifests_dir" \( -name "*.yaml" -o -name "*.yml" \) | sort)
     
     if [ ${#yaml_files[@]} -eq 0 ]; then

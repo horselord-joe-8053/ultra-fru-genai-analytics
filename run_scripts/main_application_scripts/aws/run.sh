@@ -67,6 +67,7 @@ DRY_RUN=false
 SKIP_DATA_LAKE=false
 PREEMPT=false
 FORCE_REFRESH_DATA=false
+RUN_ALL=false          # When true, run deploy for both ecs and eks sequentially
 CONTAINER_TYPE=""
 DEPLOY_COMMAND=""
 REMAINING_ARGS=()
@@ -91,6 +92,11 @@ while [ $# -gt 0 ]; do
             ;;
         --force-refresh-data)
         FORCE_REFRESH_DATA=true
+            shift
+            ;;
+        --all)
+            # Run deploy for both ecs and eks. Only valid with 'deploy' command.
+            RUN_ALL=true
             shift
             ;;
         --container-type)
@@ -136,15 +142,12 @@ else
 fi
 
 # Set default container type if deploy command is used without --container-type
-if [ "$DEPLOY_COMMAND" = "deploy" ] && [ -z "$CONTAINER_TYPE" ]; then
+if [ "$DEPLOY_COMMAND" = "deploy" ] && [ "$RUN_ALL" = false ] && [ -z "$CONTAINER_TYPE" ]; then
     CONTAINER_TYPE="$DEFAULT_CONTAINER_TYPE"  # Default to ecs for AWS
 fi
 
-# Export container type for child scripts
-export CONTAINER_TYPE
-
-# Export flags for sub-scripts
-export DRY_RUN SKIP_DATA_LAKE PREEMPT FORCE_REFRESH_DATA
+# Export flags for sub-scripts (CONTAINER_TYPE may be overridden for --all mode)
+export DRY_RUN SKIP_DATA_LAKE PREEMPT FORCE_REFRESH_DATA RUN_ALL
 
 # Show usage information
 show_usage() {
@@ -1047,14 +1050,45 @@ main() {
     
     # Handle deployment commands
     if [ "$DEPLOY_COMMAND" = "deploy" ]; then
+        # If --all is set, run deploy (and its own verification) for both ecs and eks sequentially.
+        if [ "$RUN_ALL" = true ]; then
+            if [ "$PREEMPT" = true ]; then
+                log_error "--all cannot be combined with --preempt (would destroy infrastructure twice)"
+                exit 1
+            fi
+
+            local extra_flags=()
+            [ "$DRY_RUN" = true ] && extra_flags+=("--dry-run")
+            [ "$SKIP_DATA_LAKE" = true ] && extra_flags+=("--skip-data-lake")
+            [ "$FORCE_REFRESH_DATA" = true ] && extra_flags+=("--force-refresh-data")
+
+            for ct in ecs eks; do
+                log_step "Running full AWS deploy workflow for container type: $ct (environment: $ENVIRONMENT)"
+                "$0" deploy --container-type "$ct" "$ENVIRONMENT" "${extra_flags[@]}"
+            done
+
+            # Phase 7 and final summary are handled by each child invocation.
+            trap - EXIT
+            local total_elapsed=$(( $(date +%s) - script_start_time ))
+            echo ""
+            log_success "═══════════════════════════════════════════════════════════════════════════════"
+            log_success "AWS deployment (--all: ecs + eks) completed!"
+            log_success "Total execution time: $(format_elapsed_time $total_elapsed)"
+            log_success "═══════════════════════════════════════════════════════════════════════════════"
+            perf_print_summary
+            perf_print_statistics
+            exit 0
+        fi
+
         if [ -z "$CONTAINER_TYPE" ]; then
             log_error "Missing required --container-type parameter for deploy command"
             echo ""
             show_usage
             exit 1
         fi
+        export CONTAINER_TYPE
         deploy_with_container_type
-            echo ""
+        echo ""
     elif [ "$DEPLOY_COMMAND" = "infrastructure" ]; then
             deploy_infrastructure
             echo ""
