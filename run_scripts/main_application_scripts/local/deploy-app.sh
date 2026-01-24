@@ -52,9 +52,9 @@ log_info "Generating Kubernetes manifests..."
 
 # Apply manifests
 log_info "Applying Kubernetes manifests..."
-kubectl apply -f "$REPO_ROOT/infra/k8s/configmap-generated.yaml"
-kubectl apply -f "$REPO_ROOT/infra/k8s/secret.yaml"
-kubectl apply -f "$REPO_ROOT/infra/k8s/deployment.yaml"
+kubectl apply -f "$REPO_ROOT/infra/k8s/generated/configmap-generated.yaml"
+kubectl apply -f "$REPO_ROOT/infra/k8s/generated/secret-generated.yaml"
+kubectl apply -f "$REPO_ROOT/infra/k8s/generated/deployment-generated.yaml"
 kubectl apply -f "$REPO_ROOT/infra/k8s/service.yaml"
 kubectl apply -f "$REPO_ROOT/infra/k8s/ingress.yaml"
 

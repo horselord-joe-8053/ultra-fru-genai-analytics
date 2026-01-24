@@ -73,3 +73,6 @@ data/raw/*.backup*
 
 # Backup files
 .env.example.bk1
+
+# Kubernetes generated files
+infra/k8s/generated/

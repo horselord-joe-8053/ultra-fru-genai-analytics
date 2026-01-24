@@ -1,8 +1,8 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: fru-api-ingress
-  namespace: default
+  name: fru-genai-analytics-all-test-1769123629
+  namespace: test-manifests-1769123629
   annotations:
     # NGINX Ingress (cloud-agnostic routing)
     # No rewrite needed - paths match exactly

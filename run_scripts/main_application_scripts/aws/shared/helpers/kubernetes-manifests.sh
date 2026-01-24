@@ -64,7 +64,19 @@ generate_kubernetes_manifests() {
         repo_root="$(cd "$repo_root" && pwd)"
     fi
     
-    log_info "Generating ConfigMap and Secret from templates..."
+    log_info "Generating Kubernetes manifests from templates..."
+    
+    # Set up directories
+    local templates_dir="$manifests_dir/templates"
+    local generated_dir="$manifests_dir/generated"
+    
+    # Clean up old generated files before generating new ones
+    # This ensures generated/ always reflects the last generation run
+    if [ -d "$generated_dir" ]; then
+        log_info "Cleaning up previous generated manifests..."
+        rm -rf "$generated_dir"
+    fi
+    mkdir -p "$generated_dir"
     
     # Load environment variables from .env
     if [ -f "$repo_root/run_scripts/shared/load-env.sh" ]; then
@@ -73,8 +85,8 @@ generate_kubernetes_manifests() {
     fi
     
     # Generate ConfigMap from template
-    local configmap_template="$manifests_dir/configmap.yaml"
-    local configmap_output="$manifests_dir/configmap-generated.yaml"
+    local configmap_template="$templates_dir/configmap.template.yaml"
+    local configmap_output="$generated_dir/configmap-generated.yaml"
     
     if [ -f "$configmap_template" ]; then
         log_info "Generating ConfigMap from template..."
@@ -147,8 +159,8 @@ generate_kubernetes_manifests() {
     fi
     
     # Generate Secret from template
-    local secret_template="$manifests_dir/secret.yaml.template"
-    local secret_output="$manifests_dir/secret.yaml"
+    local secret_template="$templates_dir/secret.template.yaml"
+    local secret_output="$generated_dir/secret-generated.yaml"
     
     if [ -f "$secret_template" ]; then
         log_info "Generating Secret from template..."
@@ -164,10 +176,28 @@ generate_kubernetes_manifests() {
             fi
             
             envsubst < "$secret_template" > "$secret_output"
-            log_success "Secret generated: secret.yaml"
+            log_success "Secret generated: secret-generated.yaml"
         else
             log_warning "envsubst not found, cannot generate secret from template"
             log_info "You'll need to create secret manually: kubectl create secret generic fru-secrets ..."
+        fi
+    fi
+    
+    # Generate Deployment from template (if CONTAINER_IMAGE is available)
+    local deployment_template="$templates_dir/deployment.template.yaml"
+    local deployment_output="$generated_dir/deployment-generated.yaml"
+    
+    if [ -f "$deployment_template" ]; then
+        log_info "Generating Deployment from template..."
+        if command_exists envsubst; then
+            # CONTAINER_IMAGE should be set by the calling script (apply_kubernetes_manifests)
+            # If not set, export empty string (will be set later in apply_kubernetes_manifests)
+            export CONTAINER_IMAGE="${CONTAINER_IMAGE:-}"
+            envsubst < "$deployment_template" > "$deployment_output"
+            log_success "Deployment generated: deployment-generated.yaml"
+        else
+            log_warning "envsubst not found, using template as-is"
+            cp "$deployment_template" "$deployment_output"
         fi
     fi
 }
@@ -214,37 +244,56 @@ apply_kubernetes_manifests() {
         log_info "Using container image: $container_image"
     fi
     
-    # Find YAML files (exclude templates, prefer generated files)
+    # Generate Deployment with CONTAINER_IMAGE (if not already generated)
+    local generated_dir="$manifests_dir/generated"
+    local deployment_template="$manifests_dir/templates/deployment.template.yaml"
+    local deployment_output="$generated_dir/deployment-generated.yaml"
+    
+    if [ -f "$deployment_template" ] && [ -n "$container_image" ] && [ ! -f "$deployment_output" ]; then
+        log_info "Generating Deployment with container image..."
+        export CONTAINER_IMAGE="$container_image"
+        if command_exists envsubst; then
+            envsubst < "$deployment_template" > "$deployment_output"
+            log_success "Deployment generated with image: $container_image"
+        else
+            log_warning "envsubst not found, using sed fallback"
+            sed "s|\${CONTAINER_IMAGE}|$container_image|g" "$deployment_template" > "$deployment_output"
+        fi
+    fi
+    
+    # Find YAML files: generated files first, then non-template files from root
     local yaml_files=()
+    local generated_dir="$manifests_dir/generated"
     
-    # Prefer generated files if they exist, otherwise use templates
-    if [ -f "$manifests_dir/configmap-generated.yaml" ]; then
-        yaml_files+=("$manifests_dir/configmap-generated.yaml")
-    elif [ -f "$manifests_dir/configmap.yaml" ]; then
-        yaml_files+=("$manifests_dir/configmap.yaml")
+    # Add all generated files from generated/ directory
+    if [ -d "$generated_dir" ]; then
+        while IFS= read -r file; do
+            if [ -f "$file" ]; then
+                yaml_files+=("$file")
+            fi
+        done < <(find "$generated_dir" -name "*.yaml" -type f | sort)
     fi
     
-    if [ -f "$manifests_dir/secret.yaml" ]; then
-        yaml_files+=("$manifests_dir/secret.yaml")
-    fi
-    
-    # Add other YAML files (deployment, service, ingress, etc.)
+    # Add non-template files from root (service.yaml, ingress.yaml, etc.)
     while IFS= read -r file; do
         local basename_file
         basename_file=$(basename "$file")
-        # Skip templates, Helm values files, and already-added files
+        # Skip templates, generated files, Helm values files, and documentation
         if [[ "$basename_file" == "configmap.yaml" || \
               "$basename_file" == "configmap-generated.yaml" || \
-              "$basename_file" == "secret.yaml.template" || \
+              "$basename_file" == "secret.template.yaml" || \
               "$basename_file" == "secret.yaml" || \
+              "$basename_file" == "secret-generated.yaml" || \
+              "$basename_file" == "deployment.yaml" || \
+              "$basename_file" == "deployment-generated.yaml" || \
               "$basename_file" == ".gitignore" || \
               "$basename_file" == "README.md" || \
               "$basename_file" == "ingress-nginx-values-cloud.yaml" || \
               "$basename_file" == "ingress-nginx-values-local.yaml" ]]; then
             continue
         fi
-        yaml_files+=("$file")
-    done < <(find "$manifests_dir" \( -name "*.yaml" -o -name "*.yml" \) | sort)
+            yaml_files+=("$file")
+    done < <(find "$manifests_dir" -maxdepth 1 \( -name "*.yaml" -o -name "*.yml" \) -type f | sort)
     
     if [ ${#yaml_files[@]} -eq 0 ]; then
         log_warning "No YAML files found in $manifests_dir"
@@ -703,6 +752,8 @@ PYTHON_SCRIPT
             log_success "All ${#yaml_files[@]} manifest(s) applied and verified successfully"
             log_info "  - ConfigMaps/Secrets: Created and verified"
             log_info "  - Deployments/Services: Created and verified"
+            log_info "  - Generated manifests kept in generated/ for reference"
+            
             return 0
         else
             log_error ""

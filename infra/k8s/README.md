@@ -4,10 +4,10 @@ This directory contains Kubernetes manifests for deploying the FRU API to EKS.
 
 ## Files
 
-- **deployment.yaml** - Kubernetes Deployment for the API backend
+- **templates/deployment.template.yaml** - Kubernetes Deployment template for the API backend
+- **templates/configmap.template.yaml** - Non-sensitive configuration template (database host, AWS region, etc.)
+- **templates/secret.template.yaml** - Template for sensitive data (passwords, API keys)
 - **service.yaml** - ClusterIP Service to expose the API internally
-- **configmap.yaml** - Non-sensitive configuration (database host, AWS region, etc.)
-- **secret.yaml.template** - Template for sensitive data (passwords, API keys)
 - **ingress.yaml** - Optional Ingress for external access via ALB
 
 ## Prerequisites
@@ -38,7 +38,7 @@ PGHOST=$(terragrunt output -raw cluster_endpoint)
 
 ### 2. Create Secret from Template
 
-The `secret.yaml.template` file needs to be populated with actual values. You can:
+The `templates/secret.template.yaml` file needs to be populated with actual values. You can:
 
 **Option A: Use kubectl create secret directly**
 ```bash
@@ -56,8 +56,8 @@ export AWS_ACCESS_KEY_ID="<key>"
 export AWS_SECRET_ACCESS_KEY="<secret>"
 export OPENAI_API_KEY="<key>"
 
-envsubst < secret.yaml.template > secret.yaml
-kubectl apply -f secret.yaml
+envsubst < templates/secret.template.yaml > generated/secret-generated.yaml
+kubectl apply -f generated/secret-generated.yaml
 ```
 
 **Option C: Use AWS Secrets Manager CSI Driver** (recommended for production)
@@ -67,7 +67,7 @@ kubectl apply -f secret.yaml
 
 ### 3. Update ConfigMap
 
-The `configmap.yaml` uses environment variable substitution. Update it with actual values:
+The `templates/configmap.template.yaml` uses environment variable substitution. Update it with actual values:
 
 **Option A: Use envsubst**
 ```bash
@@ -77,8 +77,8 @@ export AWS_REGION="us-east-1"
 export AWS_BEDROCK_INFERENCE_PROFILE_ID="us.anthropic.claude-3-5-haiku-20241022-v1:0"
 export AWS_BEDROCK_MODEL_ID="anthropic.claude-3-haiku-20240307-v1:0"
 
-envsubst < configmap.yaml > configmap-generated.yaml
-kubectl apply -f configmap-generated.yaml
+envsubst < templates/configmap.template.yaml > generated/configmap-generated.yaml
+kubectl apply -f generated/configmap-generated.yaml
 ```
 
 **Option B: Edit manually**
@@ -89,16 +89,23 @@ kubectl edit configmap fru-config
 ### 4. Deploy Manifests
 
 The `run_scripts/aws/eks/deploy.sh` script will automatically:
-1. Substitute `${CONTAINER_IMAGE}` in deployment.yaml
-2. Apply all YAML files in this directory
-3. Verify deployment status
+1. Generate manifests from templates in `templates/` directory
+2. Substitute `${CONTAINER_IMAGE}` in deployment template
+3. Apply all generated files from `generated/` directory and non-template files from root
+4. Verify deployment status
+5. Clean up `generated/` directory after successful apply
 
 Or manually:
 ```bash
+# Generate from templates
+envsubst < templates/configmap.template.yaml > generated/configmap-generated.yaml
+envsubst < templates/secret.template.yaml > generated/secret-generated.yaml
+envsubst < templates/deployment.template.yaml > generated/deployment-generated.yaml
+
 # Apply in order
-kubectl apply -f configmap.yaml
-kubectl apply -f secret.yaml  # or use secret.yaml.template with envsubst
-kubectl apply -f deployment.yaml
+kubectl apply -f generated/configmap-generated.yaml
+kubectl apply -f generated/secret-generated.yaml
+kubectl apply -f generated/deployment-generated.yaml
 kubectl apply -f service.yaml
 kubectl apply -f ingress.yaml  # Optional
 ```
