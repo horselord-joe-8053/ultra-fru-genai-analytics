@@ -155,7 +155,7 @@ wait_for_invalidation() {
                 log_warning "Could not parse invalidation status from response"
                 log_warning "Response: ${status_result:0:200}"
                 # Continue to next check iteration
-            el            if [ "$status" = "Completed" ]; then
+            elif [ "$status" = "Completed" ]; then
                 local elapsed_minutes=$((elapsed / 60))
                 local elapsed_seconds=$((elapsed % 60))
                 log_success "CloudFront invalidation completed successfully"
