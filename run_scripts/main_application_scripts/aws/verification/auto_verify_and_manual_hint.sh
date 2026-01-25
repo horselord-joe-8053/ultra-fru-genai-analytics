@@ -55,7 +55,17 @@ if [ "$DRY_RUN" != "true" ]; then
     log_step "Substep 4/4: Validating deployment endpoints (comprehensive)..."
     source "$VERIFICATION_DIR/diagnose-failures.sh"  # For diagnose_api_failure()
     source "$VERIFICATION_DIR/validate-endpoints.sh"
-    validate_urls || true  # Don't fail script if validation has issues
+    if ! validate_urls; then
+        log_error ""
+        log_error "═══════════════════════════════════════════════════════════════════════════════"
+        log_error "DEPLOYMENT VERIFICATION FAILED"
+        log_error "═══════════════════════════════════════════════════════════════════════════════"
+        log_error "Critical endpoints are not working. The deployment may not be functional."
+        log_error "Please review the error messages above and fix the issues before using the deployment."
+        log_error "═══════════════════════════════════════════════════════════════════════════════"
+        echo ""
+        exit 1  # Fail fast - critical validation failed
+    fi
     echo ""
 fi
 

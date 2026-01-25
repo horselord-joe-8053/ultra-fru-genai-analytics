@@ -136,6 +136,9 @@ spec:
             configMapKeyRef:
               name: fru-config
               key: allowed-origins
+        # Container image version (for /version endpoint)
+        - name: CONTAINER_IMAGE
+          value: ${CONTAINER_IMAGE}
         resources:
           requests:
             memory: "512Mi"

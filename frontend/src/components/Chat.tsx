@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import type { Message } from "../App";
 import { getBuildVersion } from "../utils/version";
+import { getBackendVersion } from "../utils/backendVersion";
 
 interface ChatProps {
   messages: Message[];
@@ -10,6 +11,7 @@ interface ChatProps {
 
 const Chat: React.FC<ChatProps> = ({ messages, onSend, loading }) => {
   const [input, setInput] = useState("");
+  const [backendVersion, setBackendVersion] = useState<string>("loading...");
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   function handleSubmit(e: React.FormEvent) {
@@ -23,14 +25,20 @@ const Chat: React.FC<ChatProps> = ({ messages, onSend, loading }) => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  useEffect(() => {
+    // Fetch backend version on component mount
+    getBackendVersion().then(setBackendVersion);
+  }, []);
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-4 py-3 border-b bg-gray-50">
         <div>
           <h1 className="text-lg font-semibold">FRU Analytics Assistant</h1>
-          <p className="text-[10px] text-gray-400 font-mono leading-tight">
-            {getBuildVersion()}
-          </p>
+          <div className="text-[10px] text-gray-400 font-mono leading-tight space-y-0.5">
+            <p>Frontend: {getBuildVersion()}</p>
+            <p>Backend: {backendVersion}</p>
+          </div>
           <p className="text-xs text-gray-500">
             Ask about sales, brands, stores, and customer feedback.
           </p>

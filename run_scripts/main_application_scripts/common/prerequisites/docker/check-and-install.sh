@@ -9,6 +9,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$SCRIPT_DIR/../shared/detect-os.sh"
 source "$SCRIPT_DIR/../shared/prompt-helpers.sh"
+source "$REPO_ROOT/run_scripts/main_application_scripts/common/docker_run.sh"
 
 # Ensure command_exists is available
 if ! type command_exists >/dev/null 2>&1; then
@@ -64,20 +65,32 @@ check_docker() {
     
     # Docker daemon MUST be running in both dry-run and non-dry-run modes
     if [ "$docker_daemon_running" != "true" ]; then
-        log_error "Docker daemon is not running"
-        log_error ""
-        log_error "Docker daemon must be running for deployment operations:"
-        if [ "${DRY_RUN:-false}" = "true" ]; then
-            log_error "  - Dry-run mode requires Docker daemon to validate environment"
+        log_warning "Docker daemon is not running"
+        log_info "Attempting to start Docker daemon automatically..."
+        
+        # Try to start Docker automatically
+        if ensure_docker_running; then
+            log_success "Docker daemon started successfully"
+            # Re-check that Docker is now running
+            if docker info >/dev/null 2>&1; then
+                docker_daemon_running=true
+            fi
         else
-            log_error "  - Non-dry-run mode requires Docker daemon to build container images"
+            log_error "Failed to start Docker daemon automatically"
+            log_error ""
+            log_error "Docker daemon must be running for deployment operations:"
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+                log_error "  - Dry-run mode requires Docker daemon to validate environment"
+            else
+                log_error "  - Non-dry-run mode requires Docker daemon to build container images"
+            fi
+            log_error ""
+            log_error "To fix this:"
+            log_error "  - Start Docker Desktop (macOS): Open Docker Desktop application"
+            log_error "  - Start Docker service (Linux): sudo systemctl start docker"
+            log_error ""
+            return 1
         fi
-        log_error ""
-        log_error "To fix this:"
-        log_error "  - Start Docker Desktop (macOS): Open Docker Desktop application"
-        log_error "  - Start Docker service (Linux): sudo systemctl start docker"
-        log_error ""
-        return 1
     fi
     
     log_success "Docker daemon is running"

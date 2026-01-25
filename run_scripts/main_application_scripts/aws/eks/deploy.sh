@@ -101,14 +101,46 @@ main() {
     local manifests_dir
     if manifests_dir=$(find_manifests_directory); then
         log_info "Found manifests directory: $manifests_dir"
+        
+        # Get namespace from Terraform output (for CloudFront update)
+        local environment="${ENVIRONMENT:-dev}"
+        local terraform_dir="$REPO_ROOT/infra/terraform/providers/aws/environments/$environment/eks"
+        local namespace="default"  # Default fallback
+        
+        if [ -d "$terraform_dir" ] && command_exists terragrunt; then
+            log_info "Fetching namespace from Terraform output..."
+            if namespace_output=$(cd "$terraform_dir" && AWS_PROFILE="${AWS_PROFILE:-admin}" terragrunt output -raw namespace 2>/dev/null); then
+                if [ -n "$namespace_output" ] && [ "$namespace_output" != "null" ]; then
+                    namespace="$namespace_output"
+                    log_info "Using namespace from Terraform: $namespace"
+                else
+                    log_warning "Namespace from Terraform is empty, using default"
+                fi
+            else
+                log_warning "Could not fetch namespace from Terraform, using default"
+            fi
+        else
+            log_warning "Terraform directory not found or terragrunt not available, using default namespace"
+        fi
+        
         apply_kubernetes_manifests "$manifests_dir"
         verify_kubernetes_deployment
 
-        # After backend is healthy and ingress is applied, wire CloudFront to the EKS LoadBalancer
+        # After backend is healthy and ingress is applied, wire CloudFront to the EKS ALB
         # This updates the Terraform-managed CloudFront distribution so that /query, /query/stream,
-        # and /analytics are routed to the ingress NLB instead of the old ALB/placeholder.
-        log_step "Substep 5b: Updating CloudFront to point API paths to the EKS LoadBalancer"
-        "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/update-cloudfront-loadbalancer.sh" fru-api default || exit 1
+        # and /analytics are routed to the ingress ALB instead of the old ALB/placeholder.
+        # Get ingress name from Terraform output
+        local ingress_name="fru-api-ingress"  # Default fallback
+        if [ -d "$terraform_dir" ] && command_exists terragrunt; then
+            if ingress_name_output=$(cd "$terraform_dir" && AWS_PROFILE="${AWS_PROFILE:-admin}" terragrunt output -raw ingress_name 2>/dev/null); then
+                if [ -n "$ingress_name_output" ] && [ "$ingress_name_output" != "null" ]; then
+                    ingress_name="$ingress_name_output"
+                    log_info "Using ingress name from Terraform: $ingress_name"
+                fi
+            fi
+        fi
+        log_step "Substep 5b: Updating CloudFront to point API paths to the EKS Ingress ALB"
+        "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/update-cloudfront-loadbalancer.sh" "$ingress_name" "$namespace" || exit 1
     else
         log_warning "Kubernetes manifests directory not found"
         log_info "Searched in:"

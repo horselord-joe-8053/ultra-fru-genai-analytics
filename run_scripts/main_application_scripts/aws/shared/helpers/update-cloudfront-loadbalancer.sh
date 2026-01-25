@@ -1,8 +1,8 @@
 #!/bin/bash
-# Update CloudFront distribution with LoadBalancer DNS from Kubernetes Service
-# Simpler alternative to ALB - uses LoadBalancer service type
+# Update CloudFront distribution with ALB DNS from Kubernetes Ingress
+# Ingress automatically creates ALB via AWS Load Balancer Controller
 #
-# Usage: ./update-cloudfront-loadbalancer.sh [service-name] [namespace] [cloudfront-distribution-id]
+# Usage: ./update-cloudfront-loadbalancer.sh [ingress-name] [namespace] [cloudfront-distribution-id]
 
 set -e
 
@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 
-SERVICE_NAME="${1:-fru-api}"
+INGRESS_NAME="${1:-fru-api-ingress}"
 NAMESPACE="${2:-default}"
 CF_DIST_ID="${3:-}"
 
@@ -40,26 +40,28 @@ if [ -z "$CF_DIST_ID" ]; then
     exit 0
 fi
 
-log_info "Waiting for LoadBalancer to be ready..."
-log_info "Service: $SERVICE_NAME (namespace: $NAMESPACE)"
+log_info "Waiting for Ingress ALB to be ready..."
+log_info "Ingress: $INGRESS_NAME (namespace: $NAMESPACE)"
 log_info "CloudFront Distribution: $CF_DIST_ID"
 
-# Wait for LoadBalancer DNS (with timeout)
-TIMEOUT=300  # 5 minutes (LoadBalancer is faster than ALB)
+# Wait for Ingress ALB DNS (with timeout)
+# Note: Ingress creates ALB automatically via AWS Load Balancer Controller
+TIMEOUT=300  # 5 minutes (ALB creation can take 2-3 minutes)
 INTERVAL=10  # Check every 10 seconds
 ELAPSED=0
 LB_DNS=""
 
 while [ $ELAPSED -lt $TIMEOUT ]; do
-    LB_DNS=$(kubectl get svc -n "$NAMESPACE" "$SERVICE_NAME" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+    # Get ALB DNS from Ingress (not Service - Service is ClusterIP)
+    LB_DNS=$(kubectl get ingress -n "$NAMESPACE" "$INGRESS_NAME" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
     
     if [ -n "$LB_DNS" ] && [ "$LB_DNS" != "null" ]; then
-        log_success "LoadBalancer DNS found: $LB_DNS"
+        log_success "Ingress ALB DNS found: $LB_DNS"
         break
     fi
     
     if [ $((ELAPSED % 30)) -eq 0 ]; then
-        log_info "Still waiting for LoadBalancer... (${ELAPSED}s / ${TIMEOUT}s)"
+        log_info "Still waiting for Ingress ALB... (${ELAPSED}s / ${TIMEOUT}s)"
     fi
     
     sleep $INTERVAL
@@ -67,8 +69,9 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
 done
 
 if [ -z "$LB_DNS" ] || [ "$LB_DNS" = "null" ]; then
-    log_error "Timeout: LoadBalancer DNS not available after ${TIMEOUT} seconds"
-    log_info "Check Service status: kubectl get svc -n $NAMESPACE $SERVICE_NAME"
+    log_error "Timeout: Ingress ALB DNS not available after ${TIMEOUT} seconds"
+    log_info "Check Ingress status: kubectl get ingress -n $NAMESPACE $INGRESS_NAME"
+    log_info "Note: ALB is created automatically by AWS Load Balancer Controller when Ingress is applied"
     exit 1
 fi
 

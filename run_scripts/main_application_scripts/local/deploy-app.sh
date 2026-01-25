@@ -44,19 +44,25 @@ log_info "  ALLOWED_ORIGINS: $ALLOWED_ORIGINS"
 # Generate ConfigMap and Secret
 log_info "Generating Kubernetes manifests..."
 
-# Use the same helper script as AWS deployment
-"$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/kubernetes-manifests.sh" || {
+# Source the helper to get generate_kubernetes_manifests function
+source "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/kubernetes-manifests.sh"
+
+# Generate all manifests (including namespace, ingress, service)
+if ! generate_kubernetes_manifests "$REPO_ROOT/infra/k8s"; then
   log_error "Failed to generate Kubernetes manifests"
   exit 1
-}
+fi
 
 # Apply manifests
 log_info "Applying Kubernetes manifests..."
+
+# Apply generated manifests
+kubectl apply -f "$REPO_ROOT/infra/k8s/generated/namespace-generated.yaml" 2>/dev/null || true
 kubectl apply -f "$REPO_ROOT/infra/k8s/generated/configmap-generated.yaml"
 kubectl apply -f "$REPO_ROOT/infra/k8s/generated/secret-generated.yaml"
 kubectl apply -f "$REPO_ROOT/infra/k8s/generated/deployment-generated.yaml"
-kubectl apply -f "$REPO_ROOT/infra/k8s/service.yaml"
-kubectl apply -f "$REPO_ROOT/infra/k8s/ingress.yaml"
+kubectl apply -f "$REPO_ROOT/infra/k8s/generated/service-generated.yaml"
+kubectl apply -f "$REPO_ROOT/infra/k8s/generated/ingress-generated.yaml"
 
 log_success "Application deployed to local Kubernetes!"
 log_info "Waiting for pods to be ready..."

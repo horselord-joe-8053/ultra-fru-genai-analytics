@@ -86,9 +86,9 @@ inputs = {
   cloudfront_price_class     = "PriceClass_100"
   frontend_certificate_arn   = null
   frontend_api_origin_id     = "ALB-${local.env_config.inputs.project_name}-${local.env_config.inputs.environment}-eks"
-  # LoadBalancer DNS (from Kubernetes Service type=LoadBalancer)
-  # Get via: kubectl get svc fru-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
-  alb_dns_name               = "ae9b974e7aaee4904ac677a7e86c9b32-1021998622.us-east-1.elb.amazonaws.com"
+  # LoadBalancer DNS (from Kubernetes Ingress)
+  # Get via: kubectl get ingress fru-api-ingress -n default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+  alb_dns_name               = "ad36c0036890a439eae339e83c735cdc-78ffc1fad6560c8f.elb.us-east-1.amazonaws.com"
   
   tags = local.env_config.inputs.tags
 }

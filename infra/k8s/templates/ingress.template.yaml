@@ -1,8 +1,8 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: fru-genai-analytics-all-test-1769123629
-  namespace: test-manifests-1769123629
+  name: ${INGRESS_NAME}
+  namespace: ${NAMESPACE}
   annotations:
     # NGINX Ingress (cloud-agnostic routing)
     # No rewrite needed - paths match exactly
@@ -10,12 +10,13 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
     nginx.ingress.kubernetes.io/enable-cors: "true"
-    nginx.ingress.kubernetes.io/cors-allow-origin: "https://d325mh0wy4je4e.cloudfront.net"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "${CORS_ORIGIN}"
     nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
 spec:
   ingressClassName: nginx
   rules:
-  - http:
+  - host: ${INGRESS_HOST}
+    http:
       paths:
       - path: /query
         pathType: Prefix
@@ -45,3 +46,11 @@ spec:
             name: fru-api
             port:
               number: 80
+      - path: /version
+        pathType: Exact
+        backend:
+          service:
+            name: fru-api
+            port:
+              number: 80
+

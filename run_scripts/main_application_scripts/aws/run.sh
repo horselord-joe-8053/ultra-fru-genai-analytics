@@ -1,33 +1,128 @@
 #!/bin/bash
 # Main AWS deployment orchestrator
 # Orchestrates end-to-end deployment workflows for ECS, EKS, and Terraform
-# Usage: ./run.sh [workflow] [environment] [options...]
 #
-# Default: deploy --container-type ecs dev (complete ECS deployment to dev environment)
+# ============================================================================
+# USAGE
+# ============================================================================
+# Basic Syntax:
+#   ./run.sh deploy --container-type <ecs|eks> [environment] [options...]
+#   ./run.sh infrastructure [environment] [options...]
 #
-# Workflows:
-#   deploy --container-type ecs  → Complete ECS deployment (build image → setup infra → deploy app + verification)
-#   deploy --container-type eks  → Complete EKS deployment (build image → setup infra → deploy app + verification)
-#   infrastructure  → Infrastructure only (via terraform/deploy.sh infrastructure: VPC, networking, DB, S3, ECS/EKS infra; no app rollout)
+# ============================================================================
+# QUICK START EXAMPLES
+# ============================================================================
+# ECS Deployment (most common):
+#   ./run.sh deploy --container-type ecs dev
+#   ./run.sh deploy --container-type ecs dev --preempt
 #
-# Environment:
-#   dev             → Development environment (default)
-#   prod            → Production environment
-#   If omitted, defaults to 'dev'
+# EKS Deployment:
+#   ./run.sh deploy --container-type eks dev
+#   ./run.sh deploy --container-type eks dev --preempt
 #
-# Options:
-#   --dry-run                → Preview changes without modifying AWS resources
-#   --skip-data-lake         → Skip data-lake setup even if analytics scheduler is enabled
-#   --preempt                → Destroy all AWS infrastructure before deployment (complete teardown and fresh rebuild)
-#                              Executes Phase 0: Step 0.5 - calls teardown-resources.sh to:
-#                              - Stop ECS/EKS services (scale to 0)
-#                              - Empty S3 buckets
-#                              - Destroy Terraform infrastructure
-#                              - Clean up orphaned resources
+# Infrastructure Only (no application deployment):
+#   ./run.sh infrastructure dev
 #
-# Data-Lake Setup Behavior:
-#   - Automatic: Setup if ENABLE_ANALYTICS_SCHEDULER=true in .env file
-#   - Idempotent: Setup scripts are safe to run multiple times (create-if-missing)
+# ============================================================================
+# FULL COMMAND EXAMPLES
+# ============================================================================
+# Complete ECS deployment to dev (default environment):
+#   ./run.sh deploy --container-type ecs dev
+#
+# Complete ECS deployment to prod:
+#   ./run.sh deploy --container-type ecs prod
+#
+# Complete EKS deployment to dev:
+#   ./run.sh deploy --container-type eks dev
+#
+# Complete EKS deployment to prod:
+#   ./run.sh deploy --container-type eks prod
+#
+# Full teardown and fresh deployment (ECS dev):
+#   ./run.sh deploy --container-type ecs dev --preempt
+#
+# Full teardown and fresh deployment (EKS dev):
+#   ./run.sh deploy --container-type eks dev --preempt
+#
+# Preview changes without deploying (dry-run):
+#   ./run.sh deploy --container-type ecs dev --dry-run
+#   ./run.sh deploy --container-type eks dev --dry-run
+#
+# Deploy both ECS and EKS sequentially:
+#   ./run.sh deploy --container-type ecs dev --all
+#
+# Infrastructure only (no application):
+#   ./run.sh infrastructure dev
+#   ./run.sh infrastructure prod
+#
+# ============================================================================
+# WORKFLOWS
+# ============================================================================
+# deploy --container-type ecs
+#   → Build container image
+#   → Setup Terraform state bucket
+#   → Deploy infrastructure (VPC, Aurora, IAM, Secrets)
+#   → Deploy ECS application (ECS service, ALB, CloudFront)
+#   → Run verification tests
+#
+# deploy --container-type eks
+#   → Build container image
+#   → Setup Terraform state bucket
+#   → Deploy infrastructure (VPC, Aurora, IAM, Secrets)
+#   → Deploy EKS layer (EKS cluster, node groups, OIDC provider)
+#   → Configure kubectl
+#   → Deploy Kubernetes manifests (Deployment, Service, Ingress)
+#   → Run verification tests
+#
+# infrastructure
+#   → Setup Terraform state bucket
+#   → Deploy infrastructure (VPC, Aurora, IAM, Secrets, S3)
+#   → No application deployment
+#
+# ============================================================================
+# ENVIRONMENTS
+# ============================================================================
+# dev     → Development environment (default if omitted)
+# prod    → Production environment
+#
+# ============================================================================
+# OPTIONS
+# ============================================================================
+# --container-type <ecs|eks>
+#   Required for 'deploy' command. Specifies container orchestration type.
+#   - ecs: AWS ECS (Elastic Container Service)
+#   - eks: AWS EKS (Elastic Kubernetes Service)
+#
+# --preempt
+#   Destroy all existing AWS infrastructure before deployment (complete teardown).
+#   Executes Phase 0: Step 0.5 - calls teardown-resources.sh to:
+#   - Stop ECS/EKS services (scale to 0)
+#   - Empty S3 buckets
+#   - Destroy Terraform infrastructure
+#   - Clean up orphaned resources
+#   Use this for a completely fresh deployment from scratch.
+#
+# --dry-run
+#   Preview changes without modifying AWS resources.
+#   Shows what would be created/modified/destroyed without actually doing it.
+#
+# --skip-data-lake
+#   Skip data-lake setup even if ENABLE_ANALYTICS_SCHEDULER=true in .env file.
+#
+# --force-refresh-data
+#   Force refresh of data resources (database schema, data, Delta tables)
+#   without destroying infrastructure.
+#
+# --all
+#   Run deploy for both ecs and eks sequentially (only valid with 'deploy').
+#   Cannot be combined with --preempt.
+#
+# ============================================================================
+# DATA-LAKE SETUP BEHAVIOR
+# ============================================================================
+# - Automatic: Setup if ENABLE_ANALYTICS_SCHEDULER=true in .env file
+# - Idempotent: Setup scripts are safe to run multiple times (create-if-missing)
+# - Can be skipped with --skip-data-lake flag
 
 set -e
 
@@ -190,10 +285,20 @@ ${BLUE}Environments:${NC}
   ${GREEN}--force-refresh-data${NC} Force refresh of data resources (database schema, data, Delta tables) without destroying infrastructure
 
 ${BLUE}Examples:${NC}
+  ${GREEN}Basic Deployments:${NC}
   $0 deploy --container-type ecs dev          # Complete ECS deployment to dev
   $0 deploy --container-type ecs              # Same as above (dev is default)
+  $0 deploy --container-type eks dev          # Complete EKS deployment to dev
   $0 deploy --container-type eks prod         # Complete EKS deployment to prod
   $0 infrastructure dev                        # Infrastructure only to dev
+
+  ${GREEN}Full Teardown and Fresh Deployment:${NC}
+  $0 deploy --container-type ecs dev --preempt    # Destroy everything, then deploy ECS
+  $0 deploy --container-type eks dev --preempt    # Destroy everything, then deploy EKS
+
+  ${GREEN}Preview Changes (Dry-Run):${NC}
+  $0 deploy --container-type ecs dev --dry-run    # Preview ECS deployment
+  $0 deploy --container-type eks dev --dry-run    # Preview EKS deployment
 
   ${GREEN}Data-Lake Scenarios:${NC}
   # With analytics enabled in .env (ENABLE_ANALYTICS_SCHEDULER=true)
@@ -203,8 +308,8 @@ ${BLUE}Examples:${NC}
   $0 deploy --container-type ecs dev   # Delta-lake setup skipped
   $0 deploy --container-type ecs dev --skip-data-lake  # Force skip (even if analytics enabled)
 
-  ${GREEN}Other Options:${NC}
-  $0 deploy --container-type ecs dev --dry-run  # Preview changes without deploying
+  ${GREEN}Deploy Both Container Types:${NC}
+  $0 deploy --container-type ecs dev --all    # Deploy both ECS and EKS sequentially
 
 ${BLUE}Data-Lake Setup:${NC}
   The data-lake (S3 + Delta table) is automatically set up when:
@@ -521,7 +626,7 @@ deploy_eks_full() {
     log_info "[DEBUG] Function started in background with PID: $func_pid"
     
     # Wait for function with timeout and show progress
-    local wait_timeout=300  # 5 minutes max
+    local wait_timeout=1800  # 30 minutes max (large downloads and ECR push can take time)
     local waited=0
     local wait_interval=5
     

@@ -63,14 +63,40 @@ output "kms_key_id" {
   value       = var.enable_secrets_encryption ? (var.kms_key_id != null ? var.kms_key_id : aws_kms_key.eks_secrets[0].id) : null
 }
 
+# Kubernetes Configuration Outputs
+output "namespace" {
+  description = "Kubernetes namespace for application"
+  value       = "fru-api-${var.environment}"
+}
+
+output "ingress_name" {
+  description = "Kubernetes ingress name"
+  value       = "fru-api-ingress-${var.environment}"
+}
+
+output "ingress_host" {
+  description = "Ingress hostname (unique per environment)"
+  value       = "api-${var.environment}.internal"
+}
+
 # Frontend Outputs
 output "cloudfront_domain_name" {
   description = "CloudFront domain name"
   value       = module.frontend.cloudfront_domain_name
 }
 
+output "cloudfront_distribution_id" {
+  description = "CloudFront distribution ID"
+  value       = module.frontend.cloudfront_distribution_id
+}
+
 output "s3_bucket_id" {
   description = "S3 bucket ID for frontend"
   value       = module.frontend.s3_bucket_id
+}
+
+output "cors_origin" {
+  description = "CORS origin URL (CloudFront domain with https:// prefix)"
+  value       = "https://${module.frontend.cloudfront_domain_name}"
 }
 

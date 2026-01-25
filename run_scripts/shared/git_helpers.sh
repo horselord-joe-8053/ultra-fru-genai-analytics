@@ -5,7 +5,7 @@
 # Generate image tag from git commit SHA
 # Format: fru-<env>-<date>-<sha>-<commit-slug> (clean) or fru-<env>-<date>-<sha>-dirty-<timestamp> (dirty)
 # Example: fru-dev-20260108-999a986-fix-teardown-script-path or fru-dev-20260108-999a986-dirty-20260117121530
-# Note: Dirty builds include timestamp (YYYYMMDDHHMMSS) to ensure uniqueness when rebuilding
+# Note: Dirty builds include timestamp (YYYYMMDD_HHMMSS) to ensure uniqueness when rebuilding
 #       with the same commit but different file content, preventing digest cache issues in ECS
 # 
 # This format is:
@@ -83,9 +83,9 @@ generate_image_tag() {
         
         # Dirty format: fru-<env>-<date>-<sha>-dirty-<timestamp>
         # Include timestamp to ensure uniqueness when rebuilding with same commit but different file content
-        # Format: YYYYMMDDHHMMSS (sortable, clear, fits Docker tag requirements)
+        # Format: YYYYMMDD_HHMMSS (sortable, clear, fits Docker tag requirements, underscore separates date and time)
         local build_timestamp
-        build_timestamp=$(date +%Y%m%d%H%M%S)
+        build_timestamp=$(date +%Y%m%d_%H%M%S)
         echo "fru-${environment}-${commit_date}-${base_sha}-dirty-${build_timestamp}"
         return
     fi

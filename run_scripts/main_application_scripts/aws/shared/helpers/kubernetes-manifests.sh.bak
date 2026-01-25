@@ -426,13 +426,12 @@ apply_kubernetes_manifests() {
         log_info "Using container image: $container_image"
     fi
     
-    # Generate Deployment with CONTAINER_IMAGE (always regenerate if CONTAINER_IMAGE is available)
-    # This ensures CONTAINER_IMAGE env var is set correctly, not just the image field
+    # Generate Deployment with CONTAINER_IMAGE (if not already generated)
     local generated_dir="$manifests_dir/generated"
     local deployment_template="$manifests_dir/templates/deployment.template.yaml"
     local deployment_output="$generated_dir/deployment-generated.yaml"
     
-    if [ -f "$deployment_template" ] && [ -n "$container_image" ]; then
+    if [ -f "$deployment_template" ] && [ -n "$container_image" ] && [ ! -f "$deployment_output" ]; then
         log_info "Generating Deployment with container image..."
         export CONTAINER_IMAGE="$container_image"
         local envsubst_cmd
@@ -440,14 +439,10 @@ apply_kubernetes_manifests() {
         if [ -n "$envsubst_cmd" ]; then
             "$envsubst_cmd" < "$deployment_template" > "$deployment_output"
             log_success "Deployment generated with image: $container_image"
-            log_info "CONTAINER_IMAGE environment variable set to: $container_image"
         else
             log_warning "envsubst not found, using sed fallback"
             sed "s|\${CONTAINER_IMAGE}|$container_image|g" "$deployment_template" > "$deployment_output"
         fi
-    elif [ -f "$deployment_template" ] && [ -z "$container_image" ]; then
-        log_warning "CONTAINER_IMAGE not set - deployment will be generated without image substitution"
-        log_warning "This may cause issues if the template requires CONTAINER_IMAGE"
     fi
     
     # Find YAML files: generated files first, then non-template files from root
@@ -492,37 +487,6 @@ apply_kubernetes_manifests() {
         log_warning "No YAML files found in $manifests_dir"
         return 0
     fi
-    
-    # Sort manifests by priority: namespace first, then secret, then others
-    # This ensures dependencies are created before resources that need them
-    local priority_order=("namespace" "secret" "configmap" "deployment" "service" "ingress")
-    local sorted_files=()
-    
-    # First, add files in priority order
-    for priority in "${priority_order[@]}"; do
-        for file in "${yaml_files[@]}"; do
-            local basename_file=$(basename "$file")
-            if [[ "$basename_file" == *"$priority"* ]]; then
-                sorted_files+=("$file")
-            fi
-        done
-    done
-    
-    # Then add any remaining files that don't match priority patterns
-    for file in "${yaml_files[@]}"; do
-        local found=false
-        for sorted_file in "${sorted_files[@]}"; do
-            if [ "$file" = "$sorted_file" ]; then
-                found=true
-                break
-            fi
-        done
-        if [ "$found" = false ]; then
-            sorted_files+=("$file")
-        fi
-    done
-    
-    yaml_files=("${sorted_files[@]}")
     
     log_info "Found ${#yaml_files[@]} manifest file(s): ${yaml_files[*]//$manifests_dir\//}"
     
@@ -803,44 +767,10 @@ PYTHON_SCRIPT
             local kubectl_exit_code
             
             # Use explicit AWS_PROFILE prefix as additional safeguard
-            # Add timeout to prevent hanging (60 seconds max for kubectl apply)
-            # Use background process with timeout since macOS doesn't have timeout command
-            local kubectl_pid
-            local kubectl_timeout=60
-            local kubectl_output_file=$(mktemp)
-            (
-                AWS_PROFILE="$aws_profile" kubectl apply --validate=false -f "$temp_file" > "$kubectl_output_file" 2>&1
-                echo $? > "$kubectl_output_file.exit"
-            ) &
-            kubectl_pid=$!
+            kubectl_output=$(AWS_PROFILE="$aws_profile" kubectl apply --validate=false -f "$temp_file" 2>&1)
+            kubectl_exit_code=$?
             
-            # Wait for kubectl with timeout
-            local waited=0
-            local wait_interval=1
-            while kill -0 "$kubectl_pid" 2>/dev/null && [ $waited -lt $kubectl_timeout ]; do
-                sleep $wait_interval
-                waited=$((waited + wait_interval))
-            done
-            
-            # Check if process is still running (timed out)
-            if kill -0 "$kubectl_pid" 2>/dev/null; then
-                log_warning "kubectl apply timed out after ${kubectl_timeout}s, killing process..."
-                kill "$kubectl_pid" 2>/dev/null || true
-                wait "$kubectl_pid" 2>/dev/null || true
-                kubectl_exit_code=124  # Timeout exit code
-                kubectl_output=$(cat "$kubectl_output_file" 2>/dev/null || echo "Command timed out after ${kubectl_timeout} seconds")
-            else
-                # Process completed, get exit code and output
-                wait "$kubectl_pid" 2>/dev/null || true
-                kubectl_output=$(cat "$kubectl_output_file" 2>/dev/null || echo "")
-                if [ -f "$kubectl_output_file.exit" ]; then
-                    kubectl_exit_code=$(cat "$kubectl_output_file.exit")
-                else
-                    kubectl_exit_code=$?
-                fi
-            fi
-            rm -f "$kubectl_output_file" "$kubectl_output_file.exit"
-# Debug: Log kubectl exit code and output snippet
+            # Debug: Log kubectl exit code and output snippet
             log_info "Debug: kubectl apply exit code: $kubectl_exit_code for $manifest_name"
             if [ $kubectl_exit_code -ne 0 ]; then
                 log_info "Debug: kubectl apply error output: $(echo "$kubectl_output" | head -5)"
@@ -857,10 +787,6 @@ PYTHON_SCRIPT
                 # Verify resource exists based on kind
                 local verify_cmd=""
                 case "$resource_kind" in
-                    Namespace)
-                        # Namespace is cluster-scoped, no -n flag needed
-                        verify_cmd="kubectl get namespace $resource_name >/dev/null 2>&1"
-                        ;;
                     ConfigMap)
                         verify_cmd="kubectl get configmap $resource_name -n $resource_namespace >/dev/null 2>&1"
                         ;;

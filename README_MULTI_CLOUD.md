@@ -165,7 +165,7 @@ infra/k8s/                            ✅ 100% Portable Kubernetes Manifests
 ├── deployment.yaml                   ✅ Application deployment
 ├── configmap.yaml                    ✅ Application configuration template
 ├── secret.yaml                       ✅ Application secrets template
-├── ingress-nginx-values-cloud.yaml   ✅ NGINX Helm values for cloud (LoadBalancer)
+├── ingress-nginx-values-local.yaml   ✅ NGINX Helm values for local (NodePort)
 └── ingress-nginx-values-local.yaml   ✅ NGINX Helm values for local (NodePort)
 ```
 

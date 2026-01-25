@@ -72,7 +72,8 @@ CORS(app, resources={
     r"/query-v2": {"origins": allowed_origins},
     r"/analytics": {"origins": allowed_origins},
     r"/metrics/agent": {"origins": allowed_origins},
-    r"/health": {"origins": "*"}
+    r"/health": {"origins": "*"},
+    r"/version": {"origins": allowed_origins}
 })
 
 
@@ -453,6 +454,24 @@ def health():
         status["aws"] = "not_configured"
     
     return jsonify(status)
+
+
+@app.route("/version", methods=["GET"])
+def version():
+    """Returns the backend container image version."""
+    container_image = os.environ.get("CONTAINER_IMAGE", "")
+    
+    # Return error if CONTAINER_IMAGE is not set or is empty/unknown
+    if not container_image or container_image == "unknown":
+        return jsonify({"error": "No Version Info Found"}), 500
+    
+    # Extract tag from full URI if needed (format: registry/repo:tag)
+    if ":" in container_image:
+        image_tag = container_image.split(":")[-1]
+    else:
+        image_tag = container_image
+    
+    return jsonify({"version": image_tag})
 
 
 @app.route("/query-v2", methods=["POST"])

@@ -29,16 +29,21 @@ start_docker_mac() {
         return 1
     fi
     
-    # Try to start Docker Desktop
-    if open -a Docker >/dev/null 2>&1; then
-        log_info "Docker Desktop launch command sent, waiting for daemon to start..."
+    # Check if Docker Desktop is already running as a process
+    if pgrep -f "Docker Desktop" >/dev/null 2>&1; then
+        log_info "Docker Desktop process is already running, waiting for daemon to be ready..."
     else
-        log_error "Failed to start Docker Desktop"
-        return 1
+        # Try to start Docker Desktop
+        if open -a Docker >/dev/null 2>&1; then
+            log_info "Docker Desktop launch command sent, waiting for daemon to start..."
+        else
+            log_error "Failed to start Docker Desktop"
+            return 1
+        fi
     fi
     
-    # Wait for Docker daemon to be ready (max 60 seconds)
-    local max_wait=60
+    # Wait for Docker daemon to be ready (max 120 seconds - Docker Desktop can take time)
+    local max_wait=120
     local elapsed=0
     while [ $elapsed -lt $max_wait ]; do
         if check_docker_running; then
@@ -48,12 +53,18 @@ start_docker_mac() {
         sleep 2
         elapsed=$((elapsed + 2))
         if [ $((elapsed % 10)) -eq 0 ]; then
-            log_info "Still waiting for Docker daemon... (${elapsed}s elapsed)"
+            # Check if Docker Desktop process is still running
+            if pgrep -f "Docker Desktop" >/dev/null 2>&1; then
+                log_info "Still waiting for Docker daemon... (${elapsed}s elapsed, Docker Desktop is running)"
+            else
+                log_warning "Still waiting for Docker daemon... (${elapsed}s elapsed, Docker Desktop process not detected)"
+            fi
         fi
     done
     
     log_error "Docker daemon did not start within ${max_wait} seconds"
     log_error "Please start Docker Desktop manually and try again"
+    log_info "You can check Docker Desktop status in the Applications folder or system tray"
     return 1
 }
 
