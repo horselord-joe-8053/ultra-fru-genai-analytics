@@ -50,43 +50,112 @@ create_cloudfront_invalidation() {
 }
 
 # Wait for invalidation to complete
-# Usage: wait_for_invalidation <distribution_id> <invalidation_id> <timeout_minutes>
-# Returns: 0 on success, exits with error on timeout/failure
-# Fail-fast: Exits with error if timeout is reached
+# Usage: wait_for_invalidation <distribution_id> <invalidation_id> <timeout_minutes> [non_blocking]
+# Returns: 0 on success, 1 on failure (non-blocking mode) or exits with error (blocking mode)
+# non_blocking: if "true", returns 1 on failure instead of exiting (allows deployment to continue)
 wait_for_invalidation() {
     local dist_id="$1"
     local invalidation_id="$2"
     local timeout_minutes="${3:-15}"  # Default 15 minutes
+    local non_blocking="${4:-false}"  # Default to blocking (exit on failure)
     local timeout_seconds=$((timeout_minutes * 60))
     local check_interval=30  # Check every 30 seconds
+    local max_retries=3  # Retry failed status checks up to 3 times
+    local base_retry_delay=1  # Base delay: 1 second (AWS recommended for throttling)
+    local max_retry_delay=20  # Maximum delay: 20 seconds (AWS SDK standard)
     
     if [ -z "$dist_id" ] || [ -z "$invalidation_id" ]; then
         log_error "Distribution ID and invalidation ID are required"
-        exit 1
+        if [ "$non_blocking" = "true" ]; then
+            return 1
+        else
+            exit 1
+        fi
     fi
     
     log_info "Waiting for CloudFront invalidation to complete..."
     log_info "  Distribution ID: $dist_id"
     log_info "  Invalidation ID: $invalidation_id"
     log_info "  Timeout: ${timeout_minutes} minutes (checking every ${check_interval}s)"
+    if [ "$non_blocking" = "true" ]; then
+        log_info "  Mode: Non-blocking (deployment will continue if invalidation fails)"
+    fi
     
     local start_time=$(date +%s)
     local elapsed=0
+    local consecutive_failures=0
     
     while [ $elapsed -lt $timeout_seconds ]; do
-        # Get invalidation status
-        local status_result
-        status_result=$(aws cloudfront get-invalidation \
-            --distribution-id "$dist_id" \
-            --id "$invalidation_id" \
-            --profile "$AWS_PROFILE" \
-            --output json 2>&1)
+        # Get invalidation status with retry logic
+        local status_result=""
+        local status_check_success=false
+        local retry_count=0
         
-        if [ $? -eq 0 ]; then
-            local status
-            status=$(echo "$status_result" | jq -r '.Invalidation.Status')
+        while [ $retry_count -lt $max_retries ] && [ "$status_check_success" = false ]; do
+            status_result=$(aws cloudfront get-invalidation \
+                --distribution-id "$dist_id" \
+                --id "$invalidation_id" \
+                --profile "$AWS_PROFILE" \
+                --output json 2>&1)
             
-            if [ "$status" = "Completed" ]; then
+            if [ $? -eq 0 ]; then
+                status_check_success=true
+                consecutive_failures=0
+                break
+            else
+                retry_count=$((retry_count + 1))
+                consecutive_failures=$((consecutive_failures + 1))
+                
+                if [ $retry_count -lt $max_retries ]; then
+                    # Exponential backoff: 1s, 2s, 4s (AWS recommended pattern)
+                    # Formula: base_delay * (2 ^ (retry_count - 1))
+                    # Retry 1: 1s, Retry 2: 2s, Retry 3: 4s
+                    local exponential_delay=$base_retry_delay
+                    local i=1
+                    while [ $i -lt $retry_count ]; do
+                        exponential_delay=$((exponential_delay * 2))
+                        i=$((i + 1))
+                    done
+                    # Cap at max_retry_delay (AWS SDK standard: 20 seconds)
+                    if [ $exponential_delay -gt $max_retry_delay ]; then
+                        exponential_delay=$max_retry_delay
+                    fi
+                    # Add jitter: random 0-1 second to prevent synchronized retries from multiple clients
+                    # This prevents "thundering herd" problem when multiple deployments retry simultaneously
+                    local jitter=$((RANDOM % 2))  # 0 or 1 second
+                    local total_delay=$((exponential_delay + jitter))
+                    
+                    log_warning "Status check failed (attempt $retry_count/$max_retries), retrying in ${total_delay}s (exponential backoff: ${exponential_delay}s + ${jitter}s jitter)..."
+                    log_warning "Error: ${status_result:0:200}"  # Show first 200 chars of error
+                    sleep $total_delay
+                else
+                    log_error "Failed to check invalidation status after $max_retries attempts"
+                    log_error "Last error: $status_result"
+                    
+                    if [ "$non_blocking" = "true" ]; then
+                        log_warning "Cannot verify CloudFront invalidation completion (non-blocking mode)"
+                        log_warning "Deployment will continue - invalidation may still complete in the background"
+                        log_info "You can check the status manually with:"
+                        log_info "  aws cloudfront get-invalidation --distribution-id $dist_id --id $invalidation_id --profile $AWS_PROFILE"
+                        return 1
+                    else
+                        log_error "Cannot verify CloudFront invalidation completion"
+                        exit 1
+                    fi
+                fi
+            fi
+        done
+        
+        # If status check succeeded, parse the status
+        if [ "$status_check_success" = true ]; then
+            local status
+            status=$(echo "$status_result" | jq -r '.Invalidation.Status' 2>/dev/null)
+            
+            if [ -z "$status" ] || [ "$status" = "null" ]; then
+                log_warning "Could not parse invalidation status from response"
+                log_warning "Response: ${status_result:0:200}"
+                # Continue to next check iteration
+            elif [ "$status" = "Completed" ]; then
                 local elapsed_minutes=$((elapsed / 60))
                 local elapsed_seconds=$((elapsed % 60))
                 log_success "CloudFront invalidation completed successfully"
@@ -98,40 +167,58 @@ wait_for_invalidation() {
                 log_info "Invalidation in progress... (${elapsed_minutes}m ${elapsed_seconds}s elapsed)"
             else
                 log_error "Invalidation status: $status (unexpected)"
-                log_error "Full status response: $status_result"
+                log_error "Full status response: ${status_result:0:500}"
                 log_error "CloudFront invalidation failed with unexpected status"
+                if [ "$non_blocking" = "true" ]; then
+                    log_warning "Deployment will continue despite invalidation failure"
+                    return 1
+                else
+                    exit 1
+                fi
+            fi
+        fi
+        
+        # If we've had too many consecutive failures, give up
+        if [ $consecutive_failures -ge $max_retries ]; then
+            log_error "Too many consecutive failures checking invalidation status"
+            if [ "$non_blocking" = "true" ]; then
+                log_warning "Deployment will continue - invalidation may still complete in the background"
+                return 1
+            else
                 exit 1
             fi
-        else
-            log_error "Failed to check invalidation status: $status_result"
-            log_error "Cannot verify CloudFront invalidation completion"
-            exit 1
         fi
         
         sleep $check_interval
         elapsed=$(($(date +%s) - start_time))
     done
     
-    # Timeout reached - fail-fast with clear error message
-    log_error "════════════════════════════════════════════════════════════════"
-    log_error "CloudFront invalidation timeout after ${timeout_minutes} minutes"
-    log_error "════════════════════════════════════════════════════════════════"
-    log_error "Distribution ID: $dist_id"
-    log_error "Invalidation ID: $invalidation_id"
-    log_error ""
-    log_error "The invalidation is still in progress. This may indicate:"
-    log_error "  1. CloudFront is experiencing high load or delays"
-    log_error "  2. The distribution has a large number of edge locations"
-    log_error "  3. Network issues preventing status checks"
-    log_error ""
-    log_error "You can check the status manually with:"
-    log_error "  aws cloudfront get-invalidation --distribution-id $dist_id --id $invalidation_id --profile $AWS_PROFILE"
-    log_error ""
-    log_error "The invalidation will continue in the background and should complete"
-    log_error "within a few minutes. The new frontend version will be available"
-    log_error "once the invalidation completes."
-    log_error ""
-    exit 1  # Fail-fast: exit deployment
+    # Timeout reached
+    log_warning "════════════════════════════════════════════════════════════════"
+    log_warning "CloudFront invalidation timeout after ${timeout_minutes} minutes"
+    log_warning "════════════════════════════════════════════════════════════════"
+    log_warning "Distribution ID: $dist_id"
+    log_warning "Invalidation ID: $invalidation_id"
+    log_warning ""
+    log_warning "The invalidation is still in progress. This may indicate:"
+    log_warning "  1. CloudFront is experiencing high load or delays"
+    log_warning "  2. The distribution has a large number of edge locations"
+    log_warning "  3. Network issues preventing status checks"
+    log_warning ""
+    log_info "You can check the status manually with:"
+    log_info "  aws cloudfront get-invalidation --distribution-id $dist_id --id $invalidation_id --profile $AWS_PROFILE"
+    log_info ""
+    
+    if [ "$non_blocking" = "true" ]; then
+        log_warning "Deployment will continue - invalidation will complete in the background"
+        log_warning "The new frontend version will be available once the invalidation completes"
+        return 1
+    else
+        log_error "The invalidation will continue in the background and should complete"
+        log_error "within a few minutes. The new frontend version will be available"
+        log_error "once the invalidation completes."
+        exit 1
+    fi
 }
 
 # Verify frontend version (optional, non-blocking)

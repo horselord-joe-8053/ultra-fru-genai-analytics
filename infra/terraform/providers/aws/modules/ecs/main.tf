@@ -178,6 +178,12 @@ resource "aws_ecs_task_definition" "fru_api" {
           # to determine if S3A packages and configuration are needed
           # Local deployments don't set this (will be empty/None)
           value = var.container_type
+        },
+        {
+          name  = "CONTAINER_IMAGE"
+          # Container image URI (for /version endpoint)
+          # Format: registry/repo:tag (e.g., 744139897900.dkr.ecr.us-east-1.amazonaws.com/fru-api:fru_dev_20260124_6b038d3_dirty_20260125_122640)
+          value = var.container_image
         }
       ]
 

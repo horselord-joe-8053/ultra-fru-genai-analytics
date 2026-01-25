@@ -618,15 +618,15 @@ validate_version_endpoint() {
             fi
             
             if [ "$has_version" = true ] && [ -n "$version_value" ]; then
-                # Validate version format (should match fru-{env}-{date}-{sha}[-dirty-{hash}] pattern)
-                if echo "$version_value" | grep -qE "^fru-[a-z0-9-]+-[0-9]{8}-[a-f0-9]+(-dirty-[0-9]+)?$"; then
+                # Validate version format (should match fru_{env}_{date}_{sha}[_dirty_{hash}] pattern)
+                if echo "$version_value" | grep -qE "^fru_[a-z0-9_]+_[0-9]{8}_[a-f0-9]+(_dirty_[0-9_]+)?$"; then
                     log_success "✓ Version endpoint is working (HTTP $version_status) after ${elapsed}s"
                     log_success "  ✓ Version format is valid: $version_value"
                     return 0
                 else
                     log_warning "⚠ Version endpoint returned HTTP 200 but version format may be unexpected"
                     log_info "  Version value: $version_value"
-                    log_info "  Expected format: fru-{env}-{date}-{sha}[-dirty-{hash}]"
+                    log_info "  Expected format: fru_{env}_{date}_{sha}[_dirty_{hash}]"
                     # Still return success if we got a version, even if format is unexpected
                     return 0
                 fi

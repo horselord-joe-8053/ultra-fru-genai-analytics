@@ -3,8 +3,8 @@
 # Provides consistent tag generation across all deployment scripts
 
 # Generate image tag from git commit SHA
-# Format: fru-<env>-<date>-<sha>-<commit-slug> (clean) or fru-<env>-<date>-<sha>-dirty-<timestamp> (dirty)
-# Example: fru-dev-20260108-999a986-fix-teardown-script-path or fru-dev-20260108-999a986-dirty-20260117121530
+# Format: fru_<env>_<date>_<sha>_<commit-slug> (clean) or fru_<env>_<date>_<sha>_dirty_<timestamp> (dirty)
+# Example: fru_dev_20260108_999a986_fix-teardown-script-path or fru_dev_20260108_999a986_dirty_20260117_121530
 # Note: Dirty builds include timestamp (YYYYMMDD_HHMMSS) to ensure uniqueness when rebuilding
 #       with the same commit but different file content, preventing digest cache issues in ECS
 # 
@@ -24,7 +24,7 @@ generate_image_tag() {
         if [ -z "$environment" ]; then
             environment="dev"
         fi
-        echo "fru-${environment}-$(date +%Y%m%d)-build-$(date +%H%M%S)"
+        echo "fru_${environment}_$(date +%Y%m%d)_build_$(date +%H%M%S)"
         return
     fi
     
@@ -81,12 +81,12 @@ generate_image_tag() {
             echo "WARNING: Uncommitted changes detected! Tagging as 'dirty'." >&2
         fi
         
-        # Dirty format: fru-<env>-<date>-<sha>-dirty-<timestamp>
+        # Dirty format: fru_<env>_<date>_<sha>_dirty_<timestamp>
         # Include timestamp to ensure uniqueness when rebuilding with same commit but different file content
         # Format: YYYYMMDD_HHMMSS (sortable, clear, fits Docker tag requirements, underscore separates date and time)
         local build_timestamp
         build_timestamp=$(date +%Y%m%d_%H%M%S)
-        echo "fru-${environment}-${commit_date}-${base_sha}-dirty-${build_timestamp}"
+        echo "fru_${environment}_${commit_date}_${base_sha}_dirty_${build_timestamp}"
         return
     fi
     
@@ -117,8 +117,8 @@ generate_image_tag() {
         commit_slug="commit"
     fi
     
-    # Clean format: fru-<env>-<date>-<sha>-<commit-slug>
+    # Clean format: fru_<env>_<date>_<sha>_<commit-slug>
     # Note: Removed # wrappers as Docker tags cannot contain # characters
-    echo "fru-${environment}-${commit_date}-${base_sha}-${commit_slug}"
+    echo "fru_${environment}_${commit_date}_${base_sha}_${commit_slug}"
 }
 

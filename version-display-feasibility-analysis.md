@@ -23,17 +23,17 @@ The refactor is feasible and straightforward. However, there's an important arch
 ### 2. Backend Component
 - **Type**: Single Docker image (monolithic application)
 - **Image Name**: `fru-api`
-- **Tag Format**: `fru-{env}-{date}-{sha}[-dirty-{hash}]`
-- **Example**: `fru-dev-20260124-6b038d3-dirty-20260124214543`
+- **Tag Format**: `fru_{env}_{date}_{sha}[_dirty_{hash}]`
+- **Example**: `fru_dev_20260124_6b038d3_dirty_20260125_122640`
 - **Generation**: At **deployment time** from git commit SHA
 - **Endpoints**: Contains `/query`, `/analytics`, `/query/stream` (all in one container)
-- **Current Deployed**: `744139897900.dkr.ecr.us-east-1.amazonaws.com/fru-api:fru-dev-20260124-6b038d3-dirty-20260124214543`
+- **Current Deployed**: `744139897900.dkr.ecr.us-east-1.amazonaws.com/fru-api:fru_dev_20260124_6b038d3_dirty_20260125_122640`
 
 ### 3. Key Finding
 **There is NO separate "Backend_Query" or "Backend_Analytics" image.** The backend is a monolith with multiple endpoints. The version display would be:
 ```
 Frontend: V_260122-124223_aws_eks_dev
-Backend: fru-dev-20260124-6b038d3-dirty-20260124214543
+Backend: fru_dev_20260124_6b038d3_dirty_20260125_122640
 ```
 
 ---
@@ -64,7 +64,7 @@ Add a `/version` endpoint to the backend that returns its image tag, then fetch 
 1. **Backend Changes** (Minimal):
    - Add `/version` endpoint to `backend/api/app.py`
    - Read image tag from environment variable (injected by Kubernetes)
-   - Return JSON: `{"version": "fru-dev-20260124-6b038d3-dirty-20260124214543"}`
+   - Return JSON: `{"version": "fru_dev_20260124_6b038d3_dirty_20260125_122640"}`
 
 2. **Kubernetes Changes** (Minimal):
    - Inject `CONTAINER_IMAGE` as environment variable in deployment manifest
@@ -107,7 +107,7 @@ Add a `/version` endpoint to the backend that returns its image tag, then fetch 
 ### Display Format
 ```
 Frontend: V_260122-124223_aws_eks_dev
-Backend: fru-dev-20260124-6b038d3-dirty-20260124214543
+Backend: fru_dev_20260124_6b038d3_dirty_20260125_122640
 ```
 
 ### Code Changes Summary
@@ -153,7 +153,7 @@ Backend: fru-dev-20260124-6b038d3-dirty-20260124214543
 - **Mitigation**: Cache in component state or localStorage
 
 ### 4. Version Format Mismatch
-- Frontend uses `V_...` format, backend uses `fru-...` format
+- Frontend uses `V_...` format, backend uses `fru_...` format
 - **Mitigation**: Display as-is (different formats are acceptable) or normalize
 
 ---

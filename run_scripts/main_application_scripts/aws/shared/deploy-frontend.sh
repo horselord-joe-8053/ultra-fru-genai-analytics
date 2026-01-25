@@ -250,9 +250,11 @@ deploy_frontend() {
                         if invalidation_id=$(create_cloudfront_invalidation "$cloudfront_dist_id" "/*"); then
                             log_info "CloudFront invalidation created: $invalidation_id"
                             
-                            # Wait for invalidation to complete (fail-fast on timeout)
-                            log_info "Waiting for CloudFront invalidation to complete..."
-                            if wait_for_invalidation "$cloudfront_dist_id" "$invalidation_id" 15; then
+                            # Wait for invalidation to complete (non-blocking mode)
+                            # If invalidation fails or times out, deployment will continue
+                            # The invalidation will complete in the background
+                            log_info "Waiting for CloudFront invalidation to complete (non-blocking)..."
+                            if wait_for_invalidation "$cloudfront_dist_id" "$invalidation_id" 15 "true"; then
                                 log_success "CloudFront invalidation completed"
                                 
                                 # Optional: Verify frontend version (non-blocking)
@@ -262,17 +264,19 @@ deploy_frontend() {
                                     fi
                                 fi
                             else
-                                # wait_for_invalidation exits on timeout/error (fail-fast)
-                                # This code path should not be reached
-                                log_error "CloudFront invalidation failed or timed out"
-                                cd "$ORIG_DIR" 2>/dev/null || true
-                                exit 1
+                                # wait_for_invalidation returned error (non-blocking mode)
+                                # Deployment will continue - invalidation happens in background
+                                log_warning "CloudFront invalidation did not complete within timeout"
+                                log_warning "Deployment will continue - invalidation will complete in the background"
+                                log_info "Frontend files are already deployed to S3"
+                                log_info "The new version will be available once CloudFront invalidation completes"
                             fi
                         else
-                            log_error "Failed to create CloudFront invalidation"
-                            log_error "Cannot proceed with deployment without CloudFront invalidation"
-                            cd "$ORIG_DIR" 2>/dev/null || true
-                            exit 1  # Fail-fast
+                            # Invalidation creation failed - log warning but don't block deployment
+                            log_warning "Failed to create CloudFront invalidation"
+                            log_warning "Deployment will continue - frontend files are already deployed to S3"
+                            log_info "You may need to manually invalidate CloudFront cache later"
+                            log_info "Or wait for the cache to expire naturally"
                         fi
                     else
                         log_warning "CloudFront invalidation helper not found: $helper_script"
