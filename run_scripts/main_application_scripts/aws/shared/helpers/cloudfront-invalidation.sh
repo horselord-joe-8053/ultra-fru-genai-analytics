@@ -155,11 +155,22 @@ wait_for_invalidation() {
                 log_warning "Could not parse invalidation status from response"
                 log_warning "Response: ${status_result:0:200}"
                 # Continue to next check iteration
-            elif [ "$status" = "Completed" ]; then
+            el            if [ "$status" = "Completed" ]; then
                 local elapsed_minutes=$((elapsed / 60))
                 local elapsed_seconds=$((elapsed % 60))
                 log_success "CloudFront invalidation completed successfully"
                 log_info "  Time taken: ${elapsed_minutes}m ${elapsed_seconds}s"
+                
+                # Phase 4: Log completion time for tracking
+                local repo_root="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)}"
+                local invalidation_log="$repo_root/.cloudfront-invalidations.log"
+                if [ -f "$invalidation_log" ]; then
+                    # Update the last entry with completion status
+                    local completion_timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+                    # Append completion info to log (simple append for now)
+                    echo "$completion_timestamp|$dist_id|$invalidation_id|COMPLETED|${elapsed_minutes}m${elapsed_seconds}s" >> "$invalidation_log"
+                fi
+                
                 return 0
             elif [ "$status" = "InProgress" ]; then
                 local elapsed_minutes=$((elapsed / 60))

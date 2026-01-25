@@ -76,3 +76,8 @@ data/raw/*.backup*
 
 # Kubernetes generated files
 infra/k8s/generated/
+
+# Deployment state files (Phase 5: Deployment State Tracking)
+.frontend-version.txt
+.cloudfront-invalidations.log
+.deployment-state.json

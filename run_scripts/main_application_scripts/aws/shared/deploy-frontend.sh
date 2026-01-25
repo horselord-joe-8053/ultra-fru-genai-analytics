@@ -18,6 +18,55 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Extract frontend version from built files
+# Phase 2: Frontend Version Verification
+# Stores version in .frontend-version.txt for later verification
+extract_frontend_version() {
+    local dist_dir="${1:-$REPO_ROOT/frontend/dist}"
+    local version_file="${2:-$REPO_ROOT/.frontend-version.txt}"
+    
+    if [ ! -d "$dist_dir" ]; then
+        log_warning "Frontend dist directory not found: $dist_dir"
+        return 1
+    fi
+    
+    log_info "Extracting frontend version from built files..."
+    
+    # Try to extract version from built JS files
+    # Look for version pattern: V_YYMMDD-HHMMSS_...
+    local version_pattern="V_[0-9]\{6\}-[0-9]\{6\}_[^\"'[:space:]]*"
+    local extracted_version=""
+    
+    # Search in built JS files (most likely location)
+    if [ -d "$dist_dir/assets" ]; then
+        extracted_version=$(find "$dist_dir/assets" -name "*.js" -type f -exec grep -oh "$version_pattern" {} \; 2>/dev/null | head -1)
+    fi
+    
+    # If not found in JS, try HTML
+    if [ -z "$extracted_version" ] && [ -f "$dist_dir/index.html" ]; then
+        extracted_version=$(grep -oh "$version_pattern" "$dist_dir/index.html" 2>/dev/null | head -1)
+    fi
+    
+    # If still not found, try all files in dist
+    if [ -z "$extracted_version" ]; then
+        extracted_version=$(grep -roh "$version_pattern" "$dist_dir" 2>/dev/null | head -1)
+    fi
+    
+    if [ -n "$extracted_version" ]; then
+        echo "$extracted_version" > "$version_file"
+        log_success "Frontend version extracted: $extracted_version"
+        log_info "Version saved to: $version_file"
+        export FRONTEND_VERSION="$extracted_version"
+        return 0
+    else
+        log_warning "Could not extract frontend version from build"
+        log_info "Searched in: $dist_dir"
+        log_info "Version pattern: $version_pattern"
+        # Don't fail - version extraction is optional for now
+        return 1
+    fi
+}
+
 AWS_REGION="${AWS_REGION:-us-east-1}"
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 
@@ -169,6 +218,9 @@ deploy_frontend() {
             }
             log_success "Frontend built successfully"
             log_info "Frontend uses relative URLs - CloudFront will proxy /query and /analytics to ALB"
+            
+            # Phase 2: Extract and track frontend version after build
+            extract_frontend_version "$REPO_ROOT/frontend/dist" "$REPO_ROOT/.frontend-version.txt" || true
         fi
         cd "$REPO_ROOT"
     fi
@@ -219,6 +271,16 @@ deploy_frontend() {
     log_success "Frontend deployed to S3"
     log_info "  Bucket: $S3_BUCKET_NAME"
     
+    # Phase 2: Log frontend version after deployment
+    if [ -f "$REPO_ROOT/.frontend-version.txt" ]; then
+        local deployed_version
+        deployed_version=$(cat "$REPO_ROOT/.frontend-version.txt" 2>/dev/null || echo "")
+        if [ -n "$deployed_version" ]; then
+            log_info "  Frontend version deployed: $deployed_version"
+            export FRONTEND_VERSION="$deployed_version"
+        fi
+    fi
+    
     # ============================================================================
     # CloudFront Invalidation
     # ============================================================================
@@ -249,6 +311,12 @@ deploy_frontend() {
                         local invalidation_id
                         if invalidation_id=$(create_cloudfront_invalidation "$cloudfront_dist_id" "/*"); then
                             log_info "CloudFront invalidation created: $invalidation_id"
+                            
+                            # Phase 4: Store invalidation ID for tracking
+                            local invalidation_log="$REPO_ROOT/.cloudfront-invalidations.log"
+                            local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+                            echo "$timestamp|$cloudfront_dist_id|$invalidation_id|/*" >> "$invalidation_log"
+                            log_info "Invalidation ID logged to: $invalidation_log"
                             
                             # Wait for invalidation to complete (non-blocking mode)
                             # If invalidation fails or times out, deployment will continue

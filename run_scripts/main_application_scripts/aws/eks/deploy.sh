@@ -141,6 +141,49 @@ main() {
         fi
         log_step "Substep 5b: Updating CloudFront to point API paths to the EKS Ingress ALB"
         "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/update-cloudfront-loadbalancer.sh" "$ingress_name" "$namespace" || exit 1
+        
+        # Phase 3: Post-deployment version verification
+        if [ "$DRY_RUN" != "true" ]; then
+            log_step "Substep 5c: Verifying deployment versions"
+            source "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/verify-deployment-versions.sh"
+            
+            # Get expected versions
+            local expected_backend=""
+            if [ -n "${CONTAINER_IMAGE:-}" ]; then
+                expected_backend=$(echo "$CONTAINER_IMAGE" | cut -d: -f2)
+            fi
+            
+            local expected_frontend=""
+            if [ -f "$REPO_ROOT/.frontend-version.txt" ]; then
+                expected_frontend=$(cat "$REPO_ROOT/.frontend-version.txt" 2>/dev/null || echo "")
+            fi
+            
+            # Get CloudFront domain from Terraform
+            local cloudfront_domain=""
+            if [ -d "$terraform_dir" ] && command_exists terragrunt; then
+                cloudfront_domain=$(cd "$terraform_dir" && AWS_PROFILE="${AWS_PROFILE:-admin}" terragrunt output -raw cloudfront_domain_name 2>/dev/null || echo "")
+                if [ "$cloudfront_domain" = "null" ] || [ -z "$cloudfront_domain" ]; then
+                    cloudfront_domain=""
+                fi
+            fi
+            
+            # Get deployment name (default to fru-api)
+            local deployment_name="fru-api"
+            if [ -d "$terraform_dir" ] && command_exists terragrunt; then
+                local deployment_name_output
+                deployment_name_output=$(cd "$terraform_dir" && AWS_PROFILE="${AWS_PROFILE:-admin}" terragrunt output -raw deployment_name 2>/dev/null || echo "")
+                if [ -n "$deployment_name_output" ] && [ "$deployment_name_output" != "null" ]; then
+                    deployment_name="$deployment_name_output"
+                fi
+            fi
+            
+            if [ -n "$expected_backend" ] || [ -n "$expected_frontend" ]; then
+                verify_deployment_versions "$expected_backend" "$expected_frontend" "$cloudfront_domain" "$namespace" "$deployment_name" || true
+                # Don't fail deployment if verification has issues - these are warnings
+            else
+                log_info "Skipping version verification (expected versions not available)"
+            fi
+        fi
     else
         log_warning "Kubernetes manifests directory not found"
         log_info "Searched in:"
@@ -166,6 +209,34 @@ main() {
         log_info "    └── ingress.yaml"
     log_info ""
         log_info "Reference CONTAINER_IMAGE in manifests using: \${CONTAINER_IMAGE} or <CONTAINER_IMAGE>"
+    fi
+    
+    # Phase 5: Save deployment state
+    if [ "$DRY_RUN" != "true" ]; then
+        log_step "Saving deployment state"
+        source "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/save-deployment-state.sh"
+        
+        # Get versions
+        local backend_version=""
+        if [ -n "${CONTAINER_IMAGE:-}" ]; then
+            backend_version=$(echo "$CONTAINER_IMAGE" | cut -d: -f2)
+        fi
+        
+        local frontend_version=""
+        if [ -f "$REPO_ROOT/.frontend-version.txt" ]; then
+            frontend_version=$(cat "$REPO_ROOT/.frontend-version.txt" 2>/dev/null || echo "")
+        fi
+        
+        # Get latest invalidation ID from log
+        local invalidation_id=""
+        if [ -f "$REPO_ROOT/.cloudfront-invalidations.log" ]; then
+            invalidation_id=$(tail -1 "$REPO_ROOT/.cloudfront-invalidations.log" 2>/dev/null | cut -d'|' -f3 || echo "")
+        fi
+        
+        local environment="${ENVIRONMENT:-dev}"
+        local container_type="${CONTAINER_TYPE:-eks}"
+        
+        save_deployment_state "$environment" "$container_type" "$backend_version" "$frontend_version" "$invalidation_id" || true
     fi
     
     log_success "EKS deployment complete!"

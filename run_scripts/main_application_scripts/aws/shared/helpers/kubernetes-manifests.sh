@@ -385,6 +385,74 @@ generate_kubernetes_manifests() {
 }
 
 # Apply Kubernetes manifests with fail-fast error handling and verification
+# Sync deployment image and CONTAINER_IMAGE environment variable
+# Ensures version endpoint returns correct version by keeping env var in sync with image
+# Usage: sync_deployment_image_and_env <deployment_name> <namespace> <new_image_uri> [container_name]
+sync_deployment_image_and_env() {
+    local deployment_name=$1
+    local namespace=$2
+    local new_image_uri=$3
+    local container_name="${4:-fru-api}"  # Default container name
+    
+    if [ -z "$deployment_name" ] || [ -z "$namespace" ] || [ -z "$new_image_uri" ]; then
+        log_error "sync_deployment_image_and_env: deployment_name, namespace, and new_image_uri are required"
+        return 1
+    fi
+    
+    log_info "Synchronizing image and CONTAINER_IMAGE env var for deployment: $deployment_name"
+    log_info "  Namespace: $namespace"
+    log_info "  New image: $new_image_uri"
+    log_info "  Container: $container_name"
+    
+    # Extract image tag for logging
+    local image_tag=""
+    if [[ "$new_image_uri" == *":"* ]]; then
+        image_tag="${new_image_uri#*:}"
+    else
+        image_tag="$new_image_uri"
+    fi
+    log_info "  Image tag: $image_tag"
+    
+    # Update deployment image
+    log_info "Updating deployment image..."
+    if ! kubectl set image "deployment/$deployment_name" "$container_name=$new_image_uri" -n "$namespace" >/dev/null 2>&1; then
+        log_error "Failed to update deployment image for $deployment_name"
+        return 1
+    fi
+    log_success "✓ Deployment image updated"
+    
+    # Update CONTAINER_IMAGE environment variable to match
+    log_info "Updating CONTAINER_IMAGE environment variable..."
+    if ! kubectl set env "deployment/$deployment_name" "CONTAINER_IMAGE=$new_image_uri" -n "$namespace" >/dev/null 2>&1; then
+        log_error "Failed to update CONTAINER_IMAGE env var for $deployment_name"
+        return 1
+    fi
+    log_success "✓ CONTAINER_IMAGE env var updated"
+    
+    # Verify both are set correctly
+    log_info "Verifying image and env var are synchronized..."
+    local verify_image
+    verify_image=$(kubectl get deployment "$deployment_name" -n "$namespace" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
+    local verify_env
+    verify_env=$(kubectl get deployment "$deployment_name" -n "$namespace" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="CONTAINER_IMAGE")].value}' 2>/dev/null || echo "")
+    
+    if [ "$verify_image" = "$new_image_uri" ] && [ "$verify_env" = "$new_image_uri" ]; then
+        log_success "✓ Verified: Image and CONTAINER_IMAGE env var are synchronized"
+        log_info "  Image: $verify_image"
+        log_info "  CONTAINER_IMAGE: $verify_env"
+        return 0
+    else
+        log_warning "⚠ Verification mismatch detected"
+        log_warning "  Expected image: $new_image_uri"
+        log_warning "  Actual image: $verify_image"
+        log_warning "  Expected CONTAINER_IMAGE: $new_image_uri"
+        log_warning "  Actual CONTAINER_IMAGE: $verify_env"
+        log_info "This may be a timing issue - changes may propagate shortly"
+        # Don't fail - changes may still be propagating
+        return 0
+    fi
+}
+
 apply_kubernetes_manifests() {
     local manifests_dir=$1
     local repo_root="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)}"
@@ -897,6 +965,26 @@ PYTHON_SCRIPT
                                 log_info "Check pod status: kubectl get pods -l app=$resource_name -n $resource_namespace"
                                 log_info "This is non-fatal - pods may still be starting"
                                 # Don't fail - pods may take time to start, but resource is created
+                            fi
+                            
+                            # Phase 1: Sync CONTAINER_IMAGE env var with deployment image
+                            # This ensures /version endpoint returns correct version
+                            if [ -n "$container_image" ] && [ "$dry_run" != "true" ]; then
+                                log_info "Synchronizing CONTAINER_IMAGE env var with deployment image..."
+                                # Extract container name from deployment spec (default to fru-api)
+                                local container_name
+                                container_name=$(kubectl get deployment "$resource_name" -n "$resource_namespace" \
+                                    -o jsonpath='{.spec.template.spec.containers[0].name}' 2>/dev/null || echo "fru-api")
+                                
+                                if sync_deployment_image_and_env "$resource_name" "$resource_namespace" "$container_image" "$container_name"; then
+                                    log_success "✓ Version synchronization complete for $resource_name"
+                                else
+                                    log_warning "⚠ Version synchronization had issues for $resource_name"
+                                    log_info "The deployment will continue, but /version endpoint may show incorrect version"
+                                    log_info "You can manually sync with: kubectl set env deployment/$resource_name CONTAINER_IMAGE=$container_image -n $resource_namespace"
+                                fi
+                            elif [ "$dry_run" = "true" ]; then
+                                log_info "[DRY-RUN] Would sync CONTAINER_IMAGE env var with deployment image"
                             fi
                         fi
                         
