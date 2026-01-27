@@ -1,7 +1,31 @@
 #!/bin/bash
-# Verify Running Versions
-# Phase 6: Standalone script to verify current running versions match expected
-# Usage: verify-running-versions.sh [--namespace <ns>] [--deployment <name>] [--environment <env>]
+# Verify Running Versions (EKS Standalone CLI Tool)
+# =================================================
+# This is a **standalone CLI tool** that wraps detect-version-drift.sh to
+# verify that running Kubernetes pods match expected deployment state.
+#
+# **Container Type**: EKS-specific (uses kubectl via detect-version-drift.sh)
+# **Location**: run_scripts/main_application_scripts/aws/eks/cli/
+# **Type**: Standalone CLI (run directly, not sourced)
+#
+# Usage (standalone):
+#   ./verify-running-versions.sh [--namespace <ns>] [--deployment <name>] [--environment <env>]
+#
+# Example:
+#   ./verify-running-versions.sh --namespace default --deployment fru-api --environment dev
+#
+# What it does:
+#   - Calls detect_version_drift() function from detect-version-drift.sh
+#   - Provides user-friendly output and exit codes
+#
+# Prerequisites:
+#   - detect-version-drift.sh in same directory
+#   - kubectl configured and pointing to EKS cluster
+#   - .deployment-state.json exists (created by deployment scripts)
+#
+# Exit codes:
+#   0 - All versions match expected state
+#   1 - Version inconsistencies detected
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
@@ -16,11 +40,11 @@ else
     log_error() { echo "[ERROR] $*"; }
 fi
 
-# Source drift detection
+# Source drift detection (from same cli directory)
 if [ -f "$SCRIPT_DIR/detect-version-drift.sh" ]; then
     source "$SCRIPT_DIR/detect-version-drift.sh"
 else
-    log_error "detect-version-drift.sh not found"
+    log_error "detect-version-drift.sh not found in $SCRIPT_DIR"
     exit 1
 fi
 

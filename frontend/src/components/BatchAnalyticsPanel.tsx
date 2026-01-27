@@ -212,7 +212,7 @@ const BatchAnalyticsPanel: React.FC<BatchAnalyticsPanelProps> = ({ onToggle, isV
             )}
           </div>
         </div>
-        <p className="text-xs text-gray-500">
+        <p className="text-[0.6875rem] text-gray-500">
           Spark + Delta offline analytics
         </p>
         {data.last_updated_at && (
@@ -225,21 +225,25 @@ const BatchAnalyticsPanel: React.FC<BatchAnalyticsPanelProps> = ({ onToggle, isV
       <div className="space-y-2">
         {/* Summary Stats */}
         <div className="bg-blue-50 p-2 rounded">
-          <div className="text-xs font-semibold text-gray-700 mb-1">
+          <div className="text-[0.6875rem] font-semibold text-gray-700 mb-1">
             Summary
           </div>
-          <div className="text-xs space-y-1">
+          <div className="text-[0.6875rem] space-y-1">
             <div className="flex justify-between">
               <span>Total Records:</span>
-              <span className="font-mono">{(data.total_records ?? 0).toLocaleString()}</span>
+              <span className="font-mono text-[0.6875rem]">
+                {(data.total_records ?? 0).toLocaleString()}
+              </span>
             </div>
             <div className="flex justify-between">
               <span>Total Revenue:</span>
-              <span className="font-mono">{formatCurrency(data.total_revenue ?? 0)}</span>
+              <span className="font-mono text-[0.6875rem]">
+                {formatCurrency(data.total_revenue ?? 0)}
+              </span>
             </div>
             <div className="flex justify-between">
               <span>Avg Price:</span>
-              <span className="font-mono">
+              <span className="font-mono text-[0.6875rem]">
                 {formatCurrency(data.price_stats?.mean_price || 0)}
               </span>
             </div>

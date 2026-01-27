@@ -1,6 +1,32 @@
 #!/bin/bash
-# kubectl installation and configuration checks
-# Usage: check_kubectl_installation, check_kubectl_context, check_kubectl_cluster_access, check_kubectl_complete
+# kubectl Installation and Configuration Checks (EKS Helper Functions)
+# ====================================================================
+# This file contains **helper functions** for checking kubectl installation,
+# configuration, and cluster access. These functions are meant to be **sourced**
+# by EKS deployment scripts, not run directly.
+#
+# **Container Type**: EKS-specific (uses kubectl, which is EKS-only)
+# **Location**: run_scripts/main_application_scripts/aws/eks/helpers/
+#
+# Functions:
+#   - check_kubectl_installation()  - Verifies kubectl is installed
+#   - check_kubectl_context()       - Verifies kubectl context is configured
+#   - check_kubectl_cluster_access() - Verifies cluster API server is accessible
+#   - check_kubectl_complete()      - Runs all checks in sequence
+#
+# Usage (from another script):
+#   source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/helpers/check-kubectl.sh"
+#   check_kubectl_complete || exit 1
+#
+# Example:
+#   if ! check_kubectl_installation; then
+#       log_error "kubectl is required for EKS deployments"
+#       exit 1
+#   fi
+#
+# Prerequisites:
+#   - Parent script must source logger.sh before sourcing this file
+#   - REPO_ROOT environment variable should be set by parent script (optional, for consistency)
 #
 # NOTE: Unlike ECS, EKS requires kubectl access to cluster API server endpoint
 # - ECS: Uses AWS APIs (ecs.amazonaws.com) - public endpoints, no VPC access needed

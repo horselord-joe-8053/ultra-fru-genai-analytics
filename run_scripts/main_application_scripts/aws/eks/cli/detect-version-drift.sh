@@ -1,11 +1,40 @@
 #!/bin/bash
-# Version Drift Detection
-# Phase 6: Detects when running versions don't match expected deployment state
-# Usage: detect-version-drift.sh [--namespace <namespace>] [--deployment <name>] [--environment <env>]
+# Version Drift Detection (EKS Standalone CLI Tool)
+# =================================================
+# This is a **standalone CLI tool** for detecting version drift between expected
+# deployment state and actual running versions in Kubernetes. It reads from
+# .deployment-state.json and compares with running pods.
+#
+# **Container Type**: EKS-specific (uses kubectl to check pod images)
+# **Location**: run_scripts/main_application_scripts/aws/eks/cli/
+# **Type**: Standalone CLI (run directly, not sourced)
+#
+# Usage (standalone):
+#   ./detect-version-drift.sh [--namespace <namespace>] [--deployment <name>] [--environment <env>]
+#
+# Example:
+#   ./detect-version-drift.sh --namespace default --deployment fru-api --environment dev
+#
+# What it checks:
+#   1. Reads expected version from .deployment-state.json
+#   2. Gets actual pod image tag from Kubernetes
+#   3. Gets actual CONTAINER_IMAGE env var from pod
+#   4. Compares and reports any drift
+#
+# Prerequisites:
+#   - kubectl configured and pointing to EKS cluster
+#   - .deployment-state.json exists (created by deployment scripts)
+#   - jq installed (for JSON parsing)
+#
+# Exit codes:
+#   0 - No drift detected
+#   1 - Drift detected or error
 
 # Source logger if available
-if [ -f "$(dirname "${BASH_SOURCE[0]}")/../../../../shared/logger.sh" ]; then
-    source "$(dirname "${BASH_SOURCE[0]}")/../../../../shared/logger.sh"
+SCRIPT_DIR_CLI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT_CLI="${REPO_ROOT:-$(cd "$SCRIPT_DIR_CLI/../../../../.." && pwd)}"
+if [ -f "$REPO_ROOT_CLI/run_scripts/shared/logger.sh" ]; then
+    source "$REPO_ROOT_CLI/run_scripts/shared/logger.sh"
 else
     # Fallback logging functions
     log_info() { echo "[INFO] $*"; }
@@ -19,7 +48,8 @@ detect_version_drift() {
     local deployment_name="${2:-fru-api}"
     local environment="${3:-dev}"
     
-    local repo_root="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)}"
+    # Use REPO_ROOT_CLI if set (from top of script), otherwise fall back to REPO_ROOT env var or calculate
+    local repo_root="${REPO_ROOT_CLI:-${REPO_ROOT:-$(cd "$SCRIPT_DIR_CLI/../../../../.." && pwd)}}"
     local state_file="$repo_root/.deployment-state.json"
     
     log_step "Detecting version drift"

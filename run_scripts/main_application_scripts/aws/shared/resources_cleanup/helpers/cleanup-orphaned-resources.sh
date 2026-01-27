@@ -24,7 +24,7 @@ DRY_RUN="${DRY_RUN:-false}"
 FORCE_DELETE="false"
 AWS_PROFILE="${AWS_PROFILE:-admin}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
-ACCOUNT_ID=""
+# ACCOUNT_ID removed - use AWS_ACCOUNT_ID directly
 PROJECT_NAME="fru"
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 CONTAINER_SYSTEM=""  # ecs or eks
@@ -105,15 +105,15 @@ EOF
     esac
 done
 
-# Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity --profile "$AWS_PROFILE" --query Account --output text 2>/dev/null || echo "")
-if [ -z "$ACCOUNT_ID" ]; then
-    log_error "Failed to get AWS account ID. Check AWS credentials."
-    exit 1
+# Get AWS account ID (using centralized resolution)
+if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
+    source "$REPO_ROOT/run_scripts/shared/load-image-identifiers.sh"
+    load_image_identifiers "aws" || exit 1
 fi
+# Use AWS_ACCOUNT_ID directly (no need for separate ACCOUNT_ID variable)
 
 log_step "AWS Resource Cleanup Utility"
-log_info "Account ID: $ACCOUNT_ID"
+log_info "Account ID: $AWS_ACCOUNT_ID"
 log_info "Region: $AWS_REGION"
 log_info "Profile: $AWS_PROFILE"
 log_info "Environment: $ENVIRONMENT"
@@ -149,9 +149,9 @@ cleanup_s3_buckets() {
     
     # Expected buckets (managed by Terraform)
     local expected_buckets=(
-        "fru-terraform-state-${ACCOUNT_ID}"
-        "${PROJECT_NAME}-${ENVIRONMENT}-analytics-data-${ACCOUNT_ID}"
-        "${PROJECT_NAME}-${ENVIRONMENT}-frontend-${ACCOUNT_ID}"
+        "fru-terraform-state-${AWS_ACCOUNT_ID}"
+        "${PROJECT_NAME}-${ENVIRONMENT}-analytics-data-${AWS_ACCOUNT_ID}"
+        "${PROJECT_NAME}-${ENVIRONMENT}-frontend-${AWS_ACCOUNT_ID}"
     )
     
     log_info "Expected buckets (managed by Terraform - will NOT delete):"

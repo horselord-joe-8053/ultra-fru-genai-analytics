@@ -274,8 +274,11 @@ fetch_terraform_outputs() {
             K8S_SERVICE_IP=$(kubectl get svc fru-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
             K8S_INGRESS_HOST=$(kubectl get ingress fru-api-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
             
+            # EKS Ingress uses NGINX Ingress Controller, which creates an NLB (Network Load Balancer) on AWS.
+            # NLBs use .elb.amazonaws.com DNS names and don't have SSL certificates by default
+            # (unless configured with ACM), so always use HTTP. This matches ECS behavior (line 155) for consistency.
             if [ -n "$K8S_INGRESS_HOST" ]; then
-                API_URL="https://$K8S_INGRESS_HOST"
+                API_URL="http://$K8S_INGRESS_HOST"
             elif [ -n "$K8S_SERVICE_IP" ]; then
                 API_URL="http://$K8S_SERVICE_IP"
             fi
@@ -317,17 +320,7 @@ fetch_terraform_outputs() {
     fi
 }
 
-# Main execution (if run standalone)
-if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
-    # Source logger if not already sourced
-    if [ -z "${log_info:-}" ]; then
-        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        source "$REPO_ROOT/run_scripts/shared/logger.sh" 2>/dev/null || true
-    fi
-    
-    fetch_terraform_outputs
-else
-    # If sourced, just define the function
-    fetch_terraform_outputs
-fi
+# This script is always sourced (never run standalone), so automatically call fetch_terraform_outputs()
+# All callers use: source "$SCRIPT_DIR/fetch-deployment-info.sh" ...
+fetch_terraform_outputs
 

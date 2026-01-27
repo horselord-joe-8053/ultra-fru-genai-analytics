@@ -406,7 +406,7 @@ EC2 Runner (in VPC) → kubectl → API Server (private endpoint) → Pods (priv
    **What it is:**
    - S3 bucket name for storing Terraform remote state files (records the current state of your infrastructure)
    - Format: `<PROJ_NAME>-terraform-state-<ACCOUNT_ID>` (you can define this format in .env)
-   - Example: `fru-terraform-state-123456789012`
+   - Example: `fru-terraform-state-999999999999`
    
    **Important:**
    - Must be **globally unique** across ALL AWS accounts worldwide (not just within your account)
@@ -472,7 +472,7 @@ EC2 Runner (in VPC) → kubectl → API Server (private endpoint) → Pods (priv
    export ENVIRONMENT="dev"
    export OPENAI_API_KEY="sk-..."
    export DB_PASSWORD="SecurePassword123!"
-   export CONTAINER_IMAGE="123456789012.dkr.ecr.us-east-1.amazonaws.com/fru-api:latest"
+   export CONTAINER_IMAGE="999999999999.dkr.ecr.us-east-1.amazonaws.com/fru-api:latest"
    ```
 
 2. **Deploy Infrastructure Layer**

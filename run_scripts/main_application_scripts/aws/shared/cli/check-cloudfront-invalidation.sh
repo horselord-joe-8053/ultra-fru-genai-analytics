@@ -1,11 +1,45 @@
 #!/bin/bash
-# CloudFront Invalidation Status Checker
-# Phase 4: Helper script to check invalidation status
-# Usage: check-cloudfront-invalidation.sh <distribution_id> <invalidation_id> [--profile <profile>]
+# CloudFront Invalidation Status Checker (Standalone CLI Tool)
+# =============================================================
+# This is a **standalone CLI tool** for manually checking the status of a
+# single CloudFront invalidation from your terminal. It is useful for
+# debugging invalidation issues or verifying invalidation completion.
+#
+# **Container Type**: Container-agnostic (CloudFront works with both ECS and EKS)
+# **Location**: run_scripts/main_application_scripts/aws/shared/cli/
+# **Type**: Standalone CLI (run directly, not sourced)
+#
+# It is intentionally separate from the library-style helper functions in:
+#   run_scripts/main_application_scripts/aws/shared/helpers/cloudfront-invalidation.sh
+# which are meant to be sourced and used by automation (deploy scripts).
+#
+# Usage (standalone):
+#   ./check-cloudfront-invalidation.sh <distribution_id> <invalidation_id> [--profile <profile>]
+#
+# Example:
+#   ./run_scripts/main_application_scripts/aws/shared/cli/check-cloudfront-invalidation.sh \\
+#     E33TA1D0OAYUNR IA2F109WZGDDJ9JH61N5TZVZS3 --profile admin
+#
+# What it shows:
+#   - Invalidation status (Completed, InProgress, etc.)
+#   - Creation time
+#   - Invalidated paths
+#
+# Prerequisites:
+#   - AWS CLI configured with CloudFront permissions
+#   - jq installed (for JSON parsing)
+#
+# Note: The deploy scripts should *not* call this CLI; they should instead
+# source and use the library helpers (wait_for_invalidation) for retries,
+# timeouts, etc. This tool is for humans debugging a specific invalidation.
+
+# Resolve REPO_ROOT for standalone execution
+SCRIPT_DIR_CLI_CF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT_CLI_CF="${REPO_ROOT:-$(cd "$SCRIPT_DIR_CLI_CF/../../../../.." && pwd)}"
 
 # Source logger if available
-if [ -f "$(dirname "${BASH_SOURCE[0]}")/../../../../shared/logger.sh" ]; then
-    source "$(dirname "${BASH_SOURCE[0]}")/../../../../shared/logger.sh"
+if [ -f "$REPO_ROOT_CLI_CF/run_scripts/shared/logger.sh" ]; then
+    source "$REPO_ROOT_CLI_CF/run_scripts/shared/logger.sh"
 else
     # Fallback logging functions
     log_info() { echo "[INFO] $*"; }
@@ -37,7 +71,8 @@ check_invalidation_status() {
         --profile "$aws_profile" \
         --output json 2>&1)
     
-    if [ $? -eq 0 ]; then
+    local aws_rc=$?
+    if [ $aws_rc -eq 0 ]; then
         local status
         status=$(echo "$status_result" | jq -r '.Invalidation.Status' 2>/dev/null || echo "Unknown")
         local create_time
@@ -64,8 +99,16 @@ check_invalidation_status() {
         echo "$status"
         return 0
     else
-        log_error "Failed to check invalidation status"
-        log_error "Error: $status_result"
+        # Handle NoSuchInvalidation consistently with the helper function
+        if echo "$status_result" | grep -q "NoSuchInvalidation"; then
+            log_error "CloudFront returned NoSuchInvalidation for ID '$invalidation_id'"
+            log_error "This usually means the invalidation never existed or has been removed/pruned"
+            log_info "You can create a new invalidation with:"
+            log_info "  aws cloudfront create-invalidation --distribution-id $distribution_id --paths '/*' --profile $aws_profile"
+        else
+            log_error "Failed to check invalidation status"
+            log_error "Error: $status_result"
+        fi
         return 1
     fi
 }

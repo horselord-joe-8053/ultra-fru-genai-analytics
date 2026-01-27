@@ -15,6 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/run_scripts/shared/load-image-identifiers.sh"
 
 DRY_RUN="false"
 FORCE_DELETE="false"
@@ -138,10 +139,12 @@ find_delta_tables_aws() {
     
     # Fallback: Try to detect bucket from AWS account
     if [ -z "$s3_bucket_id" ]; then
-        local account_id
-        account_id=$(aws sts get-caller-identity --profile "$AWS_PROFILE" --query Account --output text 2>/dev/null || echo "")
-        if [ -n "$account_id" ]; then
-            local bucket_name="fru-${ENVIRONMENT}-analytics-data-${account_id}"
+        # Use centralized AWS Account ID resolution
+        if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
+            load_image_identifiers "aws" || true
+        fi
+        if [ -n "${AWS_ACCOUNT_ID:-}" ]; then
+            local bucket_name="fru-${ENVIRONMENT}-analytics-data-${AWS_ACCOUNT_ID}"
             if aws s3 ls "s3://${bucket_name}" --profile "$AWS_PROFILE" >/dev/null 2>&1; then
                 s3_bucket_id="$bucket_name"
             fi

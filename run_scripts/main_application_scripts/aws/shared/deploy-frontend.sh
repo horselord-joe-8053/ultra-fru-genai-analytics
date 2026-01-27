@@ -308,10 +308,9 @@ deploy_frontend() {
                         source "$helper_script"
                         
                         # Create invalidation
+                        # Note: create_cloudfront_invalidation() already logs success message
                         local invalidation_id
                         if invalidation_id=$(create_cloudfront_invalidation "$cloudfront_dist_id" "/*"); then
-                            log_info "CloudFront invalidation created: $invalidation_id"
-                            
                             # Phase 4: Store invalidation ID for tracking
                             local invalidation_log="$REPO_ROOT/.cloudfront-invalidations.log"
                             local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")

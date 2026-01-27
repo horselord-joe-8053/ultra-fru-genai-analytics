@@ -61,7 +61,7 @@ cp .env.example .env
    **What it is:**
    - S3 bucket name for storing Terraform remote state files (records the current state of your infrastructure)
    - Format: `<PROJ_NAME>-terraform-state-<ACCOUNT_ID>` (you can define this format in .env)
-   - Example: `fru-terraform-state-123456789012`
+   - Example: `fru-terraform-state-999999999999`
    
    **Important:**
    - Must be **globally unique** across ALL AWS accounts worldwide (not just within your account)

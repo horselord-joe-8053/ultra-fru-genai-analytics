@@ -25,16 +25,16 @@ AWS_REGION="${AWS_REGION:-us-east-1}"
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 PROJECT_NAME="fru"
 
-# Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity --profile "$AWS_PROFILE" --query Account --output text 2>/dev/null || echo "")
-if [ -z "$ACCOUNT_ID" ]; then
-    log_error "Failed to get AWS account ID. Check AWS credentials."
-    exit 1
+# Get AWS account ID (using centralized resolution)
+if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
+    source "$REPO_ROOT/run_scripts/shared/load-image-identifiers.sh"
+    load_image_identifiers "aws" || exit 1
 fi
+# Use AWS_ACCOUNT_ID directly (no need for separate ACCOUNT_ID variable)
 
 log_step "Frontend Bucket Checker"
 log_info "Environment: $ENVIRONMENT"
-log_info "Account ID: $ACCOUNT_ID"
+log_info "Account ID: $AWS_ACCOUNT_ID"
 log_info "Region: $AWS_REGION"
 echo ""
 
@@ -138,7 +138,7 @@ echo ""
 log_step "3. Bucket Contents Check"
 
 # Check Terraform-managed bucket
-terraform_bucket_name="${PROJECT_NAME}-${ENVIRONMENT}-frontend-${ACCOUNT_ID}"
+terraform_bucket_name="${PROJECT_NAME}-${ENVIRONMENT}-frontend-${AWS_ACCOUNT_ID}"
 legacy_bucket_name="fru-frontend-bucket"
 
 buckets_to_check=()

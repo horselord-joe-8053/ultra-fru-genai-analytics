@@ -28,7 +28,7 @@ module "iam" {
   db_password_secret_arn  = module.secrets_manager.db_password_secret_arn
   
   enable_rds_iam_auth = true
-  rds_db_resource_arn  = "arn:aws:rds-db:us-east-1:123456789012:dbuser:cluster-xxx/fru_app_user"
+  rds_db_resource_arn  = "arn:aws:rds-db:us-east-1:999999999999:dbuser:cluster-xxx/fru_app_user"
 
   tags = {
     Project = "FRU-GenAI"

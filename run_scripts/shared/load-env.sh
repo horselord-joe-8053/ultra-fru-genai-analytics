@@ -137,152 +137,26 @@ fi
 # ============================================================================
 # Container Image Configuration Functions
 # ============================================================================
-# These functions centralize all image-related logic:
-# - IMAGE_PREFIX: Base image URI prefix (from .env or built dynamically)
-# - IMAGE_TAG: Image tag (auto-generated from git or manually set)
-# - CONTAINER_IMAGE: Full image URI = IMAGE_PREFIX:IMAGE_TAG
+# NOTE: Container image functions have been moved to load-image-identifiers.sh
+# for centralized cloud provider identifier management.
 #
-# For AWS deployments, IMAGE_PREFIX is replaced with dynamically built ECR URI
-# to ensure the correct repository is used regardless of .env configuration.
+# For backward compatibility, we source load-image-identifiers.sh and re-export
+# the functions. New code should source load-image-identifiers.sh directly.
+#
+# Functions available:
+# - ensure_image_tag()
+# - build_ecr_repo_uri()
+# - generate_container_image()
+# - resolve_container_image_for_aws()
+#
+# See: run_scripts/shared/load-image-identifiers.sh
 
-# Ensure IMAGE_TAG is generated if not set
-# Uses git_helpers.sh to generate tag from git commit SHA
-# Detects uncommitted changes and includes working tree hash when dirty
-# Format: git-<short-sha>[-dirty-<working-tree-hash>]
-ensure_image_tag() {
-    log_info "[DEBUG] ensure_image_tag: Starting at $(date)" >&2
-    if [ -z "${IMAGE_TAG:-}" ]; then
-        log_info "[DEBUG] ensure_image_tag: IMAGE_TAG not set, will generate it" >&2
-        # Source git_helpers if not already available
-        if ! command -v generate_image_tag >/dev/null 2>&1; then
-            log_info "[DEBUG] ensure_image_tag: Sourcing git_helpers.sh..." >&2
-            source "$ENV_SCRIPT_DIR/git_helpers.sh"
-            log_info "[DEBUG] ensure_image_tag: git_helpers.sh sourced" >&2
-        fi
-        log_info "[DEBUG] ensure_image_tag: About to call generate_image_tag..." >&2
-        local gen_start=$(date +%s)
-        # Capture only stdout (the actual tag), redirect stderr to /dev/null to avoid mixing warnings
-        # Warnings from generate_image_tag go to stderr and will be visible in main output
-        export IMAGE_TAG=$(generate_image_tag 2>/dev/null)
-        local gen_elapsed=$(( $(date +%s) - gen_start ))
-        log_info "[DEBUG] ensure_image_tag: generate_image_tag completed in ${gen_elapsed}s, IMAGE_TAG=$IMAGE_TAG" >&2
-    else
-        log_info "[DEBUG] ensure_image_tag: IMAGE_TAG already set: $IMAGE_TAG" >&2
+# Source load-image-identifiers.sh to get container image functions
+# Only source if not already sourced (to avoid re-sourcing)
+if ! command -v resolve_container_image_for_aws >/dev/null 2>&1; then
+    image_identifiers_file="$ENV_SCRIPT_DIR/load-image-identifiers.sh"
+    if [ -f "$image_identifiers_file" ]; then
+        source "$image_identifiers_file" 2>/dev/null || true
     fi
-    log_info "[DEBUG] ensure_image_tag: Completed at $(date)" >&2
-}
-
-# Build ECR repository URI from AWS account and region
-# Lazy evaluation: only builds when needed (requires AWS credentials)
-# Returns: account.dkr.ecr.region.amazonaws.com/repo-name
-# Usage: ECR_REPO_URI=$(build_ecr_repo_uri)
-build_ecr_repo_uri() {
-    log_info "[DEBUG] build_ecr_repo_uri: Starting at $(date)" >&2
-    local aws_profile="${AWS_PROFILE:-admin}"
-    local aws_region="${AWS_REGION:-us-east-1}"
-    local ecr_repo_name="${ECR_REPO_NAME:-fru-api}"
-    log_info "[DEBUG] build_ecr_repo_uri: Using AWS_PROFILE=$aws_profile, AWS_REGION=$aws_region, ECR_REPO_NAME=$ecr_repo_name" >&2
-    
-    # Get AWS account ID (requires AWS credentials)
-    log_info "[DEBUG] build_ecr_repo_uri: About to call 'aws sts get-caller-identity'..." >&2
-    local aws_account_id
-    local sts_start=$(date +%s)
-    aws_account_id=$(aws sts get-caller-identity --profile "$aws_profile" --query Account --output text 2>/dev/null || echo "")
-    local sts_elapsed=$(( $(date +%s) - sts_start ))
-    log_info "[DEBUG] build_ecr_repo_uri: 'aws sts get-caller-identity' completed in ${sts_elapsed}s, result=$aws_account_id" >&2
-    
-    if [ -z "$aws_account_id" ]; then
-        log_warning "Could not get AWS account ID. ECR URI cannot be built."
-        return 1
-    fi
-    
-    echo "${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com/${ecr_repo_name}"
-}
-
-# Generate CONTAINER_IMAGE from IMAGE_PREFIX:IMAGE_TAG
-# This is the base format used everywhere
-# If IMAGE_PREFIX not set, attempts to build from AWS account (fallback)
-# Usage: CONTAINER_IMAGE=$(generate_container_image)
-generate_container_image() {
-    log_info "[DEBUG] generate_container_image: Starting at $(date)" >&2
-    log_info "[DEBUG] generate_container_image: About to call ensure_image_tag..." >&2
-    local ensure_start=$(date +%s)
-    ensure_image_tag >&2  # Redirect all output to stderr
-    local ensure_elapsed=$(( $(date +%s) - ensure_start ))
-    log_info "[DEBUG] generate_container_image: ensure_image_tag completed in ${ensure_elapsed}s" >&2
-    
-    local image_prefix="${IMAGE_PREFIX:-}"
-    log_info "[DEBUG] generate_container_image: IMAGE_PREFIX=$image_prefix" >&2
-    
-    if [ -z "$image_prefix" ]; then
-        # Fallback: try to build from AWS account (if available)
-        # Capture only stdout, redirect stderr to /dev/null to avoid mixing logs
-        if ecr_uri=$(build_ecr_repo_uri 2>/dev/null); then
-            image_prefix="$ecr_uri"
-            log_info "IMAGE_PREFIX not set in .env, using AWS account-based ECR URI: $image_prefix" >&2
-        else
-            log_warning "IMAGE_PREFIX not set in .env and cannot build from AWS account" >&2
-            log_warning "CONTAINER_IMAGE will be incomplete. Set IMAGE_PREFIX in .env or ensure AWS credentials are available." >&2
-            image_prefix="unknown"
-        fi
-    fi
-    
-    # Output only the image string, no logs
-    echo "${image_prefix}:${IMAGE_TAG}"
-}
-
-# Resolve CONTAINER_IMAGE for AWS deployments
-# Replaces IMAGE_PREFIX with dynamically built ECR URI
-# This ensures AWS deployments always use the correct ECR URI
-# Usage: CONTAINER_IMAGE=$(resolve_container_image_for_aws)
-resolve_container_image_for_aws() {
-    log_info "[DEBUG] resolve_container_image_for_aws: Starting at $(date)" >&2
-    local container_image="${CONTAINER_IMAGE:-}"
-    log_info "[DEBUG] resolve_container_image_for_aws: CONTAINER_IMAGE=$container_image" >&2
-    
-    # If CONTAINER_IMAGE not set, generate it first
-    if [ -z "$container_image" ]; then
-        log_info "[DEBUG] resolve_container_image_for_aws: CONTAINER_IMAGE not set, calling generate_container_image..." >&2
-        local gen_start=$(date +%s)
-        # Capture only stdout (the actual return value), redirect stderr to /dev/null
-        container_image=$(generate_container_image 2>/dev/null)
-        local gen_elapsed=$(( $(date +%s) - gen_start ))
-        log_info "[DEBUG] resolve_container_image_for_aws: generate_container_image completed in ${gen_elapsed}s, result=$container_image" >&2
-    fi
-    
-    # Extract IMAGE_PREFIX and IMAGE_TAG from CONTAINER_IMAGE
-    local image_prefix="${container_image%%:*}"
-    local image_tag="${container_image##*:}"
-    
-    # Check if IMAGE_PREFIX needs to be replaced with ECR URI
-    # Replace if:
-    # 1. Contains variables (e.g., $IMAGE_PREFIX)
-    # 2. Is "unknown" (fallback value)
-    # 3. Doesn't look like an ECR URI (doesn't contain .dkr.ecr.)
-    log_info "[DEBUG] resolve_container_image_for_aws: Checking if IMAGE_PREFIX needs replacement..." >&2
-    log_info "[DEBUG] resolve_container_image_for_aws: image_prefix=$image_prefix, image_tag=$image_tag" >&2
-    if [[ "$image_prefix" == *"\$"* ]] || \
-       [[ "$image_prefix" == "unknown" ]] || \
-       [[ "$image_prefix" != *".dkr.ecr."* ]]; then
-        log_info "[DEBUG] resolve_container_image_for_aws: IMAGE_PREFIX needs replacement, calling build_ecr_repo_uri..." >&2
-        # Build ECR URI dynamically and replace IMAGE_PREFIX
-        local ecr_uri
-        local build_start=$(date +%s)
-        # Capture only stdout (the actual ECR URI), redirect stderr to /dev/null
-        if ecr_uri=$(build_ecr_repo_uri 2>/dev/null); then
-            local build_elapsed=$(( $(date +%s) - build_start ))
-            log_info "[DEBUG] resolve_container_image_for_aws: build_ecr_repo_uri completed in ${build_elapsed}s, result=$ecr_uri" >&2
-            # Output only the image string, no logs
-            echo "${ecr_uri}:${image_tag}"
-        else
-            log_error "Cannot build ECR URI for AWS deployment" >&2
-            return 1
-        fi
-    else
-        log_info "[DEBUG] resolve_container_image_for_aws: IMAGE_PREFIX already valid ECR URI, using as-is" >&2
-        # Already a valid ECR URI, use as-is
-        echo "$container_image"
-    fi
-    log_info "[DEBUG] resolve_container_image_for_aws: Completed at $(date)" >&2
-}
+fi
 

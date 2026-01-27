@@ -1,11 +1,38 @@
 #!/bin/bash
-# Stop EKS services (Kubernetes deployments/resources)
-# Usage: stop_eks_services <cluster_name> [aws_profile] [aws_region] [dry_run]
+# Stop EKS Services (EKS Helper Function)
+# =======================================
+# This file contains a **helper function** for gracefully stopping all Kubernetes
+# deployments and services before Terraform destroy. It is meant to be **sourced**
+# by teardown scripts, not run directly.
 #
-# This function stops all Kubernetes deployments and services before Terraform destroy because:
-# - Running pods may slow cluster deletion
-# - Deployments/services should be gracefully terminated
-# - Explicit cleanup provides cleaner teardown output
+# **Container Type**: EKS-specific (uses kubectl to manage Kubernetes resources)
+# **Location**: run_scripts/main_application_scripts/aws/eks/helpers/
+#
+# Function:
+#   stop_eks_services <cluster_name> [aws_profile] [aws_region] [dry_run]
+#
+# Usage (from another script):
+#   source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/helpers/stop-eks-services.sh"
+#   stop_eks_services "$cluster_name" "$AWS_PROFILE" "$AWS_REGION" "$DRY_RUN"
+#
+# Example:
+#   source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/helpers/stop-eks-services.sh"
+#   stop_eks_services "fru-dev-cluster" "admin" "us-east-1" "false"
+#
+# Prerequisites:
+#   - Parent script must source logger.sh before sourcing this file
+#   - kubectl must be installed and configured (for EKS)
+#   - REPO_ROOT environment variable should be set by parent script (optional)
+#
+# What it does:
+#   1. Scales down all deployments to 0 replicas
+#   2. Waits for pods to terminate gracefully
+#   3. Deletes deployments and services (optional, cluster deletion will handle it)
+#
+# Why this is needed:
+#   - Running pods may slow cluster deletion
+#   - Deployments/services should be gracefully terminated
+#   - Explicit cleanup provides cleaner teardown output
 
 stop_eks_services() {
     local cluster_name="$1"

@@ -50,6 +50,11 @@ create_cloudfront_invalidation() {
 }
 
 # Wait for invalidation to complete
+# NOTE: This is an automation helper used by other deploy scripts. It should
+# be called from code (e.g., deploy-frontend.sh) after sourcing this file,
+# not run directly from the CLI. For ad‑hoc, manual status checks, use the
+# standalone CLI tool:
+#   run_scripts/main_application_scripts/aws/shared/cli/check-cloudfront-invalidation.sh
 # Usage: wait_for_invalidation <distribution_id> <invalidation_id> <timeout_minutes> [non_blocking]
 # Returns: 0 on success, 1 on failure (non-blocking mode) or exits with error (blocking mode)
 # non_blocking: if "true", returns 1 on failure instead of exiting (allows deployment to continue)
@@ -98,7 +103,8 @@ wait_for_invalidation() {
                 --profile "$AWS_PROFILE" \
                 --output json 2>&1)
             
-            if [ $? -eq 0 ]; then
+            local aws_rc=$?
+            if [ $aws_rc -eq 0 ]; then
                 status_check_success=true
                 consecutive_failures=0
                 break
@@ -106,6 +112,21 @@ wait_for_invalidation() {
                 retry_count=$((retry_count + 1))
                 consecutive_failures=$((consecutive_failures + 1))
                 
+                # Special-case NoSuchInvalidation to make logs clearer
+                if echo "$status_result" | grep -q "NoSuchInvalidation"; then
+                    if [ "$non_blocking" = "true" ]; then
+                        log_warning "CloudFront returned NoSuchInvalidation for ID '$invalidation_id'."
+                        log_warning "Deployment will continue - invalidation may have expired or been pruned."
+                        log_info "You can re-check or recreate an invalidation manually with:"
+                        log_info "  aws cloudfront create-invalidation --distribution-id $dist_id --paths '/*' --profile $AWS_PROFILE"
+                        return 1
+                    else
+                        log_error "CloudFront returned NoSuchInvalidation for ID '$invalidation_id'."
+                        log_error "This usually means the invalidation never existed or has been removed."
+                        exit 1
+                    fi
+                fi
+
                 if [ $retry_count -lt $max_retries ]; then
                     # Exponential backoff: 1s, 2s, 4s (AWS recommended pattern)
                     # Formula: base_delay * (2 ^ (retry_count - 1))
@@ -125,7 +146,11 @@ wait_for_invalidation() {
                     local jitter=$((RANDOM % 2))  # 0 or 1 second
                     local total_delay=$((exponential_delay + jitter))
                     
-                    log_warning "Status check failed (attempt $retry_count/$max_retries), retrying in ${total_delay}s (exponential backoff: ${exponential_delay}s + ${jitter}s jitter)..."
+                    if [ "$non_blocking" = "true" ]; then
+                        log_warning "Status check failed (attempt $retry_count/$max_retries), retrying in ${total_delay}s (non-blocking; deployment will not be stopped)..."
+                    else
+                        log_warning "Status check failed (attempt $retry_count/$max_retries), retrying in ${total_delay}s (exponential backoff: ${exponential_delay}s + ${jitter}s jitter)..."
+                    fi
                     log_warning "Error: ${status_result:0:200}"  # Show first 200 chars of error
                     sleep $total_delay
                 else

@@ -23,7 +23,7 @@ module "alb" {
 
   target_port        = 5000
   health_check_path  = "/health"
-  certificate_arn    = "arn:aws:acm:us-east-1:123456789012:certificate/xxx" # Optional
+  certificate_arn    = "arn:aws:acm:us-east-1:999999999999:certificate/xxx" # Optional
 
   tags = {
     Project = "FRU-GenAI"

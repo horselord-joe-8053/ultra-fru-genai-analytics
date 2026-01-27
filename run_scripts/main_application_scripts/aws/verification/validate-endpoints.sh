@@ -519,12 +519,22 @@ validate_cloudfront_api_endpoints() {
     fi
     
     # Test /query/stream endpoint through CloudFront
+    # Note: This is a streaming endpoint (Server-Sent Events), so we need special handling.
+    # Using HEAD request (-I) to check HTTP status without reading the stream body.
+    # This prevents issues where curl -o /dev/null on streaming responses can cause
+    # status code parsing errors (e.g., "200000" instead of "200").
     log_info "Testing CloudFront API endpoint: $frontend_url/query/stream?query=average%20rating"
     elapsed=0
     start_time=$(date +%s)
     local query_stream_status=""
     while [ $elapsed -lt $timeout_seconds ]; do
-        query_stream_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$frontend_url/query/stream?query=average%20rating" 2>/dev/null || echo "000")
+        # For streaming endpoints, use HEAD request (-I) to get HTTP status without reading the stream
+        # This avoids issues with curl -o /dev/null on streaming responses that never "end"
+        # Extract only the 3-digit HTTP status code (handle any output contamination)
+        local curl_output
+        curl_output=$(curl -s -I -o /dev/null -w "%{http_code}" --max-time 10 "$frontend_url/query/stream?query=average%20rating" 2>/dev/null || echo "000")
+        # Extract only the first 3-digit HTTP status code (in case of contamination)
+        query_stream_status=$(echo "$curl_output" | grep -oE '[0-9]{3}' | head -1 || echo "000")
         
         if [ "$query_stream_status" = "200" ]; then
             log_success "✓ CloudFront /query/stream endpoint is accessible (HTTP 200) after ${elapsed}s"

@@ -1,6 +1,28 @@
 #!/bin/bash
-# Simplified: Update CloudFront via Terraform instead of AWS CLI
-# This is cleaner - update Terraform variable and let Terraform manage CloudFront
+# Update CloudFront via Terraform (EKS Helper Script - Simplified)
+# =================================================================
+# This script waits for a Kubernetes Service LoadBalancer to be ready and
+# provides instructions for updating CloudFront via Terraform (instead of
+# directly via AWS CLI). This is a simplified alternative to update-cloudfront-loadbalancer.sh.
+#
+# **Container Type**: EKS-specific (uses kubectl to get Service LoadBalancer DNS)
+# **Location**: run_scripts/main_application_scripts/aws/eks/helpers/
+#
+# What it does:
+#   1. Waits for Kubernetes Service LoadBalancer DNS to be available
+#   2. Outputs instructions for updating Terraform with the ALB DNS
+#   3. Does NOT directly update CloudFront (unlike update-cloudfront-loadbalancer.sh)
+#
+# Usage (standalone):
+#   ./update-cloudfront-loadbalancer-simple.sh [service-name] [namespace]
+#
+# Example:
+#   ./update-cloudfront-loadbalancer-simple.sh fru-api default
+#
+# Prerequisites:
+#   - kubectl configured and pointing to EKS cluster
+#   - Service with type LoadBalancer exists
+#   - Terraform configuration ready to accept alb_dns_name variable
 
 set -e
 

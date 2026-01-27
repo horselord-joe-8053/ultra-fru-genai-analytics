@@ -68,15 +68,15 @@ EOF
     esac
 done
 
-# Get AWS account ID to verify credentials
-ACCOUNT_ID=$(aws sts get-caller-identity --profile "$AWS_PROFILE" --query Account --output text 2>/dev/null || echo "")
-if [ -z "$ACCOUNT_ID" ]; then
-    log_error "Failed to get AWS account ID. Check AWS credentials and profile: $AWS_PROFILE"
-    exit 1
+# Get AWS account ID (using centralized resolution)
+if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
+    source "$REPO_ROOT/run_scripts/shared/load-image-identifiers.sh"
+    load_image_identifiers "aws" || exit 1
 fi
+# Use AWS_ACCOUNT_ID directly (no need for separate ACCOUNT_ID variable)
 
 log_step "AWS Resource Inventory"
-log_info "Account ID: $ACCOUNT_ID"
+log_info "Account ID: $AWS_ACCOUNT_ID"
 log_info "Profile: $AWS_PROFILE"
 if [ "$CHECK_ALL_REGIONS" = "true" ]; then
     log_info "Regions: ALL"
@@ -111,7 +111,7 @@ if [ -n "$LATEST_FILE" ] && [ -f "$LATEST_FILE" ]; then
     log_step "Summary"
     TOTAL_RESOURCES=$(python3 -c "import json; data = json.load(open('$LATEST_FILE')); print(data['metadata']['total_resources'])" 2>/dev/null || echo "unknown")
     log_info "Total resources found: $TOTAL_RESOURCES"
-    log_info "Account ID: $ACCOUNT_ID"
+    log_info "Account ID: $AWS_ACCOUNT_ID"
     log_info "Profile: $AWS_PROFILE"
     log_info "JSON file: $LATEST_FILE"
 fi

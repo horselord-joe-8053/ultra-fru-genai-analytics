@@ -140,7 +140,10 @@ check_aws_authentication() {
     fi
     
     # Get AWS account info
-    AWS_ACCOUNT_ID=$(aws sts get-caller-identity $profile_flag --query Account --output text)
+    # Use centralized resolution if available, otherwise direct call
+    if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
+        AWS_ACCOUNT_ID=$(aws sts get-caller-identity $profile_flag --query Account --output text)
+    fi
     local aws_region_from_cli=$(aws configure get region $profile_flag 2>/dev/null || echo "")
     AWS_REGION="${AWS_REGION:-${aws_region_from_cli:-us-east-1}}"
     

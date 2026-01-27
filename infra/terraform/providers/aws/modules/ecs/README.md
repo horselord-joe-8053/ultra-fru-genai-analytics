@@ -28,7 +28,7 @@ module "ecs" {
   openai_secret_arn      = module.secrets_manager.openai_secret_arn
   db_password_secret_arn  = module.secrets_manager.db_password_secret_arn
 
-  container_image = "123456789012.dkr.ecr.us-east-1.amazonaws.com/fru-api:latest"
+  container_image = "999999999999.dkr.ecr.us-east-1.amazonaws.com/fru-api:latest"
 
   desired_count = 2
   task_cpu      = 512

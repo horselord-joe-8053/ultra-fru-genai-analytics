@@ -100,7 +100,7 @@ main() {
     if [ -z "$TF_STATE_BUCKET" ]; then
         log_error "TF_STATE_BUCKET is not set in .env file"
         log_info "Please set TF_STATE_BUCKET in your .env file"
-        log_info "Example: TF_STATE_BUCKET=fru-terraform-state-123456789012"
+        log_info "Example: TF_STATE_BUCKET=fru-terraform-state-999999999999"
         exit 1
     fi
     

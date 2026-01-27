@@ -29,16 +29,16 @@ dependency "infrastructure" {
     aurora_port               = 5432
     aurora_database_name      = "fru_db"
     aurora_security_group_id  = "sg-xxxxxxxx"
-    ecs_task_execution_role_arn = "arn:aws:iam::123456789012:role/fru-dev-ecs-task-execution-role"
-    ecs_task_runtime_role_arn   = "arn:aws:iam::123456789012:role/fru-dev-ecs-task-runtime-role"
-    openai_secret_arn            = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/openai-api-key"
-    openai_secret_plain_arn      = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/openai-api-key-plain"
-    db_password_secret_arn       = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-password"
-    db_password_plain_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-password-plain"
-    db_username_secret_arn       = "arn:aws:secretsmanager:us-east-1:123456789012:secret:fru/dev/aurora-db-username"
-    s3_data_bucket_id            = "fru-dev-analytics-data-123456789012"
-    s3_data_bucket_arn           = "arn:aws:s3:::fru-dev-analytics-data-123456789012"
-    s3_delta_table_path          = "s3://fru-dev-analytics-data-123456789012/delta"
+    ecs_task_execution_role_arn = "arn:aws:iam::999999999999:role/fru-dev-ecs-task-execution-role"
+    ecs_task_runtime_role_arn   = "arn:aws:iam::999999999999:role/fru-dev-ecs-task-runtime-role"
+    openai_secret_arn            = "arn:aws:secretsmanager:us-east-1:999999999999:secret:fru/dev/openai-api-key"
+    openai_secret_plain_arn      = "arn:aws:secretsmanager:us-east-1:999999999999:secret:fru/dev/openai-api-key-plain"
+    db_password_secret_arn       = "arn:aws:secretsmanager:us-east-1:999999999999:secret:fru/dev/aurora-db-password"
+    db_password_plain_secret_arn = "arn:aws:secretsmanager:us-east-1:999999999999:secret:fru/dev/aurora-db-password-plain"
+    db_username_secret_arn       = "arn:aws:secretsmanager:us-east-1:999999999999:secret:fru/dev/aurora-db-username"
+    s3_data_bucket_id            = "fru-dev-analytics-data-999999999999"
+    s3_data_bucket_arn           = "arn:aws:s3:::fru-dev-analytics-data-999999999999"
+    s3_delta_table_path          = "s3://fru-dev-analytics-data-999999999999/delta"
   }
   
   mock_outputs_allowed_terraform_commands = ["validate", "plan"]

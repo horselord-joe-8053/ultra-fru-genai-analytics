@@ -19,7 +19,7 @@ module "frontend" {
   project_name = "fru"
   environment  = "prod"
 
-  certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxx" # Optional
+  certificate_arn = "arn:aws:acm:us-east-1:999999999999:certificate/xxx" # Optional
   api_origin_id   = "alb-origin" # Optional, for /query path
 
   tags = {

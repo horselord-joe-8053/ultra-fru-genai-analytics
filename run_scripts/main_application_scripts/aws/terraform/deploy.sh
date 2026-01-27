@@ -105,7 +105,13 @@ deploy_terragrunt() {
         
         if [ -z "$bucket" ]; then
             # Try to get from environment or construct default
-            bucket="${TF_STATE_BUCKET:-fru-terraform-state-$(aws sts get-caller-identity --profile "${AWS_PROFILE:-admin}" --query Account --output text 2>/dev/null || echo "")}"
+            # Use centralized AWS_ACCOUNT_ID if available
+            local account_id="${AWS_ACCOUNT_ID:-}"
+            if [ -z "$account_id" ]; then
+                # Fallback to direct call if not available
+                account_id=$(aws sts get-caller-identity --profile "${AWS_PROFILE:-admin}" --query Account --output text 2>/dev/null || echo "")
+            fi
+            bucket="${TF_STATE_BUCKET:-fru-terraform-state-${account_id}}"
         fi
         
         if [ -z "$bucket" ]; then
@@ -140,7 +146,13 @@ deploy_terragrunt() {
         local bucket="${TF_STATE_BUCKET:-}"
         
         if [ -z "$bucket" ]; then
-            bucket="${TF_STATE_BUCKET:-fru-terraform-state-$(aws sts get-caller-identity --profile "${AWS_PROFILE:-admin}" --query Account --output text 2>/dev/null || echo "")}"
+            # Use centralized AWS_ACCOUNT_ID if available
+            local account_id="${AWS_ACCOUNT_ID:-}"
+            if [ -z "$account_id" ]; then
+                # Fallback to direct call if not available
+                account_id=$(aws sts get-caller-identity --profile "${AWS_PROFILE:-admin}" --query Account --output text 2>/dev/null || echo "")
+            fi
+            bucket="${TF_STATE_BUCKET:-fru-terraform-state-${account_id}}"
         fi
         
         if [ -z "$bucket" ]; then

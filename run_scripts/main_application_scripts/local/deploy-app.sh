@@ -45,7 +45,7 @@ log_info "  ALLOWED_ORIGINS: $ALLOWED_ORIGINS"
 log_info "Generating Kubernetes manifests..."
 
 # Source the helper to get generate_kubernetes_manifests function
-source "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/kubernetes-manifests.sh"
+source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/helpers/kubernetes-manifests.sh"
 
 # Generate all manifests (including namespace, ingress, service)
 if ! generate_kubernetes_manifests "$REPO_ROOT/infra/k8s"; then

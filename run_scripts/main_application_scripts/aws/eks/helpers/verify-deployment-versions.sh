@@ -1,11 +1,39 @@
 #!/bin/bash
-# Post-Deployment Version Verification
-# Phase 3: Verifies that deployed versions match what's actually running
-# Usage: verify_deployment_versions <expected_backend_version> <expected_frontend_version> <cloudfront_domain> <namespace> <deployment_name>
+# Post-Deployment Version Verification (EKS Helper Function)
+# ===========================================================
+# This file contains a **helper function** for verifying that deployed versions
+# match what's actually running in Kubernetes. It can be sourced by deployment
+# scripts or run standalone as a CLI tool.
+#
+# **Container Type**: EKS-specific (uses kubectl to check pod images and env vars)
+# **Location**: run_scripts/main_application_scripts/aws/eks/helpers/
+#
+# Function:
+#   verify_deployment_versions <expected_backend_version> <expected_frontend_version> <cloudfront_domain> <namespace> <deployment_name>
+#
+# Usage (from another script - recommended):
+#   source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/helpers/verify-deployment-versions.sh"
+#   verify_deployment_versions "$IMAGE_TAG" "$FRONTEND_VERSION" "$CF_DOMAIN" "$namespace" "$deployment_name"
+#
+# Usage (standalone CLI):
+#   ./verify-deployment-versions.sh <expected_backend_version> <expected_frontend_version> <cloudfront_domain> <namespace> <deployment_name>
+#
+# Example:
+#   verify_deployment_versions "fru_dev_20260125_abc123" "V_260125-192214" "d3nafrsn307bvb.cloudfront.net" "default" "fru-api"
+#
+# What it verifies:
+#   1. Backend version via API /version endpoint
+#   2. Kubernetes pod image tag matches expected
+#   3. CONTAINER_IMAGE env var matches expected
+#   4. Pod image and CONTAINER_IMAGE env var are synchronized
+#   5. Frontend version (optional, manual check)
+#   6. Backend health endpoint
 
 # Source logger if available
-if [ -f "$(dirname "${BASH_SOURCE[0]}")/../../../../shared/logger.sh" ]; then
-    source "$(dirname "${BASH_SOURCE[0]}")/../../../../shared/logger.sh"
+SCRIPT_DIR_VERIFY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT_VERIFY="${REPO_ROOT:-$(cd "$SCRIPT_DIR_VERIFY/../../../../.." && pwd)}"
+if [ -f "$REPO_ROOT_VERIFY/run_scripts/shared/logger.sh" ]; then
+    source "$REPO_ROOT_VERIFY/run_scripts/shared/logger.sh"
 else
     # Fallback logging functions
     log_info() { echo "[INFO] $*"; }

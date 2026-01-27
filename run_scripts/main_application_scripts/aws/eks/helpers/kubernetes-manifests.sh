@@ -1,6 +1,30 @@
 #!/bin/bash
-# Kubernetes manifest helper functions
-# Functions for finding, generating, applying, and verifying Kubernetes manifests
+# Kubernetes Manifest Helper Functions (EKS Helper Library)
+# =========================================================
+# This file contains **helper functions** for managing Kubernetes manifests
+# in EKS deployments. These functions handle manifest generation, application,
+# and verification. They are meant to be **sourced** by EKS deployment scripts.
+#
+# **Container Type**: EKS-specific (uses kubectl, Kubernetes APIs)
+# **Location**: run_scripts/main_application_scripts/aws/eks/helpers/
+#
+# Key Functions:
+#   - generate_kubernetes_manifests()  - Generates manifests from templates
+#   - apply_kubernetes_manifests()      - Applies manifests to cluster
+#   - verify_kubernetes_deployment()   - Verifies deployment is running
+#   - terragrunt_output_with_timeout() - Safely gets Terraform outputs
+#
+# Usage (from another script):
+#   source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/helpers/kubernetes-manifests.sh"
+#   generate_kubernetes_manifests "$namespace" "$deployment_name" "$container_image"
+#   apply_kubernetes_manifests "$manifest_dir"
+#
+# Example:
+#   source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/helpers/kubernetes-manifests.sh"
+#   if ! apply_kubernetes_manifests "$MANIFESTS_DIR"; then
+#       log_error "Failed to apply Kubernetes manifests"
+#       exit 1
+#   fi
 #
 # CRITICAL: Kubeconfig exec.env vs exec.args Authentication Issue
 # ================================================================
@@ -39,6 +63,81 @@ find_envsubst() {
         echo "/usr/local/bin/envsubst"
     else
         echo ""
+    fi
+}
+
+# Helper function to run terragrunt output with timeout (macOS-compatible)
+# Usage: terragrunt_output_with_timeout <directory> <output_name> <timeout_seconds> [aws_profile]
+# Returns: output value on success, empty string on failure/timeout
+terragrunt_output_with_timeout() {
+    local terraform_dir="$1"
+    local output_name="$2"
+    local timeout_seconds="${3:-120}"  # Default 2 minutes (terragrunt initialization can take 20-30s in subshell, with buffer for slow systems)
+    local aws_profile="${4:-admin}"
+    
+    if [ ! -d "$terraform_dir" ]; then
+        return 1
+    fi
+    
+    # Use background process with timeout since macOS doesn't have timeout command
+    local output_file=$(mktemp)
+    local exit_file=$(mktemp)
+    local terragrunt_pid
+    
+    (
+        cd "$terraform_dir" && \
+        AWS_PROFILE="$aws_profile" terragrunt output -raw "$output_name" > "$output_file" 2>&1
+        echo $? > "$exit_file"
+    ) &
+    terragrunt_pid=$!
+    
+    # Wait for terragrunt with timeout
+    local waited=0
+    local wait_interval=1
+    while kill -0 "$terragrunt_pid" 2>/dev/null && [ $waited -lt $timeout_seconds ]; do
+        sleep $wait_interval
+        waited=$((waited + wait_interval))
+    done
+    
+    # Check if process is still running (timed out)
+    if kill -0 "$terragrunt_pid" 2>/dev/null; then
+        log_warning "terragrunt output -raw $output_name timed out after ${timeout_seconds}s in $terraform_dir"
+        kill "$terragrunt_pid" 2>/dev/null || true
+        wait "$terragrunt_pid" 2>/dev/null || true
+        rm -f "$output_file" "$exit_file"
+        return 1
+    else
+        # Process completed - wait a moment for file writes to complete
+        wait "$terragrunt_pid" 2>/dev/null || true
+        sleep 0.5  # Brief pause to ensure file writes complete
+        
+        # Check if exit file exists and is readable
+        local max_retries=5
+        local retry_count=0
+        while [ $retry_count -lt $max_retries ] && [ ! -f "$exit_file" ]; do
+            sleep 0.2
+            retry_count=$((retry_count + 1))
+        done
+        
+        local exit_code=$(cat "$exit_file" 2>/dev/null || echo "1")
+        local output=$(cat "$output_file" 2>/dev/null || echo "")
+        rm -f "$output_file" "$exit_file"
+        
+        # Remove any ANSI color codes from output (terragrunt might output colored text)
+        output=$(echo "$output" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        
+        if [ $exit_code -eq 0 ] && [ -n "$output" ] && [ "$output" != "null" ]; then
+            echo "$output"
+            return 0
+        else
+            # Log debug info if it failed
+            if [ $exit_code -ne 0 ]; then
+                log_warning "terragrunt output -raw $output_name failed with exit code $exit_code"
+            elif [ -z "$output" ] || [ "$output" = "null" ]; then
+                log_warning "terragrunt output -raw $output_name returned empty or null value"
+            fi
+            return 1
+        fi
     fi
 }
 
@@ -122,13 +221,14 @@ generate_kubernetes_manifests() {
                 fi
             done
             
-            if [ -n "$terraform_dir" ] && command_exists terragrunt; then
+                if [ -n "$terraform_dir" ] && command_exists terragrunt; then
                 log_info "Fetching Aurora endpoint from Terraform infrastructure outputs..."
                 log_info "Terraform directory: $terraform_dir"
                 local aurora_endpoint
                 # Use AWS_PROFILE if set, otherwise terragrunt will use default credentials
                 local aws_profile="${AWS_PROFILE:-admin}"
-                if aurora_endpoint=$(cd "$terraform_dir" && AWS_PROFILE="$aws_profile" terragrunt output -raw aurora_endpoint 2>/dev/null); then
+                # Use timeout wrapper to prevent hanging (2 minute timeout)
+                if aurora_endpoint=$(terragrunt_output_with_timeout "$terraform_dir" "aurora_endpoint" 120 "$aws_profile"); then
                     if [ -n "$aurora_endpoint" ] && [ "$aurora_endpoint" != "null" ]; then
                         export PGHOST="$aurora_endpoint"
                         log_info "Using Aurora endpoint from Terraform: $PGHOST"
@@ -137,7 +237,7 @@ generate_kubernetes_manifests() {
                         export PGHOST="${PGHOST:-localhost}"
                     fi
                 else
-                    log_warning "Could not fetch Aurora endpoint from Terraform, using PGHOST from environment or default"
+                    log_warning "Could not fetch Aurora endpoint from Terraform (timeout or error), using PGHOST from environment or default"
                     export PGHOST="${PGHOST:-localhost}"
                 fi
             else
@@ -172,9 +272,9 @@ generate_kubernetes_manifests() {
                 log_info "Terraform directory: $eks_terraform_dir"
                 local aws_profile="${AWS_PROFILE:-admin}"
                 
-                # Read namespace
+                # Read namespace (with timeout to prevent hanging)
                 local namespace
-                if namespace=$(cd "$eks_terraform_dir" && AWS_PROFILE="$aws_profile" terragrunt output -raw namespace 2>/dev/null); then
+                if namespace=$(terragrunt_output_with_timeout "$eks_terraform_dir" "namespace" 120 "$aws_profile"); then
                     if [ -n "$namespace" ] && [ "$namespace" != "null" ]; then
                         export NAMESPACE="$namespace"
                         log_info "Using namespace from Terraform: $NAMESPACE"
@@ -183,13 +283,13 @@ generate_kubernetes_manifests() {
                         export NAMESPACE="${NAMESPACE:-default}"
                     fi
                 else
-                    log_warning "Could not fetch namespace from Terraform, using default"
+                    log_warning "Could not fetch namespace from Terraform (timeout or error), using default"
                     export NAMESPACE="${NAMESPACE:-default}"
                 fi
                 
-                # Read ingress_name
+                # Read ingress_name (with timeout to prevent hanging)
                 local ingress_name
-                if ingress_name=$(cd "$eks_terraform_dir" && AWS_PROFILE="$aws_profile" terragrunt output -raw ingress_name 2>/dev/null); then
+                if ingress_name=$(terragrunt_output_with_timeout "$eks_terraform_dir" "ingress_name" 120 "$aws_profile"); then
                     if [ -n "$ingress_name" ] && [ "$ingress_name" != "null" ]; then
                         export INGRESS_NAME="$ingress_name"
                         log_info "Using ingress_name from Terraform: $INGRESS_NAME"
@@ -198,13 +298,13 @@ generate_kubernetes_manifests() {
                         export INGRESS_NAME="${INGRESS_NAME:-fru-api-ingress}"
                     fi
                 else
-                    log_warning "Could not fetch ingress_name from Terraform, using default"
+                    log_warning "Could not fetch ingress_name from Terraform (timeout or error), using default"
                     export INGRESS_NAME="${INGRESS_NAME:-fru-api-ingress}"
                 fi
                 
-                # Read ingress_host
+                # Read ingress_host (with timeout to prevent hanging)
                 local ingress_host
-                if ingress_host=$(cd "$eks_terraform_dir" && AWS_PROFILE="$aws_profile" terragrunt output -raw ingress_host 2>/dev/null); then
+                if ingress_host=$(terragrunt_output_with_timeout "$eks_terraform_dir" "ingress_host" 120 "$aws_profile"); then
                     if [ -n "$ingress_host" ] && [ "$ingress_host" != "null" ]; then
                         export INGRESS_HOST="$ingress_host"
                         log_info "Using ingress_host from Terraform: $INGRESS_HOST"
@@ -213,13 +313,13 @@ generate_kubernetes_manifests() {
                         export INGRESS_HOST="${INGRESS_HOST:-}"
                     fi
                 else
-                    log_warning "Could not fetch ingress_host from Terraform, using environment variable or empty (local dev)"
+                    log_warning "Could not fetch ingress_host from Terraform (timeout or error), using environment variable or empty (local dev)"
                     export INGRESS_HOST="${INGRESS_HOST:-}"
                 fi
                 
-                # Read CORS origin (cloudfront_domain_name)
+                # Read CORS origin (cloudfront_domain_name) (with timeout to prevent hanging)
                 local cors_origin
-                if cors_origin=$(cd "$eks_terraform_dir" && AWS_PROFILE="$aws_profile" terragrunt output -raw cloudfront_domain_name 2>/dev/null); then
+                if cors_origin=$(terragrunt_output_with_timeout "$eks_terraform_dir" "cloudfront_domain_name" 120 "$aws_profile"); then
                     if [ -n "$cors_origin" ] && [ "$cors_origin" != "null" ]; then
                         export CORS_ORIGIN="https://$cors_origin"
                         log_info "Using CORS origin from Terraform: $CORS_ORIGIN"
@@ -228,7 +328,7 @@ generate_kubernetes_manifests() {
                         export CORS_ORIGIN="${ALLOWED_ORIGINS:-https://d325mh0wy4je4e.cloudfront.net}"
                     fi
                 else
-                    log_warning "Could not fetch CORS origin from Terraform, using default"
+                    log_warning "Could not fetch CORS origin from Terraform (timeout or error), using default"
                     export CORS_ORIGIN="${ALLOWED_ORIGINS:-https://d325mh0wy4je4e.cloudfront.net}"
                 fi
             else
@@ -385,6 +485,358 @@ generate_kubernetes_manifests() {
 }
 
 # Apply Kubernetes manifests with fail-fast error handling and verification
+# Sync deployment image and CONTAINER_IMAGE environment variable
+# Ensures version endpoint returns correct version by keeping env var in sync with image
+# Usage: sync_deployment_image_and_env <deployment_name> <namespace> <new_image_uri> [container_name]
+sync_deployment_image_and_env() {
+    local deployment_name=$1
+    local namespace=$2
+    local new_image_uri=$3
+    local container_name="${4:-fru-api}"  # Default container name
+    
+    if [ -z "$deployment_name" ] || [ -z "$namespace" ] || [ -z "$new_image_uri" ]; then
+        log_error "sync_deployment_image_and_env: deployment_name, namespace, and new_image_uri are required"
+        return 1
+    fi
+    
+    log_info "Synchronizing image and CONTAINER_IMAGE env var for deployment: $deployment_name"
+    log_info "  Namespace: $namespace"
+    log_info "  New image: $new_image_uri"
+    log_info "  Container: $container_name"
+    
+    # Extract image tag for logging
+    local image_tag=""
+    if [[ "$new_image_uri" == *":"* ]]; then
+        image_tag="${new_image_uri#*:}"
+    else
+        image_tag="$new_image_uri"
+    fi
+    log_info "  Image tag: $image_tag"
+    
+    # Update deployment image
+    log_info "Updating deployment image..."
+    if ! kubectl set image "deployment/$deployment_name" "$container_name=$new_image_uri" -n "$namespace" >/dev/null 2>&1; then
+        log_error "Failed to update deployment image for $deployment_name"
+        return 1
+    fi
+    log_success "✓ Deployment image updated"
+    
+    # Update CONTAINER_IMAGE environment variable to match
+    log_info "Updating CONTAINER_IMAGE environment variable..."
+    if ! kubectl set env "deployment/$deployment_name" "CONTAINER_IMAGE=$new_image_uri" -n "$namespace" >/dev/null 2>&1; then
+        log_error "Failed to update CONTAINER_IMAGE env var for $deployment_name"
+        return 1
+    fi
+    log_success "✓ CONTAINER_IMAGE env var updated"
+    
+    # Verify both are set correctly
+    log_info "Verifying image and env var are synchronized..."
+    local verify_image
+    verify_image=$(kubectl get deployment "$deployment_name" -n "$namespace" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
+    local verify_env
+    verify_env=$(kubectl get deployment "$deployment_name" -n "$namespace" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="CONTAINER_IMAGE")].value}' 2>/dev/null || echo "")
+    
+    if [ "$verify_image" = "$new_image_uri" ] && [ "$verify_env" = "$new_image_uri" ]; then
+        log_success "✓ Verified: Image and CONTAINER_IMAGE env var are synchronized"
+        log_info "  Image: $verify_image"
+        log_info "  CONTAINER_IMAGE: $verify_env"
+        return 0
+    else
+        log_warning "⚠ Verification mismatch detected"
+        log_warning "  Expected image: $new_image_uri"
+        log_warning "  Actual image: $verify_image"
+        log_warning "  Expected CONTAINER_IMAGE: $new_image_uri"
+        log_warning "  Actual CONTAINER_IMAGE: $verify_env"
+        log_info "This may be a timing issue - changes may propagate shortly"
+        # Don't fail - changes may still be propagating
+        return 0
+    fi
+}
+
+# Wait for deployment to become available with detailed progress logging
+wait_for_deployment_with_progress() {
+    local deployment_name=$1
+    local namespace=$2
+    local timeout=$3  # e.g., "5m"
+    local container_image="${4:-}"  # optional, for image pull tracking
+    
+    log_info "Waiting for Deployment $deployment_name to become available (timeout: $timeout)..."
+    
+    # Check if jq is available (for JSON parsing)
+    local has_jq=false
+    if command -v jq >/dev/null 2>&1; then
+        has_jq=true
+    fi
+    
+    # Convert timeout to seconds for elapsed time tracking
+    local timeout_seconds
+    if [[ "$timeout" =~ ^([0-9]+)m$ ]]; then
+        timeout_seconds=$((${BASH_REMATCH[1]} * 60))
+    elif [[ "$timeout" =~ ^([0-9]+)s$ ]]; then
+        timeout_seconds=${BASH_REMATCH[1]}
+    else
+        timeout_seconds=300  # Default to 5 minutes
+    fi
+    
+    local start_time=$(date +%s)
+    local elapsed=0
+    local last_status=""
+    local poll_interval=5  # Poll every 5 seconds
+    local last_log_time=0
+    local log_interval=10  # Log status every 10 seconds
+    
+    while [ $elapsed -lt $timeout_seconds ]; do
+        # Get deployment status
+        local deployment_status
+        deployment_status=$(kubectl get deployment "$deployment_name" -n "$namespace" -o json 2>/dev/null)
+        
+        if [ -z "$deployment_status" ]; then
+            log_warning "Deployment $deployment_name not found in namespace $namespace"
+            return 1
+        fi
+        
+        # Extract status information (use jq if available, otherwise use kubectl get with jsonpath)
+        local replicas ready_replicas desired_replicas available pod_selector
+        
+        if [ "$has_jq" = "true" ]; then
+            replicas=$(echo "$deployment_status" | jq -r '.status.replicas // 0' 2>/dev/null || echo "0")
+            ready_replicas=$(echo "$deployment_status" | jq -r '.status.readyReplicas // 0' 2>/dev/null || echo "0")
+            desired_replicas=$(echo "$deployment_status" | jq -r '.spec.replicas // 1' 2>/dev/null || echo "1")
+            available=$(echo "$deployment_status" | jq -r '.status.conditions[]? | select(.type=="Available") | .status' 2>/dev/null || echo "False")
+            pod_selector=$(echo "$deployment_status" | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")' 2>/dev/null || echo "")
+        else
+            # Fallback to kubectl jsonpath (less flexible but doesn't require jq)
+            replicas=$(kubectl get deployment "$deployment_name" -n "$namespace" -o jsonpath='{.status.replicas}' 2>/dev/null || echo "0")
+            ready_replicas=$(kubectl get deployment "$deployment_name" -n "$namespace" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+            desired_replicas=$(kubectl get deployment "$deployment_name" -n "$namespace" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+            available=$(kubectl get deployment "$deployment_name" -n "$namespace" -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || echo "False")
+            # Build pod selector from matchLabels (simplified - assumes app label)
+            local app_label=$(kubectl get deployment "$deployment_name" -n "$namespace" -o jsonpath='{.spec.selector.matchLabels.app}' 2>/dev/null || echo "")
+            if [ -n "$app_label" ]; then
+                pod_selector="app=$app_label"
+            else
+                pod_selector=""
+            fi
+        fi
+        
+        local pod_status=""
+        local image_pull_status=""
+        local container_status=""
+        
+        if [ -n "$pod_selector" ]; then
+            if [ "$has_jq" = "true" ]; then
+                local pods_json
+                pods_json=$(kubectl get pods -l "$pod_selector" -n "$namespace" -o json 2>/dev/null)
+                
+                if [ -n "$pods_json" ]; then
+                    # Get pod phases
+                    pod_status=$(echo "$pods_json" | jq -r '.items[]?.status.phase // empty' 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo "")
+                    
+                    # Get image pull status
+                    image_pull_status=$(echo "$pods_json" | jq -r '.items[]?.status.containerStatuses[]?.state.waiting.reason // empty' 2>/dev/null | grep -i "pull\|image" | head -1 || echo "")
+                    
+                    # Get container ready status
+                    local ready_count=$(echo "$pods_json" | jq -r '[.items[]?.status.containerStatuses[]? | select(.ready==true)] | length' 2>/dev/null || echo "0")
+                    local total_containers=$(echo "$pods_json" | jq -r '[.items[]?.status.containerStatuses[]?] | length' 2>/dev/null || echo "0")
+                    container_status="$ready_count/$total_containers containers ready"
+                fi
+            else
+                # Fallback: use kubectl get with jsonpath
+                pod_status=$(kubectl get pods -l "$pod_selector" -n "$namespace" -o jsonpath='{.items[*].status.phase}' 2>/dev/null | tr ' ' ',' || echo "")
+                # Get image pull status from first pod
+                local first_pod=$(kubectl get pods -l "$pod_selector" -n "$namespace" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+                if [ -n "$first_pod" ]; then
+                    image_pull_status=$(kubectl get pod "$first_pod" -n "$namespace" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null | grep -i "pull\|image" || echo "")
+                fi
+                # Get ready container count
+                local ready_count=$(kubectl get pods -l "$pod_selector" -n "$namespace" -o jsonpath='{.items[*].status.containerStatuses[?(@.ready==true)].name}' 2>/dev/null | wc -w | tr -d ' ' || echo "0")
+                local total_containers=$(kubectl get pods -l "$pod_selector" -n "$namespace" -o jsonpath='{.items[*].status.containerStatuses[*].name}' 2>/dev/null | wc -w | tr -d ' ' || echo "0")
+                container_status="$ready_count/$total_containers containers ready"
+            fi
+        fi
+        
+        # Build status message
+        local current_status="replicas: $ready_replicas/$desired_replicas"
+        if [ -n "$pod_status" ]; then
+            current_status="$current_status, pods: [$pod_status]"
+        fi
+        if [ -n "$image_pull_status" ]; then
+            current_status="$current_status, image: $image_pull_status"
+        fi
+        if [ -n "$container_status" ]; then
+            current_status="$current_status, $container_status"
+        fi
+        
+        # Log status if it changed or if enough time has passed
+        local current_time=$(date +%s)
+        if [ "$current_status" != "$last_status" ] || [ $((current_time - last_log_time)) -ge $log_interval ]; then
+            log_info "  [$deployment_name] $current_status (${elapsed}s elapsed)"
+            last_status="$current_status"
+            last_log_time=$current_time
+        fi
+        
+        # Check if deployment is available
+        if [ "$available" = "True" ] && [ "$ready_replicas" -ge "$desired_replicas" ] && [ "$ready_replicas" -gt 0 ]; then
+            log_success "✓ Deployment $deployment_name is available (pods are ready) after ${elapsed}s"
+            return 0
+        fi
+        
+        # Sleep before next poll
+        sleep $poll_interval
+        elapsed=$(($(date +%s) - start_time))
+    done
+    
+    # Timeout reached - show diagnostic info
+    log_warning "⚠ Deployment $deployment_name did not become available within ${timeout} (${elapsed}s elapsed)"
+    log_info "Current status: $current_status"
+    log_info "Showing diagnostic information..."
+    
+    # Show deployment events
+    log_info "Deployment events:"
+    kubectl get events -n "$namespace" --field-selector involvedObject.name="$deployment_name" --sort-by='.lastTimestamp' 2>/dev/null | tail -10 || log_info "  (no events found)"
+    
+    # Show pod status
+    if [ -n "$pod_selector" ]; then
+        log_info "Pod status:"
+        kubectl get pods -l "$pod_selector" -n "$namespace" 2>/dev/null || log_info "  (no pods found)"
+        
+        # Show pod events for each pod
+        local pod_names
+        pod_names=$(kubectl get pods -l "$pod_selector" -n "$namespace" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
+        if [ -n "$pod_names" ]; then
+            for pod_name in $pod_names; do
+                log_info "Events for pod $pod_name:"
+                kubectl get events -n "$namespace" --field-selector involvedObject.name="$pod_name" --sort-by='.lastTimestamp' 2>/dev/null | tail -5 || log_info "  (no events found)"
+                
+                # Show last few lines of pod logs if available
+                log_info "Last 10 lines of logs for pod $pod_name:"
+                kubectl logs "$pod_name" -n "$namespace" --tail=10 2>/dev/null || log_info "  (logs not available)"
+            done
+        fi
+    fi
+    
+    # Show deployment description
+    log_info "Deployment description:"
+    kubectl describe deployment "$deployment_name" -n "$namespace" 2>/dev/null | tail -20 || log_info "  (description not available)"
+    
+    return 1
+}
+
+# Wait for multiple deployments in parallel
+wait_for_deployments_parallel() {
+    local deployments_array=("$@")  # Array of "name|namespace|image" strings
+    local wait_timeout="${DEPLOYMENT_WAIT_TIMEOUT:-5m}"
+    local parallel_wait="${KUBERNETES_PARALLEL_WAIT:-true}"
+    
+    if [ ${#deployments_array[@]} -eq 0 ]; then
+        log_info "No deployments to wait for"
+        return 0
+    fi
+    
+    # If parallel wait is disabled, wait sequentially
+    if [ "$parallel_wait" != "true" ]; then
+        log_info "Parallel wait disabled, waiting for deployments sequentially..."
+        for deployment_info in "${deployments_array[@]}"; do
+            IFS='|' read -r name namespace image <<< "$deployment_info"
+            wait_for_deployment_with_progress "$name" "$namespace" "$wait_timeout" "$image" || true
+        done
+        return 0
+    fi
+    
+    log_info "Waiting for ${#deployments_array[@]} deployment(s) to become available in parallel..."
+    
+    # Start background wait processes for each deployment
+    local pids=()
+    local deployment_names=()
+    local deployment_namespaces=()
+    local temp_files=()
+    
+    for deployment_info in "${deployments_array[@]}"; do
+        IFS='|' read -r name namespace image <<< "$deployment_info"
+        deployment_names+=("$name")
+        deployment_namespaces+=("$namespace")
+        
+        # Create temp file for exit code
+        local temp_file=$(mktemp)
+        temp_files+=("$temp_file")
+        
+        # Start background wait process
+        (
+            if wait_for_deployment_with_progress "$name" "$namespace" "$wait_timeout" "$image"; then
+                echo "0" > "$temp_file"
+            else
+                echo "1" > "$temp_file"
+            fi
+        ) &
+        pids+=($!)
+    done
+    
+    # Monitor all background processes
+    local all_succeeded=true
+    local completed=0
+    local total=${#pids[@]}
+    local success_count=0
+    local failure_count=0
+    
+    log_info "Monitoring ${total} deployment(s)..."
+    
+    while [ $completed -lt $total ]; do
+        for i in "${!pids[@]}"; do
+            local pid="${pids[$i]}"
+            local name="${deployment_names[$i]}"
+            local namespace="${deployment_namespaces[$i]}"
+            local temp_file="${temp_files[$i]}"
+            
+            if ! kill -0 "$pid" 2>/dev/null; then
+                # Process completed
+                local exit_code=$(cat "$temp_file" 2>/dev/null || echo "1")
+                rm -f "$temp_file"
+                
+                if [ "$exit_code" = "0" ]; then
+                    ((success_count++))
+                    log_success "✓ [$name] Deployment completed successfully"
+                else
+                    ((failure_count++))
+                    all_succeeded=false
+                    log_warning "⚠ [$name] Deployment did not become available in time"
+                fi
+                
+                ((completed++))
+                unset pids[$i]
+                unset deployment_names[$i]
+                unset deployment_namespaces[$i]
+                unset temp_files[$i]
+            fi
+        done
+        
+        if [ $completed -lt $total ]; then
+            sleep 2  # Check every 2 seconds
+        fi
+    done
+    
+    # Cleanup any remaining processes (shouldn't happen, but safety)
+    for pid in "${pids[@]}"; do
+        kill "$pid" 2>/dev/null || true
+    done
+    
+    # Cleanup temp files
+    for temp_file in "${temp_files[@]}"; do
+        rm -f "$temp_file" 2>/dev/null || true
+    done
+    
+    # Summary
+    log_info "Deployment wait summary: ${success_count} succeeded, ${failure_count} failed out of ${total} total"
+    
+    if [ "$all_succeeded" = "true" ]; then
+        log_success "✓ All deployments became available"
+        return 0
+    else
+        log_warning "⚠ Some deployments did not become available (${failure_count} failed)"
+        # Don't fail completely - some deployments may still be starting
+        return 0
+    fi
+}
+
 apply_kubernetes_manifests() {
     local manifests_dir=$1
     local repo_root="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)}"
@@ -392,11 +844,8 @@ apply_kubernetes_manifests() {
     
     log_step "Applying Kubernetes manifests"
     
-    # Generate ConfigMap and Secret from templates first
-    generate_kubernetes_manifests "$manifests_dir"
-    
-    # Resolve CONTAINER_IMAGE for AWS deployment
-    # This ensures IMAGE_PREFIX is replaced with actual ECR URI
+    # Resolve CONTAINER_IMAGE for AWS deployment FIRST (before generating manifests)
+    # This ensures IMAGE_PREFIX is replaced with actual ECR URI and deployment is generated correctly
     if [ -f "$repo_root/run_scripts/shared/load-env.sh" ]; then
         source "$repo_root/run_scripts/shared/load-env.sh" 2>/dev/null || true
     fi
@@ -424,24 +873,43 @@ apply_kubernetes_manifests() {
         log_info "Make sure your manifests reference the correct image"
     else
         log_info "Using container image: $container_image"
+        # Export CONTAINER_IMAGE so generate_kubernetes_manifests can use it
+        export CONTAINER_IMAGE="$container_image"
     fi
     
-    # Generate Deployment with CONTAINER_IMAGE (if not already generated)
-    local generated_dir="$manifests_dir/generated"
-    local deployment_template="$manifests_dir/templates/deployment.template.yaml"
-    local deployment_output="$generated_dir/deployment-generated.yaml"
+    # Generate ConfigMap, Secret, and Deployment from templates
+    # CONTAINER_IMAGE is now set, so deployment will be generated with correct image
+    generate_kubernetes_manifests "$manifests_dir"
     
-    if [ -f "$deployment_template" ] && [ -n "$container_image" ] && [ ! -f "$deployment_output" ]; then
-        log_info "Generating Deployment with container image..."
-        export CONTAINER_IMAGE="$container_image"
-        local envsubst_cmd
-        envsubst_cmd=$(find_envsubst)
-        if [ -n "$envsubst_cmd" ]; then
-            "$envsubst_cmd" < "$deployment_template" > "$deployment_output"
-            log_success "Deployment generated with image: $container_image"
-        else
-            log_warning "envsubst not found, using sed fallback"
-            sed "s|\${CONTAINER_IMAGE}|$container_image|g" "$deployment_template" > "$deployment_output"
+    # Verify deployment was generated with image (if CONTAINER_IMAGE was set)
+    if [ -n "$container_image" ]; then
+        local generated_dir="$manifests_dir/generated"
+        local deployment_output="$generated_dir/deployment-generated.yaml"
+        if [ -f "$deployment_output" ]; then
+            # Check if deployment has the image set (not empty)
+            local deployment_image
+            deployment_image=$(grep -E "^[[:space:]]*image:[[:space:]]*" "$deployment_output" | head -1 | awk '{print $2}' | tr -d '"' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
+            # Check if image is empty or just whitespace
+            if [ -z "$deployment_image" ] || [ "$deployment_image" = "null" ]; then
+                log_warning "Deployment manifest has empty image field, regenerating with CONTAINER_IMAGE..."
+                local deployment_template="$manifests_dir/templates/deployment.template.yaml"
+                if [ -f "$deployment_template" ]; then
+                    log_info "Regenerating Deployment with container image: $container_image"
+                    local envsubst_cmd
+                    envsubst_cmd=$(find_envsubst)
+                    if [ -n "$envsubst_cmd" ]; then
+                        export CONTAINER_IMAGE="$container_image"
+                        "$envsubst_cmd" < "$deployment_template" > "$deployment_output"
+                        log_success "Deployment regenerated with image: $container_image"
+                    else
+                        log_warning "envsubst not found, using sed fallback"
+                        sed "s|\${CONTAINER_IMAGE}|$container_image|g" "$deployment_template" > "$deployment_output"
+                        log_success "Deployment regenerated with image: $container_image (using sed)"
+                    fi
+                fi
+            else
+                log_success "Deployment manifest has image set: $deployment_image"
+            fi
         fi
     fi
     
@@ -487,6 +955,37 @@ apply_kubernetes_manifests() {
         log_warning "No YAML files found in $manifests_dir"
         return 0
     fi
+    
+    # Sort manifests by priority: namespace first, then secret, then others
+    # This ensures dependencies are created before resources that need them
+    local priority_order=("namespace" "secret" "configmap" "deployment" "service" "ingress")
+    local sorted_files=()
+    
+    # First, add files in priority order
+    for priority in "${priority_order[@]}"; do
+        for file in "${yaml_files[@]}"; do
+            local basename_file=$(basename "$file")
+            if [[ "$basename_file" == *"$priority"* ]]; then
+                sorted_files+=("$file")
+            fi
+        done
+    done
+    
+    # Then add any remaining files that don't match priority patterns
+    for file in "${yaml_files[@]}"; do
+        local found=false
+        for sorted_file in "${sorted_files[@]}"; do
+            if [ "$file" = "$sorted_file" ]; then
+                found=true
+                break
+            fi
+        done
+        if [ "$found" = false ]; then
+            sorted_files+=("$file")
+        fi
+    done
+    
+    yaml_files=("${sorted_files[@]}")
     
     log_info "Found ${#yaml_files[@]} manifest file(s): ${yaml_files[*]//$manifests_dir\//}"
     
@@ -677,6 +1176,9 @@ PYTHON_SCRIPT
     local applied_count=0
     local failed_count=0
     
+    # Array to track deployments that need waiting (for parallel wait after all manifests are applied)
+    declare -a deployments_to_wait=()
+    
     for yaml_file in "${yaml_files[@]}"; do
         local manifest_name=$(basename "$yaml_file")
         log_info "Applying: $manifest_name"
@@ -759,7 +1261,12 @@ PYTHON_SCRIPT
             log_info "Debug: Script name: ${0:-N/A}"
             log_info "Debug: Parent PID: $PPID"
             log_info "Debug: Shell: $SHELL"
-            log_info "Debug: AWS credentials check: $(aws sts get-caller-identity --profile "$aws_profile" --query Account --output text 2>/dev/null || echo 'failed')"
+            # Use centralized AWS_ACCOUNT_ID if available, otherwise check directly
+            local debug_account_id="${AWS_ACCOUNT_ID:-}"
+            if [ -z "$debug_account_id" ]; then
+                debug_account_id=$(aws sts get-caller-identity --profile "$aws_profile" --query Account --output text 2>/dev/null || echo 'failed')
+            fi
+            log_info "Debug: AWS credentials check: $debug_account_id"
             # NOTE: We don't check kubectl auth can-i here because it has the same exec plugin issue
             # We'll just try kubectl apply directly - if it fails, fail-fast logic will catch it
             
@@ -767,10 +1274,44 @@ PYTHON_SCRIPT
             local kubectl_exit_code
             
             # Use explicit AWS_PROFILE prefix as additional safeguard
-            kubectl_output=$(AWS_PROFILE="$aws_profile" kubectl apply --validate=false -f "$temp_file" 2>&1)
-            kubectl_exit_code=$?
+            # Add timeout to prevent hanging (60 seconds max for kubectl apply)
+            # Use background process with timeout since macOS doesn't have timeout command
+            local kubectl_pid
+            local kubectl_timeout=60
+            local kubectl_output_file=$(mktemp)
+            (
+                AWS_PROFILE="$aws_profile" kubectl apply --validate=false -f "$temp_file" > "$kubectl_output_file" 2>&1
+                echo $? > "$kubectl_output_file.exit"
+            ) &
+            kubectl_pid=$!
             
-            # Debug: Log kubectl exit code and output snippet
+            # Wait for kubectl with timeout
+            local waited=0
+            local wait_interval=1
+            while kill -0 "$kubectl_pid" 2>/dev/null && [ $waited -lt $kubectl_timeout ]; do
+                sleep $wait_interval
+                waited=$((waited + wait_interval))
+            done
+            
+            # Check if process is still running (timed out)
+            if kill -0 "$kubectl_pid" 2>/dev/null; then
+                log_warning "kubectl apply timed out after ${kubectl_timeout}s, killing process..."
+                kill "$kubectl_pid" 2>/dev/null || true
+                wait "$kubectl_pid" 2>/dev/null || true
+                kubectl_exit_code=124  # Timeout exit code
+                kubectl_output=$(cat "$kubectl_output_file" 2>/dev/null || echo "Command timed out after ${kubectl_timeout} seconds")
+            else
+                # Process completed, get exit code and output
+                wait "$kubectl_pid" 2>/dev/null || true
+                kubectl_output=$(cat "$kubectl_output_file" 2>/dev/null || echo "")
+                if [ -f "$kubectl_output_file.exit" ]; then
+                    kubectl_exit_code=$(cat "$kubectl_output_file.exit")
+                else
+                    kubectl_exit_code=$?
+                fi
+            fi
+            rm -f "$kubectl_output_file" "$kubectl_output_file.exit"
+# Debug: Log kubectl exit code and output snippet
             log_info "Debug: kubectl apply exit code: $kubectl_exit_code for $manifest_name"
             if [ $kubectl_exit_code -ne 0 ]; then
                 log_info "Debug: kubectl apply error output: $(echo "$kubectl_output" | head -5)"
@@ -787,6 +1328,10 @@ PYTHON_SCRIPT
                 # Verify resource exists based on kind
                 local verify_cmd=""
                 case "$resource_kind" in
+                    Namespace)
+                        # Namespace is cluster-scoped, no -n flag needed
+                        verify_cmd="kubectl get namespace $resource_name >/dev/null 2>&1"
+                        ;;
                     ConfigMap)
                         verify_cmd="kubectl get configmap $resource_name -n $resource_namespace >/dev/null 2>&1"
                         ;;
@@ -812,17 +1357,31 @@ PYTHON_SCRIPT
                     if eval "$verify_cmd"; then
                         log_success "✓ Verified: $resource_kind/$resource_name exists in namespace $resource_namespace"
                         
-                        # For Deployment: Wait for pods to become ready (critical for availability)
+                        # For Deployment: Record for parallel waiting after all manifests are applied
                         if [ "$resource_kind" = "Deployment" ]; then
-                            log_info "Waiting for Deployment $resource_name to become available (pods ready)..."
-                            local wait_timeout="${DEPLOYMENT_WAIT_TIMEOUT:-5m}"
-                            if kubectl wait --for=condition=available --timeout="$wait_timeout" "deployment/$resource_name" -n "$resource_namespace" >/dev/null 2>&1; then
-                                log_success "✓ Deployment $resource_name is available (pods are ready)"
-                            else
-                                log_warning "⚠ Deployment $resource_name exists but pods may not be ready yet (timeout: $wait_timeout)"
-                                log_info "Check pod status: kubectl get pods -l app=$resource_name -n $resource_namespace"
-                                log_info "This is non-fatal - pods may still be starting"
-                                # Don't fail - pods may take time to start, but resource is created
+                            # Record deployment info for later parallel waiting
+                            deployments_to_wait+=("$resource_name|$resource_namespace|$container_image")
+                            log_info "Deployment $resource_name applied, will wait for pods after all manifests are applied"
+                            
+                            # Phase 1: Sync CONTAINER_IMAGE env var with deployment image
+                            # This ensures /version endpoint returns correct version
+                            # Note: This doesn't require pods to be ready, so we can do it immediately
+                            if [ -n "$container_image" ] && [ "$dry_run" != "true" ]; then
+                                log_info "Synchronizing CONTAINER_IMAGE env var with deployment image..."
+                                # Extract container name from deployment spec (default to fru-api)
+                                local container_name
+                                container_name=$(kubectl get deployment "$resource_name" -n "$resource_namespace" \
+                                    -o jsonpath='{.spec.template.spec.containers[0].name}' 2>/dev/null || echo "fru-api")
+                                
+                                if sync_deployment_image_and_env "$resource_name" "$resource_namespace" "$container_image" "$container_name"; then
+                                    log_success "✓ Version synchronization complete for $resource_name"
+                                else
+                                    log_warning "⚠ Version synchronization had issues for $resource_name"
+                                    log_info "The deployment will continue, but /version endpoint may show incorrect version"
+                                    log_info "You can manually sync with: kubectl set env deployment/$resource_name CONTAINER_IMAGE=$container_image -n $resource_namespace"
+                                fi
+                            elif [ "$dry_run" = "true" ]; then
+                                log_info "[DRY-RUN] Would sync CONTAINER_IMAGE env var with deployment image"
                             fi
                         fi
                         
@@ -869,17 +1428,11 @@ PYTHON_SCRIPT
                             if eval "$verify_cmd"; then
                                 log_success "✓ Verified: $resource_kind/$resource_name exists after replace"
                                 
-                                # For Deployment: Wait for pods to become ready after replace
+                                # For Deployment: Record for parallel waiting after all manifests are applied
                                 if [ "$resource_kind" = "Deployment" ]; then
-                                    log_info "Waiting for Deployment $resource_name to become available after replace..."
-                                    local wait_timeout="${DEPLOYMENT_WAIT_TIMEOUT:-5m}"
-                                    if kubectl wait --for=condition=available --timeout="$wait_timeout" "deployment/$resource_name" -n "$resource_namespace" >/dev/null 2>&1; then
-                                        log_success "✓ Deployment $resource_name is available (pods are ready)"
-                                    else
-                                        log_warning "⚠ Deployment $resource_name exists but pods may not be ready yet (timeout: $wait_timeout)"
-                                        log_info "Check pod status: kubectl get pods -l app=$resource_name -n $resource_namespace"
-                                        # Don't fail - pods may take time to start
-                                    fi
+                                    # Record deployment info for later parallel waiting
+                                    deployments_to_wait+=("$resource_name|$resource_namespace|$container_image")
+                                    log_info "Deployment $resource_name replaced, will wait for pods after all manifests are applied"
                                 fi
                                 
                                 ((applied_count++))
@@ -937,6 +1490,16 @@ PYTHON_SCRIPT
             fi
         fi
     done
+    
+    # Wait for all deployments in parallel (after all manifests are applied)
+    if [ ${#deployments_to_wait[@]} -gt 0 ] && [ "$dry_run" != "true" ]; then
+        log_info ""
+        log_info "════════════════════════════════════════════════════════════════"
+        log_info "Waiting for deployments to become available"
+        log_info "════════════════════════════════════════════════════════════════"
+        wait_for_deployments_parallel "${deployments_to_wait[@]}"
+        log_info ""
+    fi
     
     # Final verification summary
     if [ "$dry_run" != "true" ]; then

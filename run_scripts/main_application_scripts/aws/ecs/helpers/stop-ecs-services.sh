@@ -1,12 +1,39 @@
 #!/bin/bash
-# Stop ECS services and tasks
-# Usage: stop_ecs_services <cluster_name> [aws_profile] [aws_region] [dry_run]
+# Stop ECS Services (ECS Helper Function)
+# =======================================
+# This file contains a **helper function** for gracefully stopping all ECS
+# services and tasks before Terraform destroy. It is meant to be **sourced**
+# by teardown scripts, not run directly.
 #
-# This function stops all ECS services and tasks before Terraform destroy because:
-# - Running tasks prevent cluster deletion
-# - Service tasks must be stopped (desired count set to 0)
-# - One-off tasks (e.g., Spark jobs via run-task) must be explicitly stopped
-# - Security groups cannot be deleted while still referenced by running tasks
+# **Container Type**: ECS-specific (uses AWS ECS APIs)
+# **Location**: run_scripts/main_application_scripts/aws/ecs/helpers/
+#
+# Function:
+#   stop_ecs_services <cluster_name> [aws_profile] [aws_region] [dry_run]
+#
+# Usage (from another script):
+#   source "$REPO_ROOT/run_scripts/main_application_scripts/aws/ecs/helpers/stop-ecs-services.sh"
+#   stop_ecs_services "$cluster_name" "$AWS_PROFILE" "$AWS_REGION" "$DRY_RUN"
+#
+# Example:
+#   source "$REPO_ROOT/run_scripts/main_application_scripts/aws/ecs/helpers/stop-ecs-services.sh"
+#   stop_ecs_services "fru-dev-cluster" "admin" "us-east-1" "false"
+#
+# Prerequisites:
+#   - Parent script must source logger.sh before sourcing this file
+#   - AWS CLI must be configured with ECS permissions
+#   - REPO_ROOT environment variable should be set by parent script (optional)
+#
+# What it does:
+#   1. Scales down all ECS services to desired count 0
+#   2. Stops all running tasks (including one-off tasks)
+#   3. Waits for all tasks to fully stop
+#
+# Why this is needed:
+#   - Running tasks prevent cluster deletion
+#   - Service tasks must be stopped (desired count set to 0)
+#   - One-off tasks (e.g., Spark jobs via run-task) must be explicitly stopped
+#   - Security groups cannot be deleted while still referenced by running tasks
 
 stop_ecs_services() {
     local cluster_name="$1"

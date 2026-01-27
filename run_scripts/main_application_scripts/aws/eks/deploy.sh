@@ -19,8 +19,8 @@ source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 
 # Source helper scripts
-source "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/check-kubectl.sh"
-source "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/kubernetes-manifests.sh"
+source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/helpers/check-kubectl.sh"
+source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/helpers/kubernetes-manifests.sh"
 source "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/prepare-frontend.sh"
 
 # Load environment variables early
@@ -140,12 +140,12 @@ main() {
             fi
         fi
         log_step "Substep 5b: Updating CloudFront to point API paths to the EKS Ingress ALB"
-        "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/update-cloudfront-loadbalancer.sh" "$ingress_name" "$namespace" || exit 1
+        "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/helpers/update-cloudfront-loadbalancer.sh" "$ingress_name" "$namespace" || exit 1
         
         # Phase 3: Post-deployment version verification
         if [ "$DRY_RUN" != "true" ]; then
             log_step "Substep 5c: Verifying deployment versions"
-            source "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/verify-deployment-versions.sh"
+            source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/helpers/verify-deployment-versions.sh"
             
             # Get expected versions
             local expected_backend=""

@@ -142,6 +142,13 @@ load_env_file || true
 SCRIPT_DIR="$AWS_SCRIPT_DIR"
 log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (aws/run.sh)"
 
+# Load cloud provider image identifiers (AWS Account ID, ECR URI, CONTAINER_IMAGE, etc.)
+# Unset any existing AWS_ACCOUNT_ID to ensure we resolve fresh from AWS STS
+# (prevents stale dummy/test values from being used)
+unset AWS_ACCOUNT_ID
+source "$REPO_ROOT/run_scripts/shared/load-image-identifiers.sh"
+load_image_identifiers "aws"
+
 # Source shared deployment phases (common logic for ECS/EKS)
 source "$SCRIPT_DIR/shared/container-deploy-common.sh"
 
@@ -393,9 +400,10 @@ check_or_build_image() {
     
     # Extract ECR_REPO_URI and IMAGE_TAG for build-push-ecr.sh
     # These are needed for ECR operations (check existence, push, etc.)
-    # Use a more robust extraction method
+    # Use robust extraction method: ##*: extracts everything after LAST colon (handles edge cases)
+    # This matches the approach in build-push-ecr.sh for consistency
     ECR_REPO_URI="${CONTAINER_IMAGE%%:*}"
-    IMAGE_TAG="${CONTAINER_IMAGE#*:}"
+    IMAGE_TAG="${CONTAINER_IMAGE##*:}"
     
     # Remove any trailing whitespace or newlines that might have been captured
     IMAGE_TAG=$(echo "$IMAGE_TAG" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')

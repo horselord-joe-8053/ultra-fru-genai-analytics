@@ -25,9 +25,15 @@ S3_DELTA_PATH=$(AWS_PROFILE="${AWS_PROFILE:-admin}" terragrunt output -raw s3_de
 
 # Fallback: Try to detect bucket from AWS account if Terraform output fails
 if [ -z "$S3_BUCKET_ID" ]; then
-    ACCOUNT_ID=$(aws sts get-caller-identity --profile "${AWS_PROFILE:-admin}" --query Account --output text 2>/dev/null || echo "")
-    if [ -n "$ACCOUNT_ID" ]; then
-        BUCKET_NAME="fru-${ENVIRONMENT}-analytics-data-${ACCOUNT_ID}"
+    # Use centralized AWS_ACCOUNT_ID if available
+    if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
+        REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)}"
+        source "$REPO_ROOT/run_scripts/shared/load-image-identifiers.sh" 2>/dev/null || true
+        load_image_identifiers "aws" 2>/dev/null || true
+    fi
+    # Use AWS_ACCOUNT_ID directly (no need for separate ACCOUNT_ID variable)
+    if [ -n "${AWS_ACCOUNT_ID:-}" ]; then
+        BUCKET_NAME="fru-${ENVIRONMENT}-analytics-data-${AWS_ACCOUNT_ID}"
         if aws s3 ls "s3://${BUCKET_NAME}" --profile "${AWS_PROFILE:-admin}" >/dev/null 2>&1; then
             S3_BUCKET_ID="$BUCKET_NAME"
             S3_BUCKET_ARN="arn:aws:s3:::${BUCKET_NAME}"

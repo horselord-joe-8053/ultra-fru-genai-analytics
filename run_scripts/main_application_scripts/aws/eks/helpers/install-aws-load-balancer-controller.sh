@@ -1,6 +1,34 @@
 #!/bin/bash
-# Install AWS Load Balancer Controller with IRSA
-# This script creates the IAM role, service account, and installs the controller
+# Install AWS Load Balancer Controller with IRSA (EKS Helper Script)
+# ====================================================================
+# This script installs the AWS Load Balancer Controller on an EKS cluster
+# using IRSA (IAM Roles for Service Accounts). It can be run as a standalone
+# script or sourced as a function.
+#
+# **Container Type**: EKS-specific (installs Kubernetes addon)
+# **Location**: run_scripts/main_application_scripts/aws/eks/helpers/
+#
+# What it does:
+#   1. Creates IAM role with IRSA trust policy
+#   2. Attaches AWS managed policy (ElasticLoadBalancingFullAccess)
+#   3. Creates Kubernetes service account with IRSA annotation
+#   4. Installs AWS Load Balancer Controller via Helm
+#
+# Usage (standalone):
+#   ./install-aws-load-balancer-controller.sh [cluster-name] [namespace] [aws-profile] [aws-region]
+#
+# Usage (from another script):
+#   source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/helpers/install-aws-load-balancer-controller.sh"
+#   # Then call the script directly (it will execute if run standalone)
+#
+# Example:
+#   ./install-aws-load-balancer-controller.sh fru-dev-cluster kube-system admin us-east-1
+#
+# Prerequisites:
+#   - kubectl configured and pointing to EKS cluster
+#   - Helm installed (brew install helm)
+#   - AWS CLI configured with appropriate permissions
+#   - eks helm repo added: helm repo add eks https://aws.github.io/eks-charts
 
 set -e
 
@@ -12,7 +40,14 @@ CLUSTER_NAME="${1:-fru-dev-cluster}"
 NAMESPACE="${2:-kube-system}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 AWS_PROFILE="${AWS_PROFILE:-admin}"
-ACCOUNT_ID=$(aws sts get-caller-identity --profile "$AWS_PROFILE" --query Account --output text)
+
+# Get AWS account ID (using centralized resolution)
+if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
+    # REPO_ROOT already set above, reuse it
+    source "$REPO_ROOT/run_scripts/shared/load-image-identifiers.sh"
+    load_image_identifiers "aws" || exit 1
+fi
+# Use AWS_ACCOUNT_ID directly (no need for separate ACCOUNT_ID variable)
 
 log_step "Installing AWS Load Balancer Controller for cluster: $CLUSTER_NAME"
 
@@ -43,7 +78,7 @@ else
     {
       "Effect": "Allow",
       "Principal": {
-        "Federated": "arn:aws:iam::${ACCOUNT_ID}:oidc-provider/${OIDC_URL}"
+        "Federated": "arn:aws:iam::${AWS_ACCOUNT_ID}:oidc-provider/${OIDC_URL}"
       },
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {

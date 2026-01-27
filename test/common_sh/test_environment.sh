@@ -115,13 +115,13 @@ setup_aws_environment() {
         log_info "  TF_STATE_BUCKET=[${TF_STATE_BUCKET:-NOT SET}]"
         log_info "  AWS_PROFILE=[${AWS_PROFILE:-NOT SET}]"
         
-        # fetch-deployment-info.sh already calls fetch_terraform_outputs() when sourced (line 243)
-        # No need to call it again explicitly - it's redundant
+        # fetch-deployment-info.sh already calls fetch_terraform_outputs() when sourced
         # Verify API_URL was set after sourcing
         # For EKS, also check K8S_INGRESS_HOST or K8S_SERVICE_IP if API_URL is not set  
+        # Note: EKS uses NGINX Ingress Controller which creates an NLB (not ALB), so always use HTTP
         if [[ -z "${API_URL:-}" ]]; then
             if [ "$container_type" = "eks" ] && [ -n "${K8S_INGRESS_HOST:-}" ]; then
-                API_URL="https://$K8S_INGRESS_HOST"
+                API_URL="http://$K8S_INGRESS_HOST"
                 log_info "Using EKS ingress host for API URL: $API_URL"
             elif [ "$container_type" = "eks" ] && [ -n "${K8S_SERVICE_IP:-}" ]; then
                 API_URL="http://$K8S_SERVICE_IP"
@@ -132,7 +132,7 @@ setup_aws_environment() {
                     log_info "Attempting to fetch API URL from Kubernetes ingress/service..."
                     local k8s_ingress=$(kubectl get ingress fru-api-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
                     if [ -n "$k8s_ingress" ]; then
-                        API_URL="https://$k8s_ingress"
+                        API_URL="http://$k8s_ingress"
                         log_info "Found EKS ingress host: $API_URL"
                     else
                         local k8s_service=$(kubectl get svc fru-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")

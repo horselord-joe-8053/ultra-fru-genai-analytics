@@ -1,8 +1,27 @@
 #!/bin/bash
-# Immediate fix: Update CloudFront distribution with ALB DNS from Kubernetes Ingress
-# This is a temporary script until automated ALB readiness check is implemented
+# Update CloudFront with EKS Ingress ALB (EKS Helper Script - Legacy)
+# =====================================================================
+# This script updates a CloudFront distribution to point to the ALB created
+# by a Kubernetes Ingress. This is a legacy/alternative version of
+# update-cloudfront-loadbalancer.sh.
 #
-# Usage: ./update-cloudfront-alb.sh [ingress-name] [namespace] [cloudfront-distribution-id]
+# **Container Type**: EKS-specific (uses kubectl to get Ingress ALB DNS)
+# **Location**: run_scripts/main_application_scripts/aws/eks/helpers/
+#
+# NOTE: This script may be redundant with update-cloudfront-loadbalancer.sh.
+# Consider using update-cloudfront-loadbalancer.sh instead, which has more
+# comprehensive cache behavior configuration.
+#
+# Usage (standalone):
+#   ./update-cloudfront-alb.sh [ingress-name] [namespace] [cloudfront-distribution-id]
+#
+# Example:
+#   ./update-cloudfront-alb.sh fru-api-ingress default E33TA1D0OAYUNR
+#
+# Prerequisites:
+#   - kubectl configured and pointing to EKS cluster
+#   - Ingress resource exists and AWS Load Balancer Controller is installed
+#   - CloudFront distribution ID available (from Terraform or argument)
 
 set -e
 

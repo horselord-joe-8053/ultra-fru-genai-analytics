@@ -29,6 +29,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/run_scripts/shared/load-image-identifiers.sh"
 
 # Load environment variables
 load_env_file
@@ -68,16 +69,16 @@ fi
 AWS_PROFILE="${AWS_PROFILE:-admin}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 PROJECT_NAME="${PROJECT_NAME:-fru}"
-ACCOUNT_ID=$(aws sts get-caller-identity --profile "$AWS_PROFILE" --query Account --output text 2>/dev/null || echo "")
 
-if [ -z "$ACCOUNT_ID" ]; then
-    log_error "Failed to get AWS account ID. Check AWS credentials."
-    exit 1
+# Get AWS account ID (using centralized resolution)
+if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
+    load_image_identifiers "aws" || exit 1
 fi
+# Use AWS_ACCOUNT_ID directly (no need for separate ACCOUNT_ID variable)
 
 log_step "Delete Recreatable AWS Resources"
 log_info "Environment: $ENVIRONMENT"
-log_info "Account ID: $ACCOUNT_ID"
+log_info "Account ID: $AWS_ACCOUNT_ID"
 log_info "Region: $AWS_REGION"
 log_info "Profile: $AWS_PROFILE"
 if [ "$DRY_RUN" = "true" ]; then
@@ -469,12 +470,12 @@ delete_s3_resources() {
     log_step "Substep 3: Deleting S3 Buckets"
     
     local buckets=(
-        "${PROJECT_NAME}-${ENVIRONMENT}-analytics-data-${ACCOUNT_ID}"
-        "${PROJECT_NAME}-${ENVIRONMENT}-frontend-${ACCOUNT_ID}"
+        "${PROJECT_NAME}-${ENVIRONMENT}-analytics-data-${AWS_ACCOUNT_ID}"
+        "${PROJECT_NAME}-${ENVIRONMENT}-frontend-${AWS_ACCOUNT_ID}"
     )
     
     # Note: Terraform state bucket is preserved
-    local state_bucket="${PROJECT_NAME}-terraform-state-${ACCOUNT_ID}"
+    local state_bucket="${PROJECT_NAME}-terraform-state-${AWS_ACCOUNT_ID}"
     log_info "Preserving Terraform state bucket: $state_bucket"
     
     for bucket in "${buckets[@]}"; do
@@ -876,7 +877,7 @@ print_summary() {
     # Resources preserved
     log_info "Resources Preserved:"
     log_info "  - Secrets Manager secrets (5 secrets)"
-    log_info "  - Terraform state bucket (fru-terraform-state-${ACCOUNT_ID})"
+    log_info "  - Terraform state bucket (fru-terraform-state-${AWS_ACCOUNT_ID})"
     echo ""
     
     # Next steps
