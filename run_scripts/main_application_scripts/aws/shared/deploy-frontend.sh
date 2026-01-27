@@ -307,21 +307,25 @@ deploy_frontend() {
                     if [ -f "$helper_script" ]; then
                         source "$helper_script"
                         
-                        # Create invalidation
-                        # Note: create_cloudfront_invalidation() already logs success message
-                        local invalidation_id
-                        if invalidation_id=$(create_cloudfront_invalidation "$cloudfront_dist_id" "/*"); then
+                        # Create invalidation for all paths
+                        # Note: create_cloudfront_invalidation() sets CLOUDFRONT_INVALIDATION_ID environment variable
+                        # Using "/*" invalidates all paths including:
+                        # - Frontend: / (index.html and all static assets)
+                        # - API endpoints: /query, /analytics, /version, /health, /query/stream
+                        # This ensures both frontend updates and API endpoint cache (including /analytics) are cleared
+                        # The "/*" pattern is more efficient than invalidating individual paths
+                        if create_cloudfront_invalidation "$cloudfront_dist_id" "/*"; then
                             # Phase 4: Store invalidation ID for tracking
                             local invalidation_log="$REPO_ROOT/.cloudfront-invalidations.log"
                             local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-                            echo "$timestamp|$cloudfront_dist_id|$invalidation_id|/*" >> "$invalidation_log"
+                            echo "$timestamp|$cloudfront_dist_id|$CLOUDFRONT_INVALIDATION_ID|/*" >> "$invalidation_log"
                             log_info "Invalidation ID logged to: $invalidation_log"
                             
                             # Wait for invalidation to complete (non-blocking mode)
                             # If invalidation fails or times out, deployment will continue
                             # The invalidation will complete in the background
                             log_info "Waiting for CloudFront invalidation to complete (non-blocking)..."
-                            if wait_for_invalidation "$cloudfront_dist_id" "$invalidation_id" 15 "true"; then
+                            if wait_for_invalidation "$cloudfront_dist_id" "$CLOUDFRONT_INVALIDATION_ID" 15 "true"; then
                                 log_success "CloudFront invalidation completed"
                                 
                                 # Optional: Verify frontend version (non-blocking)

@@ -25,81 +25,27 @@ print_manual_test_hints() {
     
     # Determine container type from CONTAINER_TYPE
     local container_type="${CONTAINER_TYPE:-ecs}"  # Default to ecs
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local repo_root="${REPO_ROOT:-$(cd "$script_dir/../.." && pwd)}"
     
+    # Dispatch to container-type-specific hint functions
     if [ "$container_type" = "ecs" ]; then
-        log_info "${GREEN}1. Get Deployment URLs:${NC}"
-        if [ "$DRY_RUN" = "true" ]; then
-            log_info "   ${GREEN}cd $REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT/ecs${NC}"
-            log_info "   ${GREEN}terragrunt output alb_dns_name${NC}        # API endpoint"
-            log_info "   ${GREEN}terragrunt output cloudfront_domain_name${NC}  # ECS Frontend URL (CloudFront distribution)"
+        if [ -f "$repo_root/run_scripts/main_application_scripts/aws/ecs/verification/print-manual-hints.sh" ]; then
+            # shellcheck source=/dev/null
+            source "$repo_root/run_scripts/main_application_scripts/aws/ecs/verification/print-manual-hints.sh"
+            print_ecs_manual_hints
         else
-            if [ -n "$ALB_DNS" ]; then
-                log_info "   ${GREEN}API endpoint: http://$ALB_DNS${NC}"
-            fi
-            if [ -n "$CLOUDFRONT_DOMAIN" ]; then
-                log_info "   ${GREEN}ECS Frontend URL: https://$CLOUDFRONT_DOMAIN${NC}${YELLOW} (CloudFront distribution for ECS deployment)${NC}"
-            fi
-            if [ -z "$ALB_DNS" ] || [ -z "$CLOUDFRONT_DOMAIN" ]; then
-                log_info "   ${GREEN}cd $REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT/ecs${NC}"
-                log_info "   ${GREEN}terragrunt output alb_dns_name${NC}        # API endpoint"
-                log_info "   ${GREEN}terragrunt output cloudfront_domain_name${NC}  # ECS Frontend URL (CloudFront distribution)"
-            fi
+            log_warning "ECS manual hints script not found at: $repo_root/run_scripts/main_application_scripts/aws/ecs/verification/print-manual-hints.sh"
         fi
-        echo ""
-        log_info "${GREEN}2. Check ECS Service Status:${NC}"
-        if [ "$DRY_RUN" = "true" ]; then
-            log_info "   ${GREEN}aws ecs list-services --cluster <cluster-name>${NC}"
-            log_info "   ${GREEN}aws ecs describe-services --cluster <cluster-name> --services <service-name>${NC}"
+    elif [ "$container_type" = "eks" ]; then
+        if [ -f "$repo_root/run_scripts/main_application_scripts/aws/eks/verification/print-manual-hints.sh" ]; then
+            # shellcheck source=/dev/null
+            source "$repo_root/run_scripts/main_application_scripts/aws/eks/verification/print-manual-hints.sh"
+            print_eks_manual_hints
         else
-            if [ -n "$ECS_CLUSTER_NAME" ] && [ -n "$ECS_SERVICE_NAME" ]; then
-                log_info "   ${GREEN}aws ecs list-services --cluster $ECS_CLUSTER_NAME${NC}"
-                log_info "   ${GREEN}aws ecs describe-services --cluster $ECS_CLUSTER_NAME --services $ECS_SERVICE_NAME${NC}"
-            else
-                log_info "   ${GREEN}aws ecs list-services --cluster <cluster-name>${NC}"
-                log_info "   ${GREEN}aws ecs describe-services --cluster <cluster-name> --services <service-name>${NC}"
-            fi
+            log_warning "EKS manual hints script not found at: $repo_root/run_scripts/main_application_scripts/aws/eks/verification/print-manual-hints.sh"
         fi
-        echo ""
-        log_info "${GREEN}3. View ECS Logs:${NC}"
-        log_info "   ${GREEN}aws logs tail /ecs/fru-dev --follow${NC}"
-        echo ""
-    fi
-    
-    if [ "$container_type" = "eks" ]; then
-        log_info "${GREEN}1. Get Deployment URLs:${NC}"
-        if [ -n "$CLOUDFRONT_DOMAIN" ]; then
-            log_info "   ${GREEN}EKS Frontend URL: https://$CLOUDFRONT_DOMAIN${NC}${YELLOW} (CloudFront distribution for EKS deployment)${NC}"
-        fi
-        if [ "$DRY_RUN" = "true" ]; then
-            log_info "   ${GREEN}cd $REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT/eks${NC}"
-            log_info "   ${GREEN}terragrunt output cloudfront_domain_name${NC}  # EKS Frontend URL (CloudFront distribution)"
-        fi
-        if [ -z "$CLOUDFRONT_DOMAIN" ] && [ "$DRY_RUN" != "true" ]; then
-            log_info "   ${GREEN}cd $REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT/eks${NC}"
-            log_info "   ${GREEN}terragrunt output cloudfront_domain_name${NC}  # EKS Frontend URL"
-        fi
-        echo ""
-        log_info "${GREEN}2. Check Pod Status:${NC}"
-        log_info "   ${GREEN}kubectl get pods -l app=fru-api${NC}"
-        log_info "   ${GREEN}kubectl get svc fru-api${NC}"
-        log_info "   ${GREEN}kubectl get ingress fru-api-ingress${NC}"
-        echo ""
-        log_info "${GREEN}3. View Pod Logs:${NC}"
-        log_info "   ${GREEN}kubectl logs -l app=fru-api --tail=100 -f${NC}"
-        echo ""
-        log_info "${GREEN}4. Get Service Endpoint:${NC}"
-        if [ "$DRY_RUN" = "true" ]; then
-            log_info "   ${GREEN}kubectl get svc fru-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'${NC}"
-        else
-            if [ -n "$K8S_INGRESS_HOST" ]; then
-                log_info "   ${GREEN}Ingress endpoint: https://$K8S_INGRESS_HOST${NC}"
-            elif [ -n "$K8S_SERVICE_IP" ]; then
-                log_info "   ${GREEN}Service endpoint: http://$K8S_SERVICE_IP${NC}"
-            else
-                log_info "   ${GREEN}kubectl get svc fru-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'${NC}"
-            fi
-        fi
-        echo ""
     fi
     
     log_info "${GREEN}4. Test API Health:${NC}"

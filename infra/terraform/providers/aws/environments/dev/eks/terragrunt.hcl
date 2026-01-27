@@ -87,7 +87,8 @@ inputs = {
   frontend_certificate_arn   = null
   frontend_api_origin_id     = "ALB-${local.env_config.inputs.project_name}-${local.env_config.inputs.environment}-eks"
   # LoadBalancer DNS (from Kubernetes Ingress)
-  # Get via: kubectl get ingress fru-api-ingress -n default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+  # Get via: kubectl get ingress fru-api-ingress-dev -n fru-api-dev -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+  # Or: kubectl get ingress --all-namespaces -o jsonpath='{.items[?(@.metadata.name=~"fru-api-ingress*")].status.loadBalancer.ingress[0].hostname}'
   alb_dns_name               = "ad36c0036890a439eae339e83c735cdc-78ffc1fad6560c8f.elb.us-east-1.amazonaws.com"
   
   tags = local.env_config.inputs.tags

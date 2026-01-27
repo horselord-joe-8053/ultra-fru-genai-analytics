@@ -5,11 +5,15 @@
 
 # Create CloudFront invalidation
 # Usage: create_cloudfront_invalidation <distribution_id> <paths>
-# Returns: invalidation_id (prints to stdout)
-# Exits with error on failure
+# Sets: CLOUDFRONT_INVALIDATION_ID (exported environment variable)
+# Returns: 0 on success, 1 on failure
+# On failure, CLOUDFRONT_INVALIDATION_ID is unset
 create_cloudfront_invalidation() {
     local dist_id="$1"
     local paths="${2:-/*}"  # Default to all paths
+    
+    # Unset the variable on entry to ensure clean state
+    unset CLOUDFRONT_INVALIDATION_ID
     
     if [ -z "$dist_id" ]; then
         log_error "CloudFront distribution ID is required"
@@ -34,17 +38,20 @@ create_cloudfront_invalidation() {
         invalidation_id=$(echo "$invalidation_result" | jq -r '.Invalidation.Id')
         
         if [ -n "$invalidation_id" ] && [ "$invalidation_id" != "null" ]; then
+            # Export the invalidation ID as an environment variable
+            export CLOUDFRONT_INVALIDATION_ID="$invalidation_id"
             log_success "CloudFront invalidation created: $invalidation_id"
-            echo "$invalidation_id"
             return 0
         else
             log_error "Failed to extract invalidation ID from response"
             log_error "Response: $invalidation_result"
+            unset CLOUDFRONT_INVALIDATION_ID
             return 1
         fi
     else
         log_error "Failed to create CloudFront invalidation"
         log_error "Error: $invalidation_result"
+        unset CLOUDFRONT_INVALIDATION_ID
         return 1
     fi
 }

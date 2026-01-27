@@ -75,8 +75,13 @@ output "ingress_name" {
 }
 
 output "ingress_host" {
-  description = "Ingress hostname (unique per environment)"
-  value       = "api-${var.environment}.internal"
+  description = "Ingress hostname (unique per environment). Note: This value is used for documentation/logging but the host restriction is removed during manifest generation to enable CloudFront/NLB access without Host header requirements"
+  # Returns environment-specific hostname (e.g., "api-dev.internal", "api-prod.internal")
+  # The Kubernetes manifest generation script always removes the host line from the Ingress
+  # to create a wildcard Ingress that works with CloudFront and direct NLB access.
+  # This is necessary because CloudFront doesn't send custom Host headers by default,
+  # and direct NLB access uses the NLB DNS name, not the internal hostname.
+  value = "api-${var.environment}.internal"
 }
 
 # Frontend Outputs

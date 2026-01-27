@@ -5,6 +5,7 @@
 
 const VERSION_CACHE_KEY = "backend_version_cache";
 const VERSION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+// Note: To force refresh, clear localStorage: localStorage.removeItem('backend_version_cache')
 
 interface VersionCache {
   version: string;
@@ -14,20 +15,23 @@ interface VersionCache {
 /**
  * Fetches backend version from the /version endpoint
  * Uses caching to avoid repeated API calls
+ * @param forceRefresh - If true, bypasses cache and fetches fresh version
  */
-export async function getBackendVersion(): Promise<string> {
-  // Check cache first
-  try {
-    const cached = localStorage.getItem(VERSION_CACHE_KEY);
-    if (cached) {
-      const cache: VersionCache = JSON.parse(cached);
-      const now = Date.now();
-      if (now - cache.timestamp < VERSION_CACHE_TTL) {
-        return cache.version;
+export async function getBackendVersion(forceRefresh: boolean = false): Promise<string> {
+  // Check cache first (unless force refresh is requested)
+  if (!forceRefresh) {
+    try {
+      const cached = localStorage.getItem(VERSION_CACHE_KEY);
+      if (cached) {
+        const cache: VersionCache = JSON.parse(cached);
+        const now = Date.now();
+        if (now - cache.timestamp < VERSION_CACHE_TTL) {
+          return cache.version;
+        }
       }
+    } catch (e) {
+      // Ignore cache errors
     }
-  } catch (e) {
-    // Ignore cache errors
   }
 
   try {

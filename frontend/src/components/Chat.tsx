@@ -27,7 +27,11 @@ const Chat: React.FC<ChatProps> = ({ messages, onSend, loading }) => {
 
   useEffect(() => {
     // Fetch backend version on component mount
-    getBackendVersion().then(setBackendVersion);
+    // Force refresh on mount to ensure we get the latest version after deployments
+    getBackendVersion(true).then(setBackendVersion).catch(() => {
+      // If force refresh fails, try with cache
+      getBackendVersion(false).then(setBackendVersion);
+    });
   }, []);
 
   return (

@@ -449,16 +449,47 @@ generate_kubernetes_manifests() {
             # Generate ingress with envsubst
             "$envsubst_cmd" < "$ingress_template" > "$ingress_output"
             
-            # If INGRESS_HOST is empty (local dev), remove the host field line
-            # Kubernetes allows ingress without host (treats as wildcard)
-            if [ -z "${INGRESS_HOST:-}" ]; then
-                log_info "INGRESS_HOST is empty (local dev), removing host field from ingress"
-                # Remove the "host: " line (and any trailing empty value)
-                sed -i.bak '/^[[:space:]]*- host: $/d; /^[[:space:]]*host: $/d' "$ingress_output" 2>/dev/null || \
-                sed -i '' '/^[[:space:]]*- host: $/d; /^[[:space:]]*host: $/d' "$ingress_output" 2>/dev/null || \
-                sed '/^[[:space:]]*- host: $/d; /^[[:space:]]*host: $/d' "$ingress_output" > "${ingress_output}.tmp" && mv "${ingress_output}.tmp" "$ingress_output"
+            # Always remove the host line from Ingress to create a wildcard Ingress
+            # This is necessary for CloudFront and direct NLB access compatibility:
+            #
+            # Why remove the host restriction?
+            # 1. CloudFront doesn't send custom Host headers by default when forwarding to origins
+            # 2. Direct NLB access uses the NLB DNS name (e.g., *.elb.amazonaws.com), not the internal hostname
+            # 3. Without removing the host line, requests fail with 503 (no matching Ingress rule)
+            #
+            # What does this do?
+            # - Replaces "- host: <value>\n    http:" with "- http:" to maintain valid YAML structure
+            # - Creates a wildcard Ingress that accepts requests with any Host header
+            # - This is safe because namespace isolation (fru-api-dev vs fru-api-prod) provides environment separation
+            #
+            # Note: INGRESS_HOST is still set by Terraform (e.g., "api-dev.internal") for documentation/logging,
+            # but we always remove it from the actual Kubernetes manifest for CloudFront/NLB compatibility.
+            log_info "Removing host restriction from Ingress for CloudFront/NLB compatibility (INGRESS_HOST was: ${INGRESS_HOST:-not set})"
+            
+            # Replace "- host: <value>\n    http:" with "- http:" to maintain valid YAML
+            # Try different sed approaches for cross-platform compatibility (Linux vs macOS)
+            local sed_success=false
+            if sed -i.bak '/^[[:space:]]*- host:/{N; s/^\([[:space:]]*\)- host:.*\n\([[:space:]]*\)    http:/\1- http:/; }' "$ingress_output" 2>/dev/null; then
                 rm -f "${ingress_output}.bak" 2>/dev/null || true
+                sed_success=true
+            elif sed -i '' '/^[[:space:]]*- host:/{N; s/^\([[:space:]]*\)- host:.*\n\([[:space:]]*\)    http:/\1- http:/; }' "$ingress_output" 2>/dev/null; then
+                sed_success=true
+            else
+                # Fallback: use temp file approach (works on all systems)
+                if sed '/^[[:space:]]*- host:/{N; s/^\([[:space:]]*\)- host:.*\n\([[:space:]]*\)    http:/\1- http:/; }' "$ingress_output" > "${ingress_output}.tmp" 2>/dev/null; then
+                    if [ -f "${ingress_output}.tmp" ]; then
+                        mv "${ingress_output}.tmp" "$ingress_output"
+                        sed_success=true
+                    fi
+                fi
             fi
+            
+            if [ "$sed_success" = false ]; then
+                log_warning "Failed to remove host line from Ingress - CloudFront/NLB access may not work correctly"
+            else
+                log_info "Successfully removed host restriction - Ingress now accepts any Host header (wildcard)"
+            fi
+            
             log_success "Ingress generated: ingress-generated.yaml"
         else
             log_warning "envsubst not found, using template as-is"

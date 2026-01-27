@@ -34,23 +34,45 @@ fetch_terraform_outputs() {
     
     # Check if critical variables are already set - if so, skip expensive terragrunt/AWS CLI calls
     # This provides significant performance savings when function is called multiple times
-    # Optimization: Check if API_URL is set (most critical) OR if core ECS variables are set
+    # Optimization: Check if API_URL is set (most critical) OR if container-type-specific variables are set
     # This is more lenient than requiring ALL variables, since some may be optional (e.g., CLOUDFRONT_DOMAIN)
-    if [ -n "${API_URL:-}" ] || 
-       ([ -n "${ALB_DNS:-}" ] && [ -n "${ECS_CLUSTER_ID:-}" ] && [ -n "${ECS_SERVICE_NAME:-}" ]); then
+    local container_type="${CONTAINER_TYPE:-ecs}"
+    local skip_fetch=false
+    
+    # Check if API_URL is set (works for both ECS and EKS)
+    if [ -n "${API_URL:-}" ]; then
+        skip_fetch=true
+    elif [ "$container_type" = "ecs" ] && 
+         [ -n "${ALB_DNS:-}" ] && [ -n "${ECS_CLUSTER_ID:-}" ] && [ -n "${ECS_SERVICE_NAME:-}" ]; then
+        # ECS variables are set
+        skip_fetch=true
+    elif [ "$container_type" = "eks" ] && 
+         [ -n "${K8S_INGRESS_HOST:-}" ] && [ -n "${EKS_CLUSTER_NAME:-}" ]; then
+        # EKS variables are set
+        skip_fetch=true
+    fi
+    
+    if [ "$skip_fetch" = true ]; then
         if command -v log_info >/dev/null 2>&1; then
             log_info "Deployment variables already set, skipping expensive terragrunt/AWS CLI calls"
             log_info "  API_URL=[${API_URL:-NOT SET}]"
-            log_info "  ALB_DNS=[${ALB_DNS:-NOT SET}]"
+            if [ "$container_type" = "ecs" ]; then
+                log_info "  ALB_DNS=[${ALB_DNS:-NOT SET}]"
+                log_info "  ECS_CLUSTER_ID=[${ECS_CLUSTER_ID:-NOT SET}]"
+            elif [ "$container_type" = "eks" ]; then
+                log_info "  K8S_INGRESS_HOST=[${K8S_INGRESS_HOST:-NOT SET}]"
+                log_info "  EKS_CLUSTER_NAME=[${EKS_CLUSTER_NAME:-NOT SET}]"
+            fi
             log_info "  CLOUDFRONT_DOMAIN=[${CLOUDFRONT_DOMAIN:-NOT SET}]"
-            log_info "  ECS_CLUSTER_ID=[${ECS_CLUSTER_ID:-NOT SET}]"
         fi
         # Ensure derived variables are set
-        if [ -n "$ECS_CLUSTER_ID" ] && [ -z "${ECS_CLUSTER_NAME:-}" ]; then
-            ECS_CLUSTER_NAME=$(echo "$ECS_CLUSTER_ID" | awk -F'/' '{print $NF}' || echo "")
-        fi
-        if [ -n "$ALB_DNS" ] && [ -z "${API_URL:-}" ]; then
-            API_URL="http://$ALB_DNS"
+        if [ "$container_type" = "ecs" ]; then
+            if [ -n "$ECS_CLUSTER_ID" ] && [ -z "${ECS_CLUSTER_NAME:-}" ]; then
+                ECS_CLUSTER_NAME=$(echo "$ECS_CLUSTER_ID" | awk -F'/' '{print $NF}' || echo "")
+            fi
+            if [ -n "$ALB_DNS" ] && [ -z "${API_URL:-}" ]; then
+                API_URL="http://$ALB_DNS"
+            fi
         fi
         if [ -n "$CLOUDFRONT_DOMAIN" ] && [ -z "${FRONTEND_URL:-}" ]; then
             FRONTEND_URL="https://$CLOUDFRONT_DOMAIN"
@@ -68,221 +90,37 @@ fetch_terraform_outputs() {
     K8S_SERVICE_IP="${K8S_SERVICE_IP:-}"
     K8S_INGRESS_HOST="${K8S_INGRESS_HOST:-}"
     
-    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT"
-    
-    # Fetch ECS/ALB outputs (for ECS container type)
-    if [ "${CONTAINER_TYPE:-ecs}" = "ecs" ]; then
-        APP_DIR="$TERRAFORM_DIR/ecs"
-        if [ -d "$APP_DIR" ] && command_exists terragrunt; then
-            ORIG_DIR=$(pwd)
-            cd "$APP_DIR" 2>/dev/null || return 0
-            
-            # Debug: Verify variables are still set before calling terragrunt
-            if command -v log_info >/dev/null 2>&1; then
-                log_info "About to run terragrunt in $APP_DIR:"
-                log_info "  TF_STATE_BUCKET=[${TF_STATE_BUCKET:-NOT SET}]"
-                log_info "  AWS_PROFILE=[${AWS_PROFILE:-NOT SET}]"
-            fi
-            
-            # Try to read outputs; on failure, log a warning instead of silently ignoring
-            # Note: Only fetch if not already set (skip expensive terragrunt calls if we already have the value)
-            local terragrunt_error
-            
-            if [ -z "${ALB_DNS:-}" ]; then
-                log_info "Fetching Terraform output: alb_dns_name"
-                if ! ALB_DNS=$(terragrunt output -raw alb_dns_name 2>&1); then
-                    terragrunt_error="$ALB_DNS"
-                    ALB_DNS=""
-                    log_warning "Could not read Terraform output 'alb_dns_name' via terragrunt; API URL may be unavailable"
-                    if command -v log_info >/dev/null 2>&1 && [ -n "$terragrunt_error" ]; then
-                        log_info "Terragrunt error: ${terragrunt_error:0:200}"
-                    fi
-                else
-                    log_info "Output retrieved: alb_dns_name=$ALB_DNS"
-                fi
-            fi
-            
-            if [ -z "${CLOUDFRONT_DOMAIN:-}" ]; then
-                log_info "Fetching Terraform output: cloudfront_domain_name"
-                if ! CLOUDFRONT_DOMAIN=$(terragrunt output -raw cloudfront_domain_name 2>&1); then
-                    terragrunt_error="$CLOUDFRONT_DOMAIN"
-                    CLOUDFRONT_DOMAIN=""
-                    log_warning "Could not read Terraform output 'cloudfront_domain_name' via terragrunt; frontend URL may be unavailable"
-                    if command -v log_info >/dev/null 2>&1 && [ -n "$terragrunt_error" ]; then
-                        log_info "Terragrunt error: ${terragrunt_error:0:200}"
-                    fi
-                else
-                    log_info "Output retrieved: cloudfront_domain_name=$CLOUDFRONT_DOMAIN"
-                fi
-            fi
-            
-            if [ -z "${ECS_CLUSTER_ID:-}" ]; then
-                log_info "Fetching Terraform output: ecs_cluster_id"
-                if ! ECS_CLUSTER_ID=$(terragrunt output -raw ecs_cluster_id 2>&1); then
-                    terragrunt_error="$ECS_CLUSTER_ID"
-                    ECS_CLUSTER_ID=""
-                    log_warning "Could not read Terraform output 'ecs_cluster_id' via terragrunt; ECS hints may be limited"
-                    if command -v log_info >/dev/null 2>&1 && [ -n "$terragrunt_error" ]; then
-                        log_info "Terragrunt error: ${terragrunt_error:0:200}"
-                    fi
-                else
-                    log_info "Output retrieved: ecs_cluster_id=${ECS_CLUSTER_ID:0:100}..."
-                fi
-            fi
-            
-            if [ -z "${ECS_SERVICE_NAME:-}" ]; then
-                log_info "Fetching Terraform output: ecs_service_name"
-                if ! ECS_SERVICE_NAME=$(terragrunt output -raw ecs_service_name 2>&1); then
-                    terragrunt_error="$ECS_SERVICE_NAME"
-                    ECS_SERVICE_NAME=""
-                    log_warning "Could not read Terraform output 'ecs_service_name' via terragrunt; ECS hints may be limited"
-                    if command -v log_info >/dev/null 2>&1 && [ -n "$terragrunt_error" ]; then
-                        log_info "Terragrunt error: ${terragrunt_error:0:200}"
-                    fi
-                else
-                    log_info "Output retrieved: ecs_service_name=$ECS_SERVICE_NAME"
-                fi
-            fi
-            cd "$ORIG_DIR" 2>/dev/null || true
-            
-            # Extract cluster name from ARN if needed
-            if [ -n "$ECS_CLUSTER_ID" ]; then
-                ECS_CLUSTER_NAME=$(echo "$ECS_CLUSTER_ID" | awk -F'/' '{print $NF}' || echo "")
-            fi
-            
-            # Set API_URL and FRONTEND_URL from discovered values
-            if [ -n "$ALB_DNS" ]; then
-                API_URL="http://$ALB_DNS"
-            fi
-            if [ -n "$CLOUDFRONT_DOMAIN" ]; then
-                FRONTEND_URL="https://$CLOUDFRONT_DOMAIN"
-            fi
-        fi
-
-        # Fallback: if Terragrunt outputs are unavailable, try AWS CLI to infer ALB DNS
-        if [ -z "$ALB_DNS" ] && command_exists aws; then
-            log_info "Attempting to discover ECS cluster/service and ALB DNS via AWS CLI (fallback)..."
-
-            # Find an ECS cluster whose ARN contains the environment name
-            # Use same pattern as check-service-status.sh: let AWS CLI use defaults for region/profile
-            ECS_CLUSTER_ID=$(aws ecs list-clusters \
-                --query "clusterArns[?contains(@, '$ENVIRONMENT')]" \
-                --output text 2>/dev/null | head -1 || echo "")
-
-            if [ -n "$ECS_CLUSTER_ID" ] && [ "$ECS_CLUSTER_ID" != "None" ]; then
-                ECS_CLUSTER_NAME=$(echo "$ECS_CLUSTER_ID" | awk -F'/' '{print $NF}' || echo "")
-                log_info "Discovered ECS cluster via AWS CLI: $ECS_CLUSTER_NAME"
-
-                # Find first service in that cluster
-                local service_arn
-                service_arn=$(aws ecs list-services \
-                    --cluster "$ECS_CLUSTER_ID" \
-                    --query "serviceArns[0]" \
-                    --output text 2>/dev/null || echo "")
-
-                if [ -n "$service_arn" ] && [ "$service_arn" != "None" ]; then
-                    ECS_SERVICE_NAME=$(echo "$service_arn" | awk -F'/' '{print $NF}' || echo "")
-                    log_info "Discovered ECS service via AWS CLI: $ECS_SERVICE_NAME"
-
-                    # From the ECS service, get target group ARN
-                    local target_group_arn
-                    target_group_arn=$(aws ecs describe-services \
-                        --cluster "$ECS_CLUSTER_ID" \
-                        --services "$ECS_SERVICE_NAME" \
-                        --query "services[0].loadBalancers[0].targetGroupArn" \
-                        --output text 2>/dev/null || echo "")
-
-                    if [ -n "$target_group_arn" ] && [ "$target_group_arn" != "None" ]; then
-                        # From target group, get load balancer ARN
-                        local lb_arn
-                        lb_arn=$(aws elbv2 describe-target-groups \
-                            --target-group-arns "$target_group_arn" \
-                            --query "TargetGroups[0].LoadBalancerArns[0]" \
-                            --output text 2>/dev/null || echo "")
-
-                        if [ -n "$lb_arn" ] && [ "$lb_arn" != "None" ]; then
-                            ALB_DNS=$(aws elbv2 describe-load-balancers \
-                                --load-balancer-arns "$lb_arn" \
-                                --query "LoadBalancers[0].DNSName" \
-                                --output text 2>/dev/null || echo "")
-
-                            if [ -n "$ALB_DNS" ] && [ "$ALB_DNS" != "None" ]; then
-                                log_info "Discovered ALB DNS via AWS CLI fallback: $ALB_DNS"
-                                API_URL="http://$ALB_DNS"
-                            else
-                                log_warning "AWS CLI fallback could not determine ALB DNS."
-                            fi
-                        fi
-                    fi
-                fi
-            else
-                log_warning "AWS CLI fallback could not find an ECS cluster for environment '$ENVIRONMENT'."
-            fi
-        fi
+    # Calculate REPO_ROOT if not set (fallback for standalone execution)
+    # From verification/ directory: go up 3 levels (verification -> aws -> main_application_scripts -> run_scripts -> repo root)
+    if [ -z "${REPO_ROOT:-}" ]; then
+        local script_dir
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        REPO_ROOT="$(cd "$script_dir/../../.." && pwd)"
     fi
     
-    # Fetch EKS outputs
-    if [ "${CONTAINER_TYPE:-ecs}" = "eks" ]; then
-        # Fetch EKS cluster name from EKS terraform outputs
-        EKS_DIR="$TERRAFORM_DIR/eks"
-        if [ -d "$EKS_DIR" ] && command_exists terragrunt; then
-            ORIG_DIR=$(pwd)
-            cd "$EKS_DIR" 2>/dev/null || return 0
-            if [ -z "${EKS_CLUSTER_NAME:-}" ]; then
-                log_info "Fetching Terraform output: cluster_name (from EKS module)"
-                EKS_CLUSTER_NAME=$(terragrunt output -raw cluster_name 2>/dev/null || echo "")
-                if [ -n "$EKS_CLUSTER_NAME" ]; then
-                    log_info "Output retrieved: cluster_name=$EKS_CLUSTER_NAME"
-                else
-                    log_warning "Could not read Terraform output 'cluster_name' from EKS module"
-                fi
-            fi
-            cd "$ORIG_DIR" 2>/dev/null || true
+    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT"
+    
+    # Dispatch to container-type-specific deployment info fetching functions
+    local container_type="${CONTAINER_TYPE:-ecs}"
+    
+    if [ "$container_type" = "ecs" ]; then
+        if [ -f "$REPO_ROOT/run_scripts/main_application_scripts/aws/ecs/verification/fetch-deployment-info-ecs.sh" ]; then
+            # shellcheck source=/dev/null
+            source "$REPO_ROOT/run_scripts/main_application_scripts/aws/ecs/verification/fetch-deployment-info-ecs.sh"
+            fetch_ecs_deployment_info
+        else
+            log_warning "ECS deployment info script not found at: $REPO_ROOT/run_scripts/main_application_scripts/aws/ecs/verification/fetch-deployment-info-ecs.sh"
         fi
-        
-        # Fetch CloudFront domain from eks terraform outputs (for EKS frontend)
-        APP_DIR="$TERRAFORM_DIR/eks"
-        if [ -d "$APP_DIR" ] && command_exists terragrunt; then
-            ORIG_DIR=$(pwd)
-            cd "$APP_DIR" 2>/dev/null || return 0
-            
-            if [ -z "${CLOUDFRONT_DOMAIN:-}" ]; then
-                log_info "Fetching Terraform output: cloudfront_domain_name (from eks module, for EKS)"
-                # Fetch from eks module which has separate CloudFront distribution
-                if ! CLOUDFRONT_DOMAIN=$(terragrunt output -raw cloudfront_domain_name 2>&1); then
-                    terragrunt_error="$CLOUDFRONT_DOMAIN"
-                    CLOUDFRONT_DOMAIN=""
-                    log_warning "Could not read Terraform output 'cloudfront_domain_name' via terragrunt (for EKS); frontend URL may be unavailable"
-                    if command -v log_info >/dev/null 2>&1 && [ -n "$terragrunt_error" ]; then
-                        log_info "Terragrunt error: ${terragrunt_error:0:200}"
-                    fi
-                else
-                    log_info "Output retrieved: cloudfront_domain_name=$CLOUDFRONT_DOMAIN"
-                fi
-            fi
-            
-            cd "$ORIG_DIR" 2>/dev/null || true
+    elif [ "$container_type" = "eks" ]; then
+        if [ -f "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/verification/fetch-deployment-info-eks.sh" ]; then
+            # shellcheck source=/dev/null
+            source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/verification/fetch-deployment-info-eks.sh"
+            fetch_eks_deployment_info
+        else
+            log_warning "EKS deployment info script not found at: $REPO_ROOT/run_scripts/main_application_scripts/aws/eks/verification/fetch-deployment-info-eks.sh"
         fi
-        
-        # Set FRONTEND_URL from discovered CloudFront domain
-        if [ -n "$CLOUDFRONT_DOMAIN" ]; then
-            FRONTEND_URL="https://$CLOUDFRONT_DOMAIN"
-        fi
-        
-        # Try to get service endpoint from kubectl if available
-        if command_exists kubectl && kubectl config current-context >/dev/null 2>&1; then
-            K8S_SERVICE_IP=$(kubectl get svc fru-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-            K8S_INGRESS_HOST=$(kubectl get ingress fru-api-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-            
-            # EKS Ingress uses NGINX Ingress Controller, which creates an NLB (Network Load Balancer) on AWS.
-            # NLBs use .elb.amazonaws.com DNS names and don't have SSL certificates by default
-            # (unless configured with ACM), so always use HTTP. This matches ECS behavior (line 155) for consistency.
-            if [ -n "$K8S_INGRESS_HOST" ]; then
-                API_URL="http://$K8S_INGRESS_HOST"
-            elif [ -n "$K8S_SERVICE_IP" ]; then
-                API_URL="http://$K8S_SERVICE_IP"
-            fi
-        fi
+    else
+        log_warning "Unknown container type: $container_type (expected 'ecs' or 'eks')"
     fi
     
     # Export all variables for use by other scripts
