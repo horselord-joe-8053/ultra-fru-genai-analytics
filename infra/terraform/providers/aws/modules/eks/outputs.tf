@@ -105,3 +105,8 @@ output "cors_origin" {
   value       = "https://${module.frontend.cloudfront_domain_name}"
 }
 
+output "api_replicas" {
+  description = "Number of replicas for the API deployment (can be used to set REPLICAS env var)"
+  value       = var.api_replicas
+}
+

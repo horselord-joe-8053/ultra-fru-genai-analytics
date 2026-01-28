@@ -7,7 +7,17 @@ metadata:
     app: fru-api
     component: backend
 spec:
-  replicas: 2
+  replicas: ${BACKEND_KUBE_REPLICA_COUNT}
+  # Deployment strategy: Terminate old pods before creating new ones to prevent resource contention
+  # maxSurge: 0 - Don't create new pods until old ones are terminated (prevents memory/CPU exhaustion)
+  # maxUnavailable: 1 - Allow 1 pod to be unavailable during update (maintains service availability)
+  # Note: BACKEND_KUBE_REPLICA_COUNT can be set via environment variable (e.g., in .env) or Terraform output (defaults to 2)
+  # This ensures old pods are deleted before new ones are created, preventing "Insufficient memory" errors
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: fru-api

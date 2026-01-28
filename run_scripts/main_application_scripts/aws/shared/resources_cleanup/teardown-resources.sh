@@ -261,8 +261,9 @@ else
 fi
 echo ""
 
-# Confirmation (unless --force or --dry-run)
-if [ "$DRY_RUN" = "false" ] && [ "$SKIP_CONFIRMATION" = "false" ]; then
+# Confirmation (unless --force, --dry-run, or PREEMPT=true)
+# When PREEMPT is enabled (run.sh --preempt), we want fully non-interactive teardown.
+if [ "$DRY_RUN" = "false" ] && [ "$SKIP_CONFIRMATION" = "false" ] && [ "${PREEMPT:-false}" != "true" ]; then
     log_warning "This action cannot be undone!"
     log_warning "All infrastructure for environment '$ENVIRONMENT' will be destroyed."
     echo ""

@@ -191,6 +191,12 @@ variable "aurora_security_group_id" {
   default     = null
 }
 
+variable "api_replicas" {
+  type        = number
+  description = "Number of replicas for the API deployment"
+  default     = 2
+}
+
 variable "tags" {
   type        = map(string)
   description = "Common tags"

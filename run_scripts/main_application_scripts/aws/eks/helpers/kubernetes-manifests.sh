@@ -317,6 +317,20 @@ generate_kubernetes_manifests() {
                     export INGRESS_HOST="${INGRESS_HOST:-}"
                 fi
                 
+                # Read API replicas from Terraform output (optional, defaults to 2)
+                local api_replicas
+                if api_replicas=$(terragrunt_output_with_timeout "$eks_terraform_dir" "api_replicas" 120 "$aws_profile"); then
+                    if [ -n "$api_replicas" ] && [ "$api_replicas" != "null" ]; then
+                        export BACKEND_KUBE_REPLICA_COUNT="$api_replicas"
+                        log_info "Using API replicas from Terraform: $BACKEND_KUBE_REPLICA_COUNT"
+                    else
+                        export BACKEND_KUBE_REPLICA_COUNT="${BACKEND_KUBE_REPLICA_COUNT:-2}"
+                    fi
+                else
+                    log_warning "Could not fetch api_replicas from Terraform (timeout or error), using default: 2"
+                    export BACKEND_KUBE_REPLICA_COUNT="${BACKEND_KUBE_REPLICA_COUNT:-2}"
+                fi
+                
                 # Read CORS origin (cloudfront_domain_name) (with timeout to prevent hanging)
                 local cors_origin
                 if cors_origin=$(terragrunt_output_with_timeout "$eks_terraform_dir" "cloudfront_domain_name" 120 "$aws_profile"); then
@@ -412,6 +426,8 @@ generate_kubernetes_manifests() {
             # CONTAINER_IMAGE should be set by the calling script (apply_kubernetes_manifests)
             # If not set, export empty string (will be set later in apply_kubernetes_manifests)
             export CONTAINER_IMAGE="${CONTAINER_IMAGE:-}"
+            # BACKEND_KUBE_REPLICA_COUNT can be set via environment variable (e.g., in .env) or Terraform output (defaults to 2)
+            export BACKEND_KUBE_REPLICA_COUNT="${BACKEND_KUBE_REPLICA_COUNT:-2}"
             "$envsubst_cmd" < "$deployment_template" > "$deployment_output"
             log_success "Deployment generated: deployment-generated.yaml"
         else
@@ -906,6 +922,7 @@ apply_kubernetes_manifests() {
         log_info "Using container image: $container_image"
         # Export CONTAINER_IMAGE so generate_kubernetes_manifests can use it
         export CONTAINER_IMAGE="$container_image"
+        export BACKEND_KUBE_REPLICA_COUNT="${BACKEND_KUBE_REPLICA_COUNT:-2}"
     fi
     
     # Generate ConfigMap, Secret, and Deployment from templates
@@ -930,6 +947,7 @@ apply_kubernetes_manifests() {
                     envsubst_cmd=$(find_envsubst)
                     if [ -n "$envsubst_cmd" ]; then
                         export CONTAINER_IMAGE="$container_image"
+        export BACKEND_KUBE_REPLICA_COUNT="${BACKEND_KUBE_REPLICA_COUNT:-2}"
                         "$envsubst_cmd" < "$deployment_template" > "$deployment_output"
                         log_success "Deployment regenerated with image: $container_image"
                     else
@@ -1221,6 +1239,8 @@ PYTHON_SCRIPT
                 envsubst_cmd=$(find_envsubst)
                 if [ -n "$envsubst_cmd" ]; then
                     export CONTAINER_IMAGE="$container_image"
+        export BACKEND_KUBE_REPLICA_COUNT="${BACKEND_KUBE_REPLICA_COUNT:-2}"
+                    export BACKEND_KUBE_REPLICA_COUNT="${BACKEND_KUBE_REPLICA_COUNT:-2}"
                     "$envsubst_cmd" < "$yaml_file" | kubectl apply --dry-run=client -f - 2>&1
                 else
                     sed "s|\${CONTAINER_IMAGE}|$container_image|g; s|<CONTAINER_IMAGE>|$container_image|g" "$yaml_file" | kubectl apply --dry-run=client -f - 2>&1
@@ -1252,6 +1272,7 @@ PYTHON_SCRIPT
                 envsubst_cmd=$(find_envsubst)
                 if [ -n "$envsubst_cmd" ]; then
                     export CONTAINER_IMAGE="$container_image"
+        export BACKEND_KUBE_REPLICA_COUNT="${BACKEND_KUBE_REPLICA_COUNT:-2}"
                     if ! "$envsubst_cmd" < "$yaml_file" > "$temp_file" 2>&1; then
                         log_error "Failed to process $manifest_name with envsubst"
                         rm -f "$temp_file"
@@ -1275,6 +1296,24 @@ PYTHON_SCRIPT
             local resource_kind=$(grep -E "^kind:" "$temp_file" | head -1 | awk '{print $2}' || echo "")
             local resource_name=$(grep -E "^  name:" "$temp_file" | head -1 | awk '{print $2}' || echo "")
             local resource_namespace=$(grep -E "^  namespace:" "$temp_file" | head -1 | awk '{print $2}' || echo "default")
+            
+            # Pre-apply hook: For deployments, check for pending pods that might indicate resource contention
+            # The deployment strategy (maxSurge: 0, maxUnavailable: 1) handles pod termination order,
+            # but we can proactively help if we detect resource issues
+            if [ "$resource_kind" = "Deployment" ] && [ -n "$resource_name" ] && [ -n "$resource_namespace" ]; then
+                # Check if deployment already exists
+                if kubectl get deployment "$resource_name" -n "$resource_namespace" >/dev/null 2>&1; then
+                    # Check for pending pods (might indicate resource contention)
+                    local pending_pods
+                    pending_pods=$(kubectl get pods -n "$resource_namespace" -l app="$resource_name" --field-selector=status.phase=Pending --no-headers 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+                    
+                    if [ "$pending_pods" -gt 0 ]; then
+                        log_warning "Found $pending_pods pending pod(s) for deployment $resource_name - may indicate resource contention"
+                        log_info "Deployment strategy (maxSurge: 0) will ensure old pods terminate before new ones start"
+                        log_info "If pods remain pending, old replicasets may need to be scaled down manually"
+                    fi
+                fi
+            fi
             
             # Try kubectl apply (without problematic pipes)
             # Ensure AWS_PROFILE is still set right before kubectl call (may have been reset)

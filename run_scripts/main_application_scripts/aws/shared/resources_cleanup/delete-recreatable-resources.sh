@@ -109,7 +109,9 @@ STEP_DURATIONS_VPC=0
 TOTAL_START_TIME=$(date +%s)
 
 # Confirmation prompt
-if [ "$DRY_RUN" = "false" ] && [ "$SKIP_CONFIRMATION" = "false" ]; then
+# When PREEMPT=true (run.sh --preempt), skip interactive confirmation to allow
+# fully non-interactive teardown from the orchestrator.
+if [ "$DRY_RUN" = "false" ] && [ "$SKIP_CONFIRMATION" = "false" ] && [ "${PREEMPT:-false}" != "true" ]; then
     log_warning "This will DELETE AWS resources that can be recreated:"
     log_warning "  - ECS clusters, services, task definitions"
     log_warning "  - ECR repositories"

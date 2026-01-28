@@ -127,14 +127,17 @@ stop_eks_services() {
     # Delete deployments
     local deleted_deployments
     deleted_deployments=$(kubectl delete deployment --all --grace-period=0 2>/dev/null | grep -c "deleted" || echo "0")
-    if [ "${deleted_deployments:-0}" -gt 0 ]; then
+    # Safety: ensure we have a clean integer value (avoid "0 0" / non-numeric cases)
+    deleted_deployments=$(printf '%s\n' "$deleted_deployments" | awk 'NR==1 { if ($1 ~ /^[0-9]+$/) print $1; else print 0 }')
+    if [ "$deleted_deployments" -gt 0 ]; then
         log_info "    Deleted $deleted_deployments deployment(s)"
     fi
     
     # Delete services (except kubernetes service)
     local deleted_services
     deleted_services=$(kubectl delete service --all --ignore-not-found 2>/dev/null | grep -c "deleted" || echo "0")
-    if [ "${deleted_services:-0}" -gt 0 ]; then
+    deleted_services=$(printf '%s\n' "$deleted_services" | awk 'NR==1 { if ($1 ~ /^[0-9]+$/) print $1; else print 0 }')
+    if [ "$deleted_services" -gt 0 ]; then
         log_info "    Deleted $deleted_services service(s)"
     fi
     

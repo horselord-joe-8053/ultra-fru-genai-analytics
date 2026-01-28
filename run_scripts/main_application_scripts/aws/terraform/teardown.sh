@@ -82,13 +82,25 @@ teardown_terragrunt() {
             
             log_warning "Terragrunt will DESTROY AWS resources in application layer"
             log_warning "This action cannot be undone!"
-            read -p "Do you want to proceed with terragrunt destroy? (yes/no): " confirm
+            # When PREEMPT=true (run.sh --preempt), auto-confirm to keep flow non-interactive.
+            if [ "${PREEMPT:-false}" = "true" ]; then
+                confirm="yes"
+                log_info "PREEMPT=true: auto-confirming terragrunt destroy for ECS layer"
+            else
+                read -p "Do you want to proceed with terragrunt destroy? (yes/no): " confirm
+            fi
             
             if [ "$confirm" = "yes" ]; then
                 log_info "Destroying application layer..."
-                terragrunt destroy || {
-                    log_warning "Destroy failed or no resources to destroy (idempotent)"
-                }
+                if [ "${PREEMPT:-false}" = "true" ]; then
+                    terragrunt destroy --terragrunt-non-interactive || {
+                        log_warning "Destroy failed or no resources to destroy (idempotent)"
+                    }
+                else
+                    terragrunt destroy || {
+                        log_warning "Destroy failed or no resources to destroy (idempotent)"
+                    }
+                fi
                 log_success "ECS layer destroyed!"
             else
                 log_info "ECS layer teardown cancelled"
@@ -114,13 +126,24 @@ teardown_terragrunt() {
             log_warning "Terragrunt will DESTROY AWS resources in infrastructure layer"
             log_warning "This includes: VPC, Aurora database, IAM roles, Secrets Manager"
             log_warning "This action cannot be undone!"
-            read -p "Do you want to proceed with terragrunt destroy? (yes/no): " confirm
+            if [ "${PREEMPT:-false}" = "true" ]; then
+                confirm="yes"
+                log_info "PREEMPT=true: auto-confirming terragrunt destroy for infrastructure layer"
+            else
+                read -p "Do you want to proceed with terragrunt destroy? (yes/no): " confirm
+            fi
             
             if [ "$confirm" = "yes" ]; then
                 log_info "Destroying infrastructure layer..."
-                terragrunt destroy || {
-                    log_warning "Destroy failed or no resources to destroy (idempotent)"
-                }
+                if [ "${PREEMPT:-false}" = "true" ]; then
+                    terragrunt destroy --terragrunt-non-interactive || {
+                        log_warning "Destroy failed or no resources to destroy (idempotent)"
+                    }
+                else
+                    terragrunt destroy || {
+                        log_warning "Destroy failed or no resources to destroy (idempotent)"
+                    }
+                fi
                 log_success "Infrastructure layer destroyed!"
             else
                 log_info "Infrastructure layer teardown cancelled"
