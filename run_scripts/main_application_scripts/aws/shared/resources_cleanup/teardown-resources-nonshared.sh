@@ -1,14 +1,13 @@
 #!/bin/bash
-# Complete infrastructure destruction - leaves blank slate for fresh Terraform apply
+# Destroy non-shared infrastructure (container-type specific) - preserves shared infrastructure
 #
 # SYNOPSIS:
-#   ./teardown-resources.sh <ENVIRONMENT> --container-type <ecs|eks> [OPTIONS]
+#   ./teardown-resources-nonshared.sh <ENVIRONMENT> --container-type <ecs|eks> [OPTIONS]
 #
 # DESCRIPTION:
-#   This script completely destroys AWS infrastructure for a specified environment,
-#   handling dependencies and resource deletion in the correct order to prevent
-#   timeouts and ensure clean teardown. It also optionally cleans up local Docker
-#   images that were built for ECR push.
+#   This script destroys AWS infrastructure for a specific container type (ECS or EKS),
+#   while preserving shared infrastructure (VPC, Aurora, IAM). This allows tearing down
+#   one container orchestrator without affecting the other or shared resources.
 #
 #   REQUIRED: --container-type parameter (ecs or eks) - no auto-detection
 #
@@ -41,20 +40,10 @@
 #      - Handles both regular and versioned objects
 #      - Speeds up Terraform destroy (Terraform cannot delete non-empty buckets)
 #
-#   2.5.1. Wait for VPC Endpoints
-#      - Waits for VPC endpoints to fully delete (up to 5 minutes)
-#      - Waits for network interfaces (ENIs) in private subnets to clean up (up to 3 minutes)
-#      - Prevents subnet deletion timeouts from lingering ENIs
-#
-#   2.5.2. Wait for Aurora Cluster
-#      - Waits for Aurora cluster and instances to fully delete (up to 15 minutes)
-#      - Aurora deletion can take 10-20+ minutes (normal AWS behavior)
-#      - Prevents Terraform timeout on subnet deletion (subnets blocked by DB subnet group)
-#
-#   3. Destroy Terraform Infrastructure
-#      - Destroys application layer (ECS/EKS, ALB, Frontend)
-#      - Destroys infrastructure layer (VPC, Aurora, IAM, Secrets Manager)
-#      - Handles dependency ordering within each layer
+#   3. Destroy Terraform Infrastructure (Container-Type Specific Only)
+#      - Destroys ONLY the specified container-type layer (ecs OR eks)
+#      - Preserves shared infrastructure layer (VPC, Aurora, IAM, Secrets Manager)
+#      - Handles dependency ordering within the container-type layer
 #
 #   4. Clean Up Local Docker Images
 #      - Removes images matching pattern: fru-api:*
@@ -94,8 +83,9 @@
 #   1  Failure - Error during teardown or invalid arguments
 #
 # WARNING:
-#   This script will DESTROY ALL infrastructure for the specified environment!
-#   - All AWS resources (VPC, Aurora, ECS/EKS, ALB, S3, etc.) will be permanently deleted
+#   This script will DESTROY container-type specific infrastructure!
+#   - ECS/EKS resources, ALB, Frontend (for the specified container-type) will be permanently deleted
+#   - Shared infrastructure (VPC, Aurora, IAM) will be PRESERVED
 #   - This action cannot be undone
 #   - Use --dry-run to preview changes before actual destruction
 #   - Use --clean-local-only to skip AWS destruction and only clean local images
@@ -165,18 +155,17 @@ while [[ $# -gt 0 ]]; do
             cat << EOF
 Usage: $0 <environment> --container-type <ecs|eks> [options...]
 
-Complete infrastructure destruction - leaves blank slate for fresh Terraform apply.
+Destroy container-type specific infrastructure while preserving shared resources.
 
-This script destroys AWS infrastructure in the correct dependency order:
-1. Stops ECS/EKS services and all running tasks
+This script destroys AWS infrastructure for the specified container type in the correct dependency order:
+1. Stops ECS/EKS services and all running tasks (for specified container-type)
 2. Empties S3 buckets (before Terraform destroy)
-3. Waits for VPC endpoints and network interfaces to delete
-4. Waits for Aurora cluster to fully delete (can take 10-20+ minutes)
-5. Destroys Terraform infrastructure (VPC, Aurora, ECS/EKS, ALB, etc.)
-6. Cleans up local Docker images (built locally and pushed to ECR)
-7. Cleans up orphaned AWS resources (S3, ECR, ECS task definitions)
+3. Destroys Terraform infrastructure (ECS/EKS layer only - preserves VPC, Aurora, IAM)
+4. Cleans up local Docker images (built locally and pushed to ECR)
+5. Cleans up orphaned AWS resources (S3, ECR, ECS task definitions)
 
-WARNING: This will DESTROY ALL infrastructure for the specified environment!
+WARNING: This will DESTROY $CONTAINER_TYPE infrastructure for the specified environment!
+Shared infrastructure (VPC, Aurora, IAM) will be PRESERVED.
 
 Required Arguments:
   <environment>         Environment name (dev, staging, prod) - defaults to 'dev'
@@ -208,8 +197,8 @@ Notes:
   - By default, this script requires confirmation before destroying and cleans AWS resources.
   - Use --force to skip confirmation prompts.
   - Use --clean-local-only to skip AWS teardown and only clean local Docker images.
-  - Aurora deletion can take 10-20+ minutes (this is normal AWS behavior).
-  - The script waits for dependencies (VPC endpoints, Aurora) before proceeding to prevent timeouts.
+  - Shared infrastructure (VPC, Aurora, IAM) is preserved - only container-type layer is destroyed.
+  - This allows tearing down ECS without affecting EKS (or vice versa).
 
 EOF
             exit 0
@@ -246,9 +235,10 @@ if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
 fi
 # Use AWS_ACCOUNT_ID directly (no need for separate ACCOUNT_ID variable)
 
-log_step "Infrastructure Destruction"
+log_step "Non-Shared Infrastructure Destruction"
 log_warning "════════════════════════════════════════════════════════════════"
-log_warning "WARNING: This will DESTROY ALL infrastructure for $ENVIRONMENT"
+log_warning "WARNING: This will DESTROY $CONTAINER_TYPE infrastructure for $ENVIRONMENT"
+log_warning "Shared infrastructure (VPC, Aurora, IAM) will be PRESERVED"
 log_warning "════════════════════════════════════════════════════════════════"
 log_info "Account ID: $AWS_ACCOUNT_ID"
 log_info "Region: $AWS_REGION"
@@ -265,7 +255,8 @@ echo ""
 # When PREEMPT is enabled (run.sh --preempt), we want fully non-interactive teardown.
 if [ "$DRY_RUN" = "false" ] && [ "$SKIP_CONFIRMATION" = "false" ] && [ "${PREEMPT:-false}" != "true" ]; then
     log_warning "This action cannot be undone!"
-    log_warning "All infrastructure for environment '$ENVIRONMENT' will be destroyed."
+    log_warning "$CONTAINER_TYPE infrastructure for environment '$ENVIRONMENT' will be destroyed."
+    log_info "Shared infrastructure (VPC, Aurora, IAM) will be preserved."
     echo ""
     read -p "Type 'yes' to confirm destruction: " confirm
     if [ "$confirm" != "yes" ]; then
@@ -650,17 +641,18 @@ wait_for_aurora_deletion() {
 # - Steps 2.5.1-2.5.2 ensure VPC endpoints and Aurora are deleted first
 # - Terraform handles dependency ordering within each layer
 terraform_destroy() {
-    log_step "Substep 3: Destroying Terraform Infrastructure"
+    log_step "Substep 3: Destroying Terraform Infrastructure ($CONTAINER_TYPE layer only)"
     
     if [ "$DRY_RUN" = "true" ]; then
-        log_info "[DRY-RUN] Would run: terraform/teardown.sh $ENVIRONMENT all"
-        log_info "[DRY-RUN] This would destroy all Terraform-managed infrastructure"
+        log_info "[DRY-RUN] Would run: terraform/teardown.sh $ENVIRONMENT $CONTAINER_TYPE"
+        log_info "[DRY-RUN] This would destroy $CONTAINER_TYPE layer only (shared infrastructure preserved)"
     else
-        log_info "Calling Terraform teardown..."
+        log_info "Calling Terraform teardown for $CONTAINER_TYPE layer..."
+        log_info "Shared infrastructure (VPC, Aurora, IAM) will be preserved"
         local terraform_teardown_script="$REPO_ROOT/run_scripts/main_application_scripts/aws/terraform/teardown.sh"
         if [ -f "$terraform_teardown_script" ]; then
-            if "$terraform_teardown_script" "$ENVIRONMENT" "all"; then
-                log_success "Terraform infrastructure destroyed"
+            if "$terraform_teardown_script" "$ENVIRONMENT" "$CONTAINER_TYPE"; then
+                log_success "Terraform infrastructure destroyed ($CONTAINER_TYPE layer)"
             else
                 log_warning "Terraform teardown had issues (may have been partially destroyed)"
             fi
@@ -866,20 +858,9 @@ main() {
         failed=true
     fi
     
-    # Step 2.5.1: Wait for VPC endpoints and network interfaces to delete
-    # VPC endpoints create network interfaces (ENIs) in private subnets that block deletion
-    if ! wait_for_vpc_endpoints_deletion; then
-        log_warning "VPC endpoints check had issues (may still be deleting)"
-    fi
-    
-    # Step 2.5.2: Wait for Aurora deletion if it exists
-    # This prevents Terraform destroy from timing out on subnet deletion
-    # (Aurora deletion can take 10-20+ minutes, and subnets can't be deleted
-    # until DB subnet group is deleted, which depends on Aurora cluster deletion)
-    if ! wait_for_aurora_deletion; then
-        log_warning "Aurora deletion check had issues (may still be deleting)"
-        log_info "Terraform destroy will proceed, but may timeout on subnet deletion if Aurora is still deleting"
-    fi
+    # Note: Steps 2.5.1-2.5.2 (VPC/Aurora waits) are skipped for non-shared teardown
+    # These are only needed when destroying shared infrastructure (VPC, Aurora)
+    # Since we're preserving shared infra, we don't need to wait for VPC/Aurora deletion
     
     if ! terraform_destroy; then
         failed=true
@@ -910,10 +891,11 @@ main() {
             log_warning "Destruction completed with some issues"
             log_info "Review the output above for details"
         else
-            log_success "Infrastructure destruction completed!"
+            log_success "Non-shared infrastructure destruction completed!"
             log_info ""
-            log_info "All resources for environment '$ENVIRONMENT' have been destroyed"
-            log_info "You can now run a fresh Terraform apply to recreate infrastructure"
+            log_info "$CONTAINER_TYPE resources for environment '$ENVIRONMENT' have been destroyed"
+            log_info "Shared infrastructure (VPC, Aurora, IAM) has been preserved"
+            log_info "You can now run a fresh Terraform apply to recreate $CONTAINER_TYPE infrastructure"
         fi
     fi
     log_info "════════════════════════════════════════════════════════════════"

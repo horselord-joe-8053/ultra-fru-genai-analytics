@@ -95,7 +95,7 @@
 #
 # --preempt
 #   Destroy all existing AWS infrastructure before deployment (complete teardown).
-#   Executes Phase 0: Step 0.5 - calls teardown-resources.sh to:
+#   Executes Phase 0: Step 0.5 - calls teardown-resources-all.sh to:
 #   - Stop ECS/EKS services (scale to 0)
 #   - Empty S3 buckets
 #   - Destroy Terraform infrastructure
@@ -1110,7 +1110,7 @@ main() {
             fi
             
             # Pass CONTAINER_TYPE explicitly to teardown (required parameter)
-            local destroy_cmd="$SCRIPT_DIR/shared/resources_cleanup/teardown-resources.sh $ENVIRONMENT --container-type $CONTAINER_TYPE"
+            local destroy_cmd="$SCRIPT_DIR/shared/resources_cleanup/teardown-resources-all.sh $ENVIRONMENT --container-type $CONTAINER_TYPE"
             # --dry-run and --force are NOT mutually exclusive
             # --dry-run: preview what would be destroyed
             # --force: skip confirmation prompts

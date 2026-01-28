@@ -4,12 +4,13 @@
 # Usage: ./run.sh [options...]
 #
 # Options:
+#   --container-type        → Container orchestrator type: kube (Kubernetes) or nonkube (Docker Compose, default)
 #   --skip-frontend         → Skip frontend development server startup
 #   --skip-data-load        → Skip loading data into database
 #   --skip-data-lake        → Skip data-lake setup even if analytics scheduler is enabled
 #   --preempt               → Destroy all local resources before setup (complete teardown and fresh rebuild)
-#                             Executes Phase 0: Step 0.3 - calls teardown-resources.sh to:
-#                             - Stop Docker services and frontend dev server
+#                             Executes Phase 0: Step 0.3 - calls teardown-resources-all.sh to:
+#                             - Stop Docker services and frontend dev server (nonkube) or Kubernetes resources (kube)
 #                             - Remove Delta tables
 #                             - Clean up Docker resources (containers, volumes, images)
 #                             Database is preserved by default (use --reset-db in teardown script for full reset)
@@ -31,6 +32,7 @@ load_env_file || true
 log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (local/run.sh)"
 
 # Parse command line arguments
+CONTAINER_TYPE="nonkube"  # Default: Docker Compose
 SKIP_FRONTEND=false
 SKIP_DATA_LOAD=false
 SKIP_DATA_LAKE=false
@@ -39,6 +41,19 @@ FORCE_REFRESH_DATA=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --container-type)
+            if [ $# -ge 2 ]; then
+                CONTAINER_TYPE="$2"
+                if [[ "$CONTAINER_TYPE" != "kube" && "$CONTAINER_TYPE" != "nonkube" ]]; then
+                    log_error "Invalid container type: $CONTAINER_TYPE (must be kube or nonkube)"
+                    exit 1
+                fi
+                shift 2
+            else
+                log_error "--container-type requires a value (kube or nonkube)"
+                exit 1
+            fi
+            ;;
         --skip-frontend)
             SKIP_FRONTEND=true
             shift
@@ -63,14 +78,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             log_error "Unknown option: $1"
-            log_info "Usage: $0 [--skip-frontend] [--skip-data-load] [--skip-data-lake] [--preempt] [--force-refresh-data]"
+            log_info "Usage: $0 [--container-type kube|nonkube] [--skip-frontend] [--skip-data-load] [--skip-data-lake] [--preempt] [--force-refresh-data]"
             exit 1
             ;;
     esac
 done
 
 # Export flags for sub-scripts
-export FORCE_REFRESH_DATA
+export FORCE_REFRESH_DATA CONTAINER_TYPE PREEMPT
 
 # Determine if data-lake setup is needed (consistent with AWS)
 # Priority order:
@@ -187,7 +202,7 @@ main() {
         fi
         echo ""
         
-        local teardown_cmd="$SCRIPT_DIR/shared/resources_cleanup/teardown-resources.sh"
+        local teardown_cmd="$SCRIPT_DIR/shared/resources_cleanup/teardown-resources-all.sh --container-type $CONTAINER_TYPE"
         if [ "${DRY_RUN:-false}" = "true" ]; then
             teardown_cmd="$teardown_cmd --clean-all --dry-run"
         else
@@ -263,27 +278,69 @@ main() {
     # Phase 2: Infrastructure Setup
     # ============================================================================
     perf_phase_start 2 "Infrastructure Setup"
-    perf_step_start 2 "2.1" "Starting Docker services"
-    step_start_time=$(date +%s)
-    log_step "Phase 2: Step 2.1 - Step ${current_step}/${total_steps}: Starting Docker services"
-    # Use --force to ensure containers are recreated with latest .env variables
-    # In PREEMPT mode, also pass --build-api to force image rebuild after teardown.
-    local start_cmd="$SCRIPT_DIR/start-services.sh --force"
-    if [ "$PREEMPT" = "true" ]; then
-        log_info "PREEMPT mode: Forcing API image rebuild via start-services.sh --build-api"
-        start_cmd="$start_cmd --build-api"
-    fi
-    if ! $start_cmd; then
+    
+    if [ "$CONTAINER_TYPE" = "kube" ]; then
+        # Kubernetes path: Setup local K8s cluster and deploy
+        perf_step_start 2 "2.1" "Setting up local Kubernetes cluster"
+        step_start_time=$(date +%s)
+        log_step "Phase 2: Step 2.1 - Step ${current_step}/${total_steps}: Setting up local Kubernetes cluster"
+        
+        # Default to minikube if not specified
+        K8S_TYPE="${K8S_TYPE:-minikube}"
+        export K8S_TYPE
+        
+        if ! "$SCRIPT_DIR/kube/setup.sh" "$K8S_TYPE"; then
+            elapsed=$(( $(date +%s) - step_start_time ))
+            perf_step_end 2 "2.1" "FAILED" "Kubernetes cluster setup failed"
+            log_error "Phase 2: Step 2.1 - Step ${current_step}/${total_steps} FAILED: Kubernetes cluster setup failed (took $(format_elapsed_time $elapsed))"
+            exit 1
+        fi
         elapsed=$(( $(date +%s) - step_start_time ))
-        perf_step_end 2 "2.1" "FAILED" "Docker services startup failed"
-        log_error "Phase 2: Step 2.1 - Step ${current_step}/${total_steps} FAILED: Docker services startup failed (took $(format_elapsed_time $elapsed))"
-        exit 1
+        perf_step_end 2 "2.1" "SUCCESS" "Kubernetes cluster ready"
+        log_success "Phase 2: Step 2.1 - Step ${current_step}/${total_steps} PASSED: Kubernetes cluster ready (took $(format_elapsed_time $elapsed))"
+        current_step=$((current_step + 1))
+        echo ""
+        
+        perf_step_start 2 "2.2" "Installing NGINX Ingress Controller"
+        step_start_time=$(date +%s)
+        log_step "Phase 2: Step 2.2 - Step ${current_step}/${total_steps}: Installing NGINX Ingress Controller"
+        if ! "$SCRIPT_DIR/kube/install-ingress.sh" "$K8S_TYPE"; then
+            elapsed=$(( $(date +%s) - step_start_time ))
+            perf_step_end 2 "2.2" "FAILED" "Ingress installation failed"
+            log_error "Phase 2: Step 2.2 - Step ${current_step}/${total_steps} FAILED: Ingress installation failed (took $(format_elapsed_time $elapsed))"
+            exit 1
+        fi
+        elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 2 "2.2" "SUCCESS" "Ingress controller installed"
+        log_success "Phase 2: Step 2.2 - Step ${current_step}/${total_steps} PASSED: Ingress controller installed (took $(format_elapsed_time $elapsed))"
+        current_step=$((current_step + 1))
+        echo ""
+        
+        # Kubernetes deployment will happen in Phase 5
+    else
+        # Docker Compose path (nonkube - default)
+        perf_step_start 2 "2.1" "Starting Docker services"
+        step_start_time=$(date +%s)
+        log_step "Phase 2: Step 2.1 - Step ${current_step}/${total_steps}: Starting Docker services"
+        # Use --force to ensure containers are recreated with latest .env variables
+        # In PREEMPT mode, also pass --build-api to force image rebuild after teardown.
+        local start_cmd="$SCRIPT_DIR/start-services.sh --force"
+        if [ "$PREEMPT" = "true" ]; then
+            log_info "PREEMPT mode: Forcing API image rebuild via start-services.sh --build-api"
+            start_cmd="$start_cmd --build-api"
+        fi
+        if ! $start_cmd; then
+            elapsed=$(( $(date +%s) - step_start_time ))
+            perf_step_end 2 "2.1" "FAILED" "Docker services startup failed"
+            log_error "Phase 2: Step 2.1 - Step ${current_step}/${total_steps} FAILED: Docker services startup failed (took $(format_elapsed_time $elapsed))"
+            exit 1
+        fi
+        elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 2 "2.1" "SUCCESS" "Docker services running"
+        log_success "Phase 2: Step 2.1 - Step ${current_step}/${total_steps} PASSED: Docker services running (took $(format_elapsed_time $elapsed))"
+        current_step=$((current_step + 1))
+        echo ""
     fi
-    elapsed=$(( $(date +%s) - step_start_time ))
-    perf_step_end 2 "2.1" "SUCCESS" "Docker services running"
-    log_success "Phase 2: Step 2.1 - Step ${current_step}/${total_steps} PASSED: Docker services running (took $(format_elapsed_time $elapsed))"
-    current_step=$((current_step + 1))
-    echo ""
     perf_phase_end 2
     
     # ============================================================================
@@ -357,7 +414,7 @@ main() {
         log_step "Phase 4: Step 4.1 - Step ${current_step}/${total_steps}: Setting up data-lake (Delta table using Docker Spark)"
         log_info "Spark runs inside the Docker container (no local Spark installation needed)"
         local setup_cmd="$REPO_ROOT/run_scripts/spark_delta-lake_scripts/local/delta-lake/setup-and-verify.sh"
-        # Note: --preempt flag is already handled in Phase 0: Step 0.3 (teardown-resources.sh)
+        # Note: --preempt flag is already handled in Phase 0: Step 0.3 (teardown-resources-all.sh)
         # Delta tables were already removed if --preempt was set, so no need to pass it again
         if [ "$FORCE_REFRESH_DATA" = "true" ]; then
             setup_cmd="$setup_cmd --force-refresh-data"
@@ -389,7 +446,27 @@ main() {
     # (Phase 5: Steps 5.1, 5.3 are for AWS deployments only)
     # ============================================================================
     
+    if [ "$CONTAINER_TYPE" = "kube" ]; then
+        # Step 5.1: Deploy application to Kubernetes
+        perf_step_start 5 "5.1" "Deploying application to Kubernetes"
+        step_start_time=$(date +%s)
+        log_step "Phase 5: Step 5.1 - Step ${current_step}/${total_steps}: Deploying application to Kubernetes"
+        
+        if ! "$SCRIPT_DIR/deploy.sh" "${K8S_TYPE:-minikube}"; then
+            elapsed=$(( $(date +%s) - step_start_time ))
+            perf_step_end 5 "5.1" "FAILED" "Kubernetes deployment failed"
+            log_error "Phase 5: Step 5.1 - Step ${current_step}/${total_steps} FAILED: Kubernetes deployment failed (took $(format_elapsed_time $elapsed))"
+            exit 1
+        fi
+        elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 5 "5.1" "SUCCESS" "Application deployed to Kubernetes"
+        log_success "Phase 5: Step 5.1 - Step ${current_step}/${total_steps} PASSED: Application deployed to Kubernetes (took $(format_elapsed_time $elapsed))"
+        current_step=$((current_step + 1))
+        echo ""
+    fi
+    
     # Step 5.2: Start frontend dev server (optional)
+    # Note: For kube, frontend may be served via Ingress, but dev server can still run for hot-reload
     if [ "$SKIP_FRONTEND" = false ]; then
         perf_step_start 5 "5.2" "Starting frontend development server"
         step_start_time=$(date +%s)

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Complete local environment destruction - leaves blank slate for fresh setup
-# Usage: ./teardown-resources.sh [--force] [--skip-confirmation] [--dry-run] [--reset-db] [--keep-db] [--clean-volumes] [--clean-images] [--clean-cache]
+# Usage: ./teardown-resources-all.sh [--force] [--skip-confirmation] [--dry-run] [--reset-db] [--keep-db] [--clean-volumes] [--clean-images] [--clean-cache] [--container-type kube|nonkube]
 #
 # This script:
 # 1. Stops Docker services and frontend dev server (to release resources)
@@ -25,10 +25,24 @@ KEEP_DB="false"
 CLEAN_VOLUMES="false"
 CLEAN_IMAGES="false"
 CLEAN_CACHE="false"
+CONTAINER_TYPE="${CONTAINER_TYPE:-nonkube}"  # Default to nonkube (Docker Compose)
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --container-type)
+            if [ $# -ge 2 ]; then
+                CONTAINER_TYPE="$2"
+                if [[ "$CONTAINER_TYPE" != "kube" && "$CONTAINER_TYPE" != "nonkube" ]]; then
+                    log_error "Invalid container type: $CONTAINER_TYPE (must be kube or nonkube)"
+                    exit 1
+                fi
+                shift 2
+            else
+                log_error "--container-type requires a value (kube or nonkube)"
+                exit 1
+            fi
+            ;;
         --force)
             FORCE_DELETE="true"
             SKIP_CONFIRMATION="true"
@@ -72,13 +86,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --help|-h)
             cat << EOF
-Usage: $0 [--force] [--skip-confirmation] [--dry-run] [--reset-db] [--keep-db] [--clean-volumes] [--clean-images] [--clean-cache] [--clean-all]
+Usage: $0 [--container-type kube|nonkube] [--force] [--skip-confirmation] [--dry-run] [--reset-db] [--keep-db] [--clean-volumes] [--clean-images] [--clean-cache] [--clean-all]
 
 Complete local environment destruction - leaves blank slate for fresh setup.
 
 WARNING: This will DESTROY ALL local resources!
 
 Options:
+  --container-type      Container orchestrator: kube (Kubernetes) or nonkube (Docker Compose, default)
   --dry-run             Show what would be destroyed without actually destroying (default: false)
   --force               Skip confirmation prompts and actually destroy (default: requires confirmation)
   --skip-confirmation   Alias for --force
@@ -133,6 +148,7 @@ if [ "$DRY_RUN" = "true" ]; then
 else
     log_warning "Mode: DESTRUCTION (resources will be permanently destroyed!)"
 fi
+log_info "Container Type: $CONTAINER_TYPE"
 log_info "Database: $([ "$RESET_DB" = "true" ] && echo "Will be reset" || echo "Will be preserved")"
 log_info "Volumes: $([ "$CLEAN_VOLUMES" = "true" ] && echo "Will be removed" || echo "Will be preserved")"
 log_info "Images: $([ "$CLEAN_IMAGES" = "true" ] && echo "Will be removed" || echo "Will be preserved")"
@@ -164,39 +180,100 @@ fi
 stop_services() {
     log_step "Substep 1: Stopping Services"
     
-    if [ "$DRY_RUN" = "true" ]; then
-        log_info "[DRY-RUN] Would stop Docker Compose services"
-        log_info "[DRY-RUN] Would kill frontend dev server (if running on port 5173)"
-    else
-        # Stop Docker Compose services
-        DOCKER_DIR="$REPO_ROOT/infra/docker"
-        if [ -d "$DOCKER_DIR" ]; then
-            log_info "Stopping Docker Compose services..."
-            cd "$DOCKER_DIR"
-            if docker compose down 2>/dev/null; then
-                log_success "  ✓ Docker services stopped"
+    if [ "$CONTAINER_TYPE" = "kube" ]; then
+        # Kubernetes path: Delete Kubernetes resources
+        if [ "$DRY_RUN" = "true" ]; then
+            log_info "[DRY-RUN] Would delete Kubernetes resources (deployments, services, ingress)"
+            log_info "[DRY-RUN] Would kill frontend dev server (if running on port 5173)"
+        else
+            # Delete Kubernetes resources if kubectl is available
+            if command -v kubectl >/dev/null 2>&1 && kubectl config current-context >/dev/null 2>&1; then
+                log_info "Deleting Kubernetes resources..."
+                
+                # Delete deployments
+                if kubectl delete deployment --all --grace-period=0 2>/dev/null | grep -q "deleted"; then
+                    log_success "  ✓ Kubernetes deployments deleted"
+                else
+                    log_info "    No deployments found or already deleted"
+                fi
+                
+                # Delete services (except kubernetes service)
+                if kubectl delete service --all --ignore-not-found 2>/dev/null | grep -q "deleted"; then
+                    log_success "  ✓ Kubernetes services deleted"
+                else
+                    log_info "    No services found or already deleted"
+                fi
+                
+                # Delete ingress
+                if kubectl delete ingress --all --ignore-not-found 2>/dev/null | grep -q "deleted"; then
+                    log_success "  ✓ Kubernetes ingress deleted"
+                else
+                    log_info "    No ingress found or already deleted"
+                fi
+                
+                # Delete configmaps and secrets (app-specific)
+                if kubectl delete configmap --all --ignore-not-found 2>/dev/null | grep -q "deleted"; then
+                    log_success "  ✓ Kubernetes configmaps deleted"
+                fi
+                if kubectl delete secret --all --ignore-not-found 2>/dev/null | grep -q "deleted"; then
+                    log_success "  ✓ Kubernetes secrets deleted"
+                fi
             else
-                log_warning "    Some services may have already been stopped"
+                log_warning "kubectl not available or not configured - skipping Kubernetes cleanup"
             fi
-        else
-            log_info "Docker directory not found (may already be cleaned)"
+            
+            # Kill frontend dev server (if running)
+            FRONTEND_PID=$(lsof -Pi :5173 -sTCP:LISTEN -t 2>/dev/null || echo "")
+            if [ -n "$FRONTEND_PID" ]; then
+                log_info "Stopping frontend dev server (PID: $FRONTEND_PID)..."
+                kill "$FRONTEND_PID" 2>/dev/null || true
+                sleep 2
+                if kill -0 "$FRONTEND_PID" 2>/dev/null; then
+                    log_warning "    Process still running, force killing..."
+                    kill -9 "$FRONTEND_PID" 2>/dev/null || true
+                    sleep 1
+                fi
+                log_success "  ✓ Frontend dev server stopped"
+            else
+                log_info "Frontend dev server not running"
+            fi
         fi
-        
-        # Kill frontend dev server (if running)
-        FRONTEND_PID=$(lsof -Pi :5173 -sTCP:LISTEN -t 2>/dev/null || echo "")
-        if [ -n "$FRONTEND_PID" ]; then
-            log_info "Stopping frontend dev server (PID: $FRONTEND_PID)..."
-            kill "$FRONTEND_PID" 2>/dev/null || true
-            sleep 2
-            # Force kill if still running
-            if kill -0 "$FRONTEND_PID" 2>/dev/null; then
-                log_warning "    Process still running, force killing..."
-                kill -9 "$FRONTEND_PID" 2>/dev/null || true
-                sleep 1
-            fi
-            log_success "  ✓ Frontend dev server stopped"
+    else
+        # Docker Compose path (nonkube - default)
+        if [ "$DRY_RUN" = "true" ]; then
+            log_info "[DRY-RUN] Would stop Docker Compose services"
+            log_info "[DRY-RUN] Would kill frontend dev server (if running on port 5173)"
         else
-            log_info "Frontend dev server not running"
+            # Stop Docker Compose services
+            DOCKER_DIR="$REPO_ROOT/infra/docker"
+            if [ -d "$DOCKER_DIR" ]; then
+                log_info "Stopping Docker Compose services..."
+                cd "$DOCKER_DIR"
+                if docker compose down 2>/dev/null; then
+                    log_success "  ✓ Docker services stopped"
+                else
+                    log_warning "    Some services may have already been stopped"
+                fi
+            else
+                log_info "Docker directory not found (may already be cleaned)"
+            fi
+            
+            # Kill frontend dev server (if running)
+            FRONTEND_PID=$(lsof -Pi :5173 -sTCP:LISTEN -t 2>/dev/null || echo "")
+            if [ -n "$FRONTEND_PID" ]; then
+                log_info "Stopping frontend dev server (PID: $FRONTEND_PID)..."
+                kill "$FRONTEND_PID" 2>/dev/null || true
+                sleep 2
+                # Force kill if still running
+                if kill -0 "$FRONTEND_PID" 2>/dev/null; then
+                    log_warning "    Process still running, force killing..."
+                    kill -9 "$FRONTEND_PID" 2>/dev/null || true
+                    sleep 1
+                fi
+                log_success "  ✓ Frontend dev server stopped"
+            else
+                log_info "Frontend dev server not running"
+            fi
         fi
     fi
     
