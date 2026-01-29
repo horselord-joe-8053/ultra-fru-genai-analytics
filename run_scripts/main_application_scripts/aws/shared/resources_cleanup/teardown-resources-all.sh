@@ -65,6 +65,7 @@
 #      - Non-critical step (skipped if Docker is not running)
 #
 #   5. Clean Up Orphaned AWS Resources
+#      - Performed by teardown-resources-nonshared.sh (Step 3) after container-type destruction
 #      - Cleans up orphaned S3 buckets (not managed by Terraform)
 #      - Cleans up unused ECR images (old versions not in use)
 #      - Cleans up old ECS task definitions (beyond safety threshold)
@@ -432,11 +433,14 @@ wait_for_vpc_endpoints_deletion() {
     
     if [ -n "$vpc_endpoint_ids" ]; then
         log_info "Found VPC endpoints: $vpc_endpoint_ids"
-        log_info "Waiting for VPC endpoints to fully delete (this may take a few minutes)..."
+        log_info "Waiting briefly for VPC endpoints to delete (bounded wait to avoid long stalls)..."
         
-        local max_wait_minutes=5  # VPC endpoints usually delete in 1-3 minutes
+        # Shorten wait to 2 minutes to avoid long preempt stalls. If endpoints are still
+        # present after this period, Terraform destroy may still see subnet/VPC dependencies,
+        # but we've capped the extra wait time here.
+        local max_wait_minutes=2  # Bounded wait; endpoints often delete within 1-3 minutes
         local wait_attempt=0
-        local wait_attempts=$((max_wait_minutes * 6))  # 5 minutes = 30 * 10 seconds
+        local wait_attempts=$((max_wait_minutes * 6))  # 2 minutes = 12 * 10 seconds
         
         while [ $wait_attempt -lt $wait_attempts ]; do
             local remaining_endpoints
@@ -477,9 +481,11 @@ wait_for_vpc_endpoints_deletion() {
         --output text 2>/dev/null || echo "")
     
     if [ -n "$private_subnet_ids" ]; then
-        local max_wait_minutes=3  # Network interfaces usually clean up quickly after endpoint deletion
+        # Shorten ENI wait to 2 minutes; beyond that, remaining ENIs will be handled
+        # by Terraform or may require manual cleanup if they block VPC deletion.
+        local max_wait_minutes=2  # Bounded wait for ENI cleanup
         local wait_attempt=0
-        local wait_attempts=$((max_wait_minutes * 6))  # 3 minutes = 18 * 10 seconds
+        local wait_attempts=$((max_wait_minutes * 6))  # 2 minutes = 12 * 10 seconds
         
         while [ $wait_attempt -lt $wait_attempts ]; do
             local eni_count=0
@@ -526,7 +532,10 @@ wait_for_vpc_endpoints_deletion() {
 # - Aurora instances take 10-20+ minutes to delete (normal AWS behavior)
 # - DB subnet groups block private subnet deletion until Aurora is fully deleted
 # - Terraform destroy will timeout on subnet deletion if Aurora is still deleting
-# - This step waits up to 15 minutes for Aurora cluster and instances to fully delete
+# - Historically this step waited up to 15 minutes for Aurora to delete, but in practice
+#   that can add significant time to preempt runs. We now use a bounded 2-minute wait
+#   and proceed even if Aurora is still deleting, accepting that Terraform destroy may
+#   see subnet/VPC dependency errors in that case.
 wait_for_aurora_deletion() {
     log_step "Substep 2.5.2: Checking Aurora Cluster Status"
     
@@ -550,11 +559,13 @@ wait_for_aurora_deletion() {
     
     log_info "Aurora cluster found: $cluster_name"
     log_warning "Aurora deletion can take 10-20+ minutes (this is normal AWS behavior)"
-    log_info "Waiting for Aurora cluster and instances to fully delete..."
-    log_info "This prevents Terraform destroy from timing out on subnet deletion"
+    log_info "Waiting briefly (up to 2 minutes) for Aurora cluster and instances to delete..."
+    log_info "If Aurora is still deleting after this, Terraform destroy may still see subnet/VPC dependencies."
     echo ""
     
-    local max_wait_minutes=15  # Wait up to 15 minutes (90 attempts * 10 seconds)
+    # Bounded wait of 2 minutes; beyond this, we proceed and let Terraform handle any
+    # remaining dependencies (or require manual intervention via AWS Console).
+    local max_wait_minutes=2  # Wait up to 2 minutes (12 attempts * 10 seconds)
     local wait_attempt=0
     local wait_attempts=$((max_wait_minutes * 6))  # 15 minutes = 90 * 10 seconds
     
@@ -632,7 +643,8 @@ wait_for_aurora_deletion() {
         log_warning "Aurora may still be deleting. Terraform destroy may timeout on subnet deletion."
         log_warning "You may need to wait manually or delete Aurora cluster via AWS Console."
         echo ""
-        return 1
+        # Do not hard-fail teardown here; proceed with best-effort destroy.
+        return 0
     fi
     
     echo ""
@@ -693,26 +705,47 @@ terraform_destroy_nonshared() {
 terraform_destroy_shared() {
     log_step "Substep 3.5: Destroying Shared Terraform Infrastructure"
     
+    local shared_script="$SCRIPT_DIR/teardown-resources-shared.sh"
+
+    if [ ! -f "$shared_script" ]; then
+        log_error "Shared teardown script not found: $shared_script"
+        return 1
+    fi
+
     if [ "$DRY_RUN" = "true" ]; then
-        log_info "[DRY-RUN] Would run: terraform/teardown.sh $ENVIRONMENT infrastructure"
-        log_info "[DRY-RUN] This would destroy shared infrastructure (VPC, Aurora, IAM)"
+        log_info "[DRY-RUN] Would run: $shared_script $ENVIRONMENT --dry-run"
+        log_info "[DRY-RUN] This would destroy shared infrastructure (VPC, Aurora, IAM, Secrets Manager) and run shared-layer orphan cleanup."
     else
-        log_info "Calling Terraform teardown for shared infrastructure..."
-        log_warning "This will destroy VPC, Aurora, IAM, and other shared resources"
-        local terraform_teardown_script="$REPO_ROOT/run_scripts/main_application_scripts/aws/terraform/teardown.sh"
-        if [ -f "$terraform_teardown_script" ]; then
-            if "$terraform_teardown_script" "$ENVIRONMENT" "infrastructure"; then
-                log_success "Shared Terraform infrastructure destroyed"
-            else
-                log_warning "Shared Terraform teardown had issues (may have been partially destroyed)"
-                return 1
-            fi
+        log_info "Calling shared teardown wrapper for infrastructure layer..."
+        local shared_cmd=("$shared_script" "$ENVIRONMENT")
+
+        # Pass through confirmation/no-interactive behavior
+        if [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ]; then
+            shared_cmd+=(--force)
+        fi
+        if [ "$DRY_RUN" = "true" ]; then
+            shared_cmd+=(--dry-run)
+        fi
+
+        # Export PREEMPT so nested scripts respect non-interactive mode
+        export PREEMPT="${PREEMPT:-false}"
+
+        log_info "Running: ${shared_cmd[*]}"
+        local shared_exit=0
+        "${shared_cmd[@]}" || shared_exit=$?
+
+        if [ "$shared_exit" -eq 0 ]; then
+            log_success "Shared Terraform infrastructure destroyed (via teardown-resources-shared.sh)"
         else
-            log_warning "Terraform teardown script not found at: $terraform_teardown_script"
-            log_info "Skipping Terraform teardown (infrastructure may need manual cleanup)"
+            log_error "Shared teardown failed (exit code: $shared_exit)"
+            log_info "Common causes (see output above for the actual message):"
+            log_info "  - Terraform destroy: lifecycle.prevent_destroy on secrets, dependency errors, or timeouts"
+            log_info "  - Orphan cleanup: S3/ECR/ECS cleanup reported issues"
+            log_info "Review the log lines above from teardown-resources-shared.sh and terraform/teardown.sh for details."
             return 1
         fi
     fi
+
     echo ""
 }
 
@@ -832,50 +865,6 @@ cleanup_local_images() {
 }
 
 # ============================================================================
-# Step 5: Clean Up Orphaned AWS Resources
-# ============================================================================
-# This step cleans up orphaned AWS resources that Terraform might have missed
-# or that were created outside of Terraform (e.g., manually or by other scripts).
-#
-# Resources cleaned (via cleanup-orphaned-resources.sh):
-# - Orphaned S3 buckets (not managed by Terraform, empty or with old data)
-# - Unused ECR images (old image versions not in use)
-# - Old ECS task definitions (not in use, beyond safety threshold)
-#
-# This step uses the cleanup-orphaned-resources.sh helper script which provides
-# safe cleanup with retention policies and protection for in-use resources.
-cleanup_orphaned() {
-    log_step "Substep 5: Cleaning Up Orphaned AWS Resources"
-    
-    # Use CONTAINER_TYPE parameter (no auto-detection)
-    local cluster_name="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
-    local cont_sys="$CONTAINER_TYPE"
-    
-    local cleanup_cmd="$SCRIPT_DIR/helpers/cleanup-orphaned-resources.sh --environment $ENVIRONMENT"
-    if [ -n "$cont_sys" ]; then
-        cleanup_cmd="$cleanup_cmd --cont-sys $cont_sys"
-    fi
-    
-    if [ "$DRY_RUN" = "true" ]; then
-        cleanup_cmd="$cleanup_cmd --dry-run"
-    else
-        cleanup_cmd="$cleanup_cmd --force"
-    fi
-    
-    if [ "$DRY_RUN" = "true" ]; then
-        log_info "[DRY-RUN] Would run: $cleanup_cmd"
-    else
-        log_info "Running cleanup to catch any resources Terraform missed..."
-        if $cleanup_cmd; then
-            log_success "Orphaned resources cleaned up"
-        else
-            log_warning "Cleanup had issues (may have been partially cleaned)"
-        fi
-    fi
-    echo ""
-}
-
-# ============================================================================
 # Main Execution
 # ============================================================================
 main() {
@@ -926,19 +915,25 @@ main() {
     fi
     
     # Step 3: Destroy non-shared infrastructure (container-type layer only)
+    log_step "Step 3: Terraform Destroy (Non-Shared $CONTAINER_TYPE Layer)"
+    log_info "Starting Terraform teardown for $CONTAINER_TYPE layer (application stack: ECS/EKS, ALB, frontend)..."
+    log_info "This may take several minutes depending on the size of the stack."
     if ! terraform_destroy_nonshared; then
         failed=true
     fi
     
     # Step 3.5: Destroy shared infrastructure (VPC, Aurora, IAM)
     # This step destroys shared resources after container-type layer is gone
+    log_step "Step 3.5: Terraform Destroy (Shared Infrastructure)"
+    log_info "Starting Terraform teardown for shared infrastructure (VPC, Aurora, IAM, supporting resources)..."
+    log_info "Aurora and networking teardown can take 10–20+ minutes; logs will appear periodically as AWS completes deletion."
     if ! terraform_destroy_shared; then
         failed=true
     fi
     
-    if ! cleanup_orphaned; then
-        failed=true
-    fi
+    # Note: cleanup_orphaned() is already called by teardown-resources-nonshared.sh (Step 3),
+    # so we don't need to call it again here. The nested script handles orphaned resource cleanup
+    # after container-type layer destruction.
     
     # Step 4: Clean up local Docker images (images built locally and pushed to ECR)
     if ! cleanup_local_images; then

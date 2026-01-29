@@ -52,6 +52,9 @@ logs/
 # Test results
 test/test_results/
 
+# AWS resource removal results (generated JSON)
+run_scripts/main_application_scripts/aws/shared/cli/resource-removal/results/
+
 # AWS/Terraform
 .terraform/
 *.tfstate

@@ -1,7 +1,10 @@
 #!/bin/bash
-# Delete AWS resources that can be quickly recreated
-# This script deletes resources that don't have 30-day recovery windows
-# and can be promptly recreated by Terraform/run.sh
+# Standalone CLI tool: Delete AWS resources that can be quickly recreated
+#
+# This is a standalone utility script (not called by other scripts) for manually
+# cleaning up AWS resources that don't have 30-day recovery windows and can be
+# promptly recreated by Terraform/run.sh. Use this when you need to perform a
+# "nuclear" teardown of all recreatable resources for a specific environment.
 #
 # Resources deleted:
 # - ECS clusters, services, task definitions
@@ -19,6 +22,9 @@
 # Usage: ./delete-recreatable-resources.sh [dev|prod] [--dry-run] [--skip-confirmation]
 #   --dry-run: Show what would be deleted without actually deleting
 #   --skip-confirmation: Skip confirmation prompts
+#
+# Note: For automated teardown via run.sh --preempt, use teardown-resources-all.sh
+#       which calls cleanup-orphaned-resources.sh (selective cleanup) instead.
 
 set -e
 # Note: We use set -e but handle errors gracefully in delete_resource function
@@ -26,7 +32,7 @@ set -e
 # We use || true or if statements to prevent script exit on expected failures
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
 source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 source "$REPO_ROOT/run_scripts/shared/load-image-identifiers.sh"
@@ -425,32 +431,60 @@ delete_ecr_resources() {
         local image_ids
         image_ids=$(aws ecr list-images --repository-name "$repo_name" --profile "$AWS_PROFILE" --region "$AWS_REGION" --query 'imageIds[]' --output json 2>/dev/null || echo "[]")
         if [ "$image_ids" != "[]" ] && [ -n "$image_ids" ]; then
-            aws ecr batch-delete-image \
-                --repository-name "$repo_name" \
-                --image-ids "$image_ids" \
-                --profile "$AWS_PROFILE" \
-                --region "$AWS_REGION" >/dev/null 2>&1 || true
-        fi
-    fi
-    
-    # Delete all images first
-    log_info "Deleting all images in repository: $repo_name"
-    if [ "$DRY_RUN" = "false" ]; then
-        local image_ids
-        image_ids=$(aws ecr list-images --repository-name "$repo_name" --profile "$AWS_PROFILE" --region "$AWS_REGION" --query 'imageIds[]' --output json 2>/dev/null || echo "[]")
-        if [ "$image_ids" != "[]" ] && [ -n "$image_ids" ]; then
-            local image_count=$(echo "$image_ids" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+            # The AWS ECR BatchDeleteImage API enforces a hard limit:
+            #   InvalidParameterException: Invalid parameter at 'imageIds'
+            #   failed to satisfy constraint: 'Member must have length less than or equal to 100'
+            # To respect this, we delete images in chunks of at most 100 imageIds per call.
+            local image_count
+            image_count=$(echo "$image_ids" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
             if [ "$image_count" -gt 0 ]; then
-                if aws ecr batch-delete-image \
-                    --repository-name "$repo_name" \
-                    --image-ids "$image_ids" \
-                    --profile "$AWS_PROFILE" \
-                    --region "$AWS_REGION" >/dev/null 2>&1; then
-                    SUCCESSFUL_DELETIONS+=("ECR images:$repo_name ($image_count images)")
+                local deleted_count=0
+                local start_index=0
+                local chunk_size=100
+                local chunk_json
+                local chunk_len
+                
+                log_info "Found $image_count image(s) in ECR repo $repo_name; deleting in batches of up to $chunk_size to satisfy AWS limits."
+                
+                while [ "$start_index" -lt "$image_count" ]; do
+                    # Build a JSON array slice imageIds[start_index:start_index+chunk_size]
+                    chunk_json=$(printf '%s\n' "$image_ids" | python3 -c "
+import sys, json
+ids = json.load(sys.stdin)
+start = $start_index
+size = $chunk_size
+chunk = ids[start:start+size]
+print(json.dumps(chunk))
+" 2>/dev/null || echo "[]")
+                    
+                    chunk_len=$(printf '%s\n' "$chunk_json" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+                    if [ "$chunk_len" -eq 0 ]; then
+                        break
+                    fi
+                    
+                    log_info "  Deleting batch starting at index $start_index (size: $chunk_len)..."
+                    if aws ecr batch-delete-image \
+                        --repository-name "$repo_name" \
+                        --image-ids "$chunk_json" \
+                        --profile "$AWS_PROFILE" \
+                        --region "$AWS_REGION" >/dev/null 2>&1; then
+                        deleted_count=$((deleted_count + chunk_len))
+                    else
+                        FAILED_DELETIONS+=("ECR images batch:$repo_name (start_index=$start_index,size=$chunk_len)")
+                        log_warning "  ✗ FAILED to delete ECR image batch starting at index $start_index"
+                    fi
+                    
+                    start_index=$((start_index + chunk_size))
+                done
+                
+                if [ "$deleted_count" -gt 0 ]; then
+                    SUCCESSFUL_DELETIONS+=("ECR images:$repo_name ($deleted_count/$image_count images deleted)")
                 else
-                    FAILED_DELETIONS+=("ECR images:$repo_name")
+                    FAILED_DELETIONS+=("ECR images:$repo_name (no images deleted)")
                 fi
             fi
+        else
+            log_info "No images found in ECR repository: $repo_name"
         fi
     else
         SUCCESSFUL_DELETIONS+=("ECR images:$repo_name (dry-run)")

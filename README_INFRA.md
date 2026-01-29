@@ -690,7 +690,7 @@ See `README_RUN.md` for detailed local setup instructions.
 - `guides/deployment_scripts_relationship.md` - Explanation of deployment scripts and their relationships
 
 **AWS Resource Management:**
-- `run_scripts/main_application_scripts/aws/resource-check/find-all-current-aws-resources.sh` - AWS resource inventory script that generates JSON reports of all non-default AWS resources in your account
+- `run_scripts/main_application_scripts/aws/shared/cli/resource-check/find-all-current-aws-resources.sh` - AWS resource inventory script that generates JSON reports of all non-default AWS resources in your account
 
 ---
 

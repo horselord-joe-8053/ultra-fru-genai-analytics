@@ -219,13 +219,16 @@ cleanup_s3_buckets() {
         
         if [ "$versioning_status" = "Enabled" ] || [ "$versioning_status" = "Suspended" ]; then
             log_info "    - Counting versioned objects..."
-            version_count=$(aws s3api list-object-versions --bucket "$bucket" --profile "$AWS_PROFILE" --region "$AWS_REGION" --query 'length(Versions[])' --output text 2>/dev/null || echo "0")
-            delete_markers=$(aws s3api list-object-versions --bucket "$bucket" --profile "$AWS_PROFILE" --region "$AWS_REGION" --query 'length(DeleteMarkers[])' --output text 2>/dev/null || echo "0")
+            # AWS CLI --output text can emit multiple lines; take first line and ensure a single integer for arithmetic.
+            version_count=$(aws s3api list-object-versions --bucket "$bucket" --profile "$AWS_PROFILE" --region "$AWS_REGION" --query 'length(Versions[])' --output text 2>/dev/null | head -1 | tr -cd '0-9' || true)
+            delete_markers=$(aws s3api list-object-versions --bucket "$bucket" --profile "$AWS_PROFILE" --region "$AWS_REGION" --query 'length(DeleteMarkers[])' --output text 2>/dev/null | head -1 | tr -cd '0-9' || true)
+            version_count=${version_count:-0}
+            delete_markers=${delete_markers:-0}
             log_info "      Versioned objects: $version_count"
             log_info "      Delete markers: $delete_markers"
         fi
         
-        local total_objects=$((object_count + version_count))
+        local total_objects=$((object_count + ${version_count:-0}))
         log_info "    - Total objects: $total_objects"
         
         # List sample objects if bucket is not empty
@@ -355,477 +358,159 @@ if objects:
 # ============================================================================
 # ECR Image Cleanup
 # ============================================================================
-# Handles cleanup of orphaned ECR images with special handling for:
-# - Multi-architecture images (manifest lists)
-# - Images referenced by Docker buildx manifest lists
-# 
-# Background on Manifest Lists:
-# When Docker builds multi-arch images (e.g., for both AMD64 and ARM64), or when
-# Docker Desktop on ARM64 Macs uses buildx under the hood, Docker creates a
-# "manifest list" (also called a "fat manifest") that references multiple
-# individual image manifests. When you try to delete an individual manifest
-# that's part of a manifest list, ECR prevents deletion because the manifest
-# list still references it.
-#
-# Solution:
-# This script detects manifest list references in deletion failures, extracts
-# the manifest list digest from the error message, deletes the manifest list
-# first, then retries deleting the individual manifests.
+# Simplified, robust cleanup of orphaned ECR images with chunked deletion.
+# Behaviour:
+# - Targets the fru-api repository
+# - Deletes untagged images and images older than ECR_RETENTION_DAYS
+# - Always keeps KEEP_RECENT_IMAGES newest images regardless of age
+# - Uses chunk size 100 to respect AWS BatchDeleteImage API limits
 # ============================================================================
 cleanup_ecr_images() {
     log_step "Checking ECR Repository Images"
-    
+
     local repo_name="fru-api"
-    
+    local python_script="$SCRIPT_DIR/python/ecr_cleanup.py"
+
+    # Check if Python script exists
+    if [ ! -f "$python_script" ]; then
+        log_error "Python ECR cleanup script not found: $python_script"
+        return 1
+    fi
+
     # Check if repository exists
     if ! aws ecr describe-repositories --repository-names "$repo_name" --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null 2>&1; then
         log_info "ECR repository '$repo_name' does not exist"
         return 0
     fi
-    
+
     log_info "Repository: $repo_name"
-    
-    # Get images with details (including push date)
+    log_info "Profile: $AWS_PROFILE"
+    log_info "Region: $AWS_REGION"
+
+    # Get images with details using Python module (with validation and error handling)
+    log_info "Retrieving ECR images..."
     local images_with_details
-    images_with_details=$(aws ecr describe-images --repository-name "$repo_name" --profile "$AWS_PROFILE" --region "$AWS_REGION" --output json 2>/dev/null || echo '{"imageDetails":[]}')
+    local aws_error_output
+    local temp_stderr
     
-    local image_count
-    image_count=$(echo "$images_with_details" | python3 -c "import sys, json; data=json.load(sys.stdin); print(len(data.get('imageDetails', [])))" 2>/dev/null || echo "0")
+    # Use temporary file to capture stderr separately from stdout
+    temp_stderr=$(mktemp)
+    trap "rm -f '$temp_stderr'" EXIT
     
-    if [ "$image_count" -eq 0 ]; then
-        log_info "  No images found in repository"
-        return 0
+    # Capture stdout (JSON) and stderr (errors) separately
+    images_with_details=$(python3 "$python_script" describe-images \
+        --repository-name "$repo_name" \
+        --profile "$AWS_PROFILE" \
+        --region "$AWS_REGION" 2>"$temp_stderr")
+    local aws_exit_code=$?
+    
+    # Read stderr if there was an error
+    if [ $aws_exit_code -ne 0 ]; then
+        aws_error_output=$(cat "$temp_stderr" 2>/dev/null || echo "Unknown error")
+        rm -f "$temp_stderr"
+        trap - EXIT
+        
+        log_error "Failed to retrieve ECR images from repository '$repo_name'"
+        log_error "Error details: $aws_error_output"
+        log_info "This could be due to:"
+        log_info "  - Repository does not exist"
+        log_info "  - AWS credentials/permissions issue"
+        log_info "  - Network connectivity problem"
+        log_info "  - AWS API rate limiting"
+        return 1
     fi
     
-    log_info "  Found $image_count image(s) in repository"
-    echo ""
+    # Check for any warnings in stderr (even if exit code was 0)
+    aws_error_output=$(cat "$temp_stderr" 2>/dev/null || echo "")
+    rm -f "$temp_stderr"
+    trap - EXIT
     
-    # Show summary of all images in repository (compact format, one per line)
-    log_info "  All images in repository:"
-    echo "$images_with_details" | python3 -c "
-import sys, json
-from datetime import datetime
-
-data = json.load(sys.stdin)
-images = data.get('imageDetails', [])
-# Sort by push date (newest first)
-images_sorted = sorted(images, key=lambda x: x.get('imagePushedAt', ''), reverse=True)
-
-for idx, img in enumerate(images_sorted, 1):
-    tags = img.get('imageTags', [])
-    digest = img.get('imageDigest', 'N/A')
-    pushed_at = img.get('imagePushedAt', '')
-    size_bytes = img.get('imageSizeInBytes', 0)
-    
-    # Format pushed date (short format)
-    pushed_str = 'N/A'
-    if pushed_at:
-        try:
-            dt = datetime.fromisoformat(pushed_at.replace('Z', '+00:00'))
-            pushed_str = dt.strftime('%Y-%m-%d %H:%M')
-        except:
-            pushed_str = pushed_at[:16] if len(pushed_at) >= 16 else pushed_at
-    
-    # Format size
-    size_str = 'N/A'
-    if size_bytes and size_bytes > 0:
-        if size_bytes < 1024:
-            size_str = f'{size_bytes}B'
-        elif size_bytes < 1024 * 1024:
-            size_str = f'{size_bytes / 1024:.1f}KB'
-        elif size_bytes < 1024 * 1024 * 1024:
-            size_str = f'{size_bytes / (1024 * 1024):.1f}MB'
-        else:
-            size_str = f'{size_bytes / (1024 * 1024 * 1024):.2f}GB'
-    
-    # Show tag(s) or untagged, wrapped in < >
-    tag_str = ', '.join(tags) if tags else 'untagged'
-    if len(tag_str) > 50:
-        tag_str = tag_str[:47] + '...'
-    
-    # Format: (index) <tag> | pushed_date | size | full digest
-    print(f\"    ({idx}) <{tag_str}> | {pushed_str} | {size_str} | {digest}\")
-" 2>/dev/null || log_info "    (Unable to parse image details)"
-    echo ""
-    
-    # Get images currently in use by ECS services (if ECS is configured)
-    local images_in_use_json="[]"
-    if [ "$CONTAINER_SYSTEM" = "ecs" ]; then
-        local cluster_name="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
-        if aws ecs describe-clusters --clusters "$cluster_name" --profile "$AWS_PROFILE" --region "$AWS_REGION" >/dev/null 2>&1; then
-            local services_json
-            services_json=$(aws ecs list-services --cluster "$cluster_name" --profile "$AWS_PROFILE" --region "$AWS_REGION" --output json 2>/dev/null || echo '{"serviceArns":[]}')
-            local service_arns
-            service_arns=$(echo "$services_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(' '.join(data.get('serviceArns', [])))" 2>/dev/null || echo "")
-            
-            local in_use_list=()
-            for service_arn in $service_arns; do
-                local task_def_arn
-                task_def_arn=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_arn" --profile "$AWS_PROFILE" --region "$AWS_REGION" --query 'services[0].taskDefinition' --output text 2>/dev/null || echo "")
-                if [ -n "$task_def_arn" ] && [ "$task_def_arn" != "None" ]; then
-                    local task_def_json
-                    task_def_json=$(aws ecs describe-task-definition --task-definition "$task_def_arn" --profile "$AWS_PROFILE" --region "$AWS_REGION" --output json 2>/dev/null || echo "{}")
-                    local image_uri
-                    image_uri=$(echo "$task_def_json" | python3 -c "import sys, json; td=json.load(sys.stdin); print(td.get('taskDefinition', {}).get('containerDefinitions', [{}])[0].get('image', ''))" 2>/dev/null || echo "")
-                    if [[ "$image_uri" == *"$repo_name"* ]]; then
-                        # Extract image digest or tag from URI
-                        local image_id
-                        image_id=$(echo "$image_uri" | sed -n 's/.*\(sha256:[a-f0-9]\+\|:[^@]*\).*/\1/p' || echo "")
-                        if [ -n "$image_id" ]; then
-                            in_use_list+=("$image_id")
-                        fi
-                    fi
-                fi
-            done
-            # Convert bash array to JSON array
-            if [ ${#in_use_list[@]} -gt 0 ]; then
-                images_in_use_json=$(printf '%s\n' "${in_use_list[@]}" | python3 -c "import sys, json; print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))" 2>/dev/null || echo "[]")
-            fi
-        fi
+    if [ -n "$aws_error_output" ]; then
+        log_warning "ECR describe-images produced warnings: $aws_error_output"
     fi
+
+    # Validate JSON structure using Python (empty response is OK if valid JSON)
+    if [ -z "$images_with_details" ]; then
+        log_warning "Received empty response from ECR describe-images (treating as empty repository)"
+        images_with_details='{"imageDetails":[]}'
+    elif ! printf '%s\n' "$images_with_details" | python3 -c "import sys, json; json.load(sys.stdin)" 2>/dev/null; then
+        log_error "Invalid JSON response from ECR describe-images"
+        log_error "Response preview: ${images_with_details:0:200}"
+        return 1
+    fi
+
+    # Count total images using Python module
+    local total_images
+    total_images=$(printf '%s\n' "$images_with_details" | python3 "$python_script" count 2>/dev/null || echo "0")
     
-    # Identify images to delete: untagged or older than retention period
+    if [ "$total_images" -eq 0 ]; then
+        log_info "Repository exists but contains no images"
+    else
+        log_info "Successfully retrieved $total_images image(s) from repository"
+    fi
+
+    # Filter images for deletion using Python module
     local images_to_delete
-    images_to_delete=$(echo "$images_with_details" | python3 -c "
-import sys, json
-from datetime import datetime, timezone, timedelta
+    images_to_delete=$(printf '%s\n' "$images_with_details" | python3 "$python_script" filter \
+        --retention-days "${ECR_RETENTION_DAYS:-7}" \
+        --keep-recent "${KEEP_RECENT_IMAGES:-5}" 2>/dev/null || echo "[]")
 
-data = json.load(sys.stdin)
-images = data.get('imageDetails', [])
-retention_days = $ECR_RETENTION_DAYS
-keep_recent = $KEEP_RECENT_IMAGES
-images_in_use = $images_in_use_json
-
-# Sort by push date (newest first)
-images_sorted = sorted(images, key=lambda x: x.get('imagePushedAt', ''), reverse=True)
-
-images_to_delete = []
-images_to_keep = []
-
-cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
-
-for idx, img in enumerate(images_sorted):
-    image_digest = img.get('imageDigest', '')
-    image_tags = img.get('imageTags', [])
-    pushed_at_str = img.get('imagePushedAt', '')
-    
-    # Check if in use
-    is_in_use = False
-    for used_id in images_in_use:
-        if used_id in image_digest or any(used_id in tag for tag in image_tags):
-            is_in_use = True
-            break
-    
-    if is_in_use:
-        images_to_keep.append(img)
-        continue
-    
-    # Keep most recent N images regardless of age
-    if idx < keep_recent:
-        images_to_keep.append(img)
-        continue
-    
-    # Check if untagged
-    is_untagged = len(image_tags) == 0
-    
-    # Check if older than retention period
-    is_old = False
-    if pushed_at_str:
-        try:
-            pushed_at = datetime.fromisoformat(pushed_at_str.replace('Z', '+00:00'))
-            is_old = pushed_at < cutoff_date
-        except:
-            pass
-    
-    if is_untagged or is_old:
-        images_to_delete.append(img)
-    else:
-        images_to_keep.append(img)
-
-# Output images to delete as JSON
-print(json.dumps(images_to_delete))
-" 2>/dev/null || echo "[]")
-    
+    # Count images to delete
     local delete_count
-    delete_count=$(echo "$images_to_delete" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
-    
+    if [ "$images_to_delete" = "[]" ] || [ -z "$images_to_delete" ]; then
+        delete_count=0
+    else
+        delete_count=$(printf '%s\n' "$images_to_delete" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+    fi
+
     echo ""
     log_info "ECR Image Cleanup Summary:"
-    log_info "  Total images in repository: $image_count"
-    log_info "  Eligible for deletion: $delete_count"
+    log_info "  Total images (from describe-images): $total_images"
+    log_info "  Eligible for deletion (after retention/keep rules): $delete_count"
     echo ""
-    
+
     if [ "$delete_count" -eq 0 ]; then
-        log_info "  No orphaned images to clean up"
-        log_info "  (All images are either in use, recent, or within retention period)"
-    else
-        log_warning "  Found $delete_count orphaned image(s) to delete"
-        
-        # Show image details (both dry-run and actual deletion) - compact format
-        log_info "  Images to delete:"
-        echo "$images_to_delete" | python3 -c "
-import sys, json
-from datetime import datetime
-
-images = json.load(sys.stdin)
-for idx, img in enumerate(images, 1):
-    tags = img.get('imageTags', [])
-    digest = img.get('imageDigest', 'N/A')
-    pushed_at = img.get('imagePushedAt', '')
-    size_bytes = img.get('imageSizeInBytes', 0)
-    
-    # Format pushed date (short format)
-    pushed_str = 'N/A'
-    if pushed_at:
-        try:
-            dt = datetime.fromisoformat(pushed_at.replace('Z', '+00:00'))
-            pushed_str = dt.strftime('%Y-%m-%d %H:%M')
-        except:
-            pushed_str = pushed_at[:16] if len(pushed_at) >= 16 else pushed_at
-    
-    # Format size
-    size_str = 'N/A'
-    if size_bytes and size_bytes > 0:
-        if size_bytes < 1024:
-            size_str = f'{size_bytes}B'
-        elif size_bytes < 1024 * 1024:
-            size_str = f'{size_bytes / 1024:.1f}KB'
-        elif size_bytes < 1024 * 1024 * 1024:
-            size_str = f'{size_bytes / (1024 * 1024):.1f}MB'
-        else:
-            size_str = f'{size_bytes / (1024 * 1024 * 1024):.2f}GB'
-    
-    # Show tag(s) or untagged, wrapped in < >
-    tag_str = ', '.join(tags) if tags else 'untagged'
-    
-    # Format: (index) <tag> | pushed_date | size | full digest
-    print(f\"    ({idx}) <{tag_str}> | {pushed_str} | {size_str} | {digest}\")
-" 2>/dev/null || log_info "    (Unable to parse image details)"
-        
-        if [ "$DRY_RUN" = "true" ]; then
-            log_info ""
-            log_info "  [DRY-RUN] Above images would be deleted (use --force to actually delete)"
-        else
-            # Delete images
-            # Note: We handle manifest lists (multi-arch images) automatically by detecting
-            # failures and retrying after deleting manifest lists. See comment block above
-            # cleanup_ecr_images() for details on why manifest lists exist.
-            
-            echo ""
-            log_info "  Proceeding with deletion..."
-            
-            # Build list of image IDs to delete
-            local delete_image_ids
-            delete_image_ids=$(echo "$images_to_delete" | python3 -c "
-import sys, json
-images = json.load(sys.stdin)
-image_ids = []
-for img in images:
-    img_id = {}
-    if 'imageDigest' in img:
-        img_id['imageDigest'] = img['imageDigest']
-    if 'imageTags' in img and img['imageTags']:
-        img_id['imageTag'] = img['imageTags'][0]
-    if img_id:
-        image_ids.append(img_id)
-print(json.dumps(image_ids))
-" 2>/dev/null || echo "[]")
-            
-            if [ "$delete_image_ids" != "[]" ] && [ -n "$delete_image_ids" ]; then
-                
-                # First attempt: Try to delete images directly
-                local delete_result
-                delete_result=$(aws ecr batch-delete-image \
-                    --repository-name "$repo_name" \
-                    --image-ids "$delete_image_ids" \
-                    --profile "$AWS_PROFILE" \
-                    --region "$AWS_REGION" \
-                    --output json 2>&1)
-                
-                local delete_exit_code=$?
-                local deleted_success=0
-                local failure_count=0
-                
-                if [ $delete_exit_code -eq 0 ]; then
-                    deleted_success=$(echo "$delete_result" | python3 -c "import sys, json; data=json.load(sys.stdin); print(len(data.get('imageIds', [])))" 2>/dev/null || echo "0")
-                    failure_count=$(echo "$delete_result" | python3 -c "import sys, json; data=json.load(sys.stdin); print(len(data.get('failures', [])))" 2>/dev/null || echo "0")
-                fi
-                
-                # If we have failures due to manifest lists, extract manifest list digests from error messages
-                if [ "$failure_count" -gt 0 ]; then
-                    # Extract manifest list digests directly from error messages
-                    # Error format: "Requested image referenced by manifest list: [sha256:...]"
-                    local manifest_list_digests
-                    manifest_list_digests=$(echo "$delete_result" | python3 -c "
-import sys, json
-import re
-data = json.load(sys.stdin)
-failures = data.get('failures', [])
-manifest_digests = []
-for f in failures:
-    reason = f.get('failureReason', '')
-    code = f.get('failureCode', '')
-    # Extract manifest list digest from error message
-    # Format: 'Requested image referenced by manifest list: [sha256:...]'
-    if 'ImageReferencedByManifestList' in code or 'manifest list' in reason.lower():
-        # Look for sha256: followed by 64 hex characters
-        match = re.search(r'sha256:[a-f0-9]{64}', reason)
-        if match:
-            manifest_digests.append(match.group(0))
-# Remove duplicates
-manifest_digests = list(set(manifest_digests))
-print(json.dumps(manifest_digests))
-" 2>/dev/null || echo "[]")
-                    
-                    # Delete manifest lists first, then retry
-                    if [ "$manifest_list_digests" != "[]" ] && [ -n "$manifest_list_digests" ]; then
-                        log_info "  Found images referenced by manifest lists (multi-arch images)"
-                        log_info "  Deleting manifest lists first, then retrying..."
-                        
-                        # Build image IDs for manifest lists (by digest only)
-                        local manifest_list_ids
-                        manifest_list_ids=$(echo "$manifest_list_digests" | python3 -c "
-import sys, json
-digests = json.load(sys.stdin)
-ids = [{'imageDigest': d} for d in digests]
-print(json.dumps(ids))
-" 2>/dev/null || echo "[]")
-                        
-                        if [ "$manifest_list_ids" != "[]" ]; then
-                            # Delete manifest lists
-                            aws ecr batch-delete-image \
-                                --repository-name "$repo_name" \
-                                --image-ids "$manifest_list_ids" \
-                                --profile "$AWS_PROFILE" \
-                                --region "$AWS_REGION" \
-                                --output json >/dev/null 2>&1 || true
-                            
-                            # Wait a moment for ECR to process the deletion
-                            sleep 2
-                            
-                            # Retry deleting the original images
-                            log_info "  Retrying deletion of individual images..."
-                            delete_result=$(aws ecr batch-delete-image \
-                                --repository-name "$repo_name" \
-                                --image-ids "$delete_image_ids" \
-                                --profile "$AWS_PROFILE" \
-                                --region "$AWS_REGION" \
-                                --output json 2>&1)
-                            delete_exit_code=$?
-                            
-                            if [ $delete_exit_code -eq 0 ]; then
-                                deleted_success=$(echo "$delete_result" | python3 -c "import sys, json; data=json.load(sys.stdin); print(len(data.get('imageIds', [])))" 2>/dev/null || echo "0")
-                                failure_count=$(echo "$delete_result" | python3 -c "import sys, json; data=json.load(sys.stdin); print(len(data.get('failures', [])))" 2>/dev/null || echo "0")
-                            fi
-                        fi
-                    fi
-                fi
-                
-                # Report results with details
-                if [ $delete_exit_code -eq 0 ]; then
-                    if [ "$deleted_success" -gt 0 ]; then
-                        log_success "  ✓ SUCCESS: Deleted $deleted_success image(s)"
-                        
-                        # Show details of successfully deleted images
-                        if [ "$deleted_success" -le 20 ]; then
-                            log_info "  Successfully deleted images:"
-                            echo "$delete_result" | python3 -c "
-import sys, json
-from datetime import datetime
-
-data = json.load(sys.stdin)
-deleted = data.get('imageIds', [])
-for idx, img_id in enumerate(deleted, 1):
-    tag = img_id.get('imageTag', '<untagged>')
-    digest = img_id.get('imageDigest', 'N/A')
-    digest_short = digest[:16] + '...' if len(digest) > 16 else digest
-    print(f\"    [{idx}] Tag: {tag}, Digest: {digest_short}\")
-" 2>/dev/null || true
-                        fi
-                        
-                        if [ "$failure_count" -gt 0 ]; then
-                            log_warning ""
-                            log_warning "  ⚠ Note: $failure_count image(s) could not be deleted (may still be in use or have dependencies)"
-                            log_info "  Failed images (first 10):"
-                            echo "$delete_result" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-failures = data.get('failures', [])[:10]
-for idx, f in enumerate(failures, 1):
-    reason = f.get('failureReason', 'N/A')
-    detail = f.get('failureCode', 'N/A')
-    img_id = f.get('imageId', {})
-    tag = img_id.get('imageTag', '<untagged>')
-    digest = img_id.get('imageDigest', 'N/A')
-    digest_short = digest[:16] + '...' if len(digest) > 16 and digest != 'N/A' else digest
-    print(f\"    [{idx}] Tag: {tag}\")
-    print(f\"        Digest: {digest_short}\")
-    print(f\"        Reason: {reason}\")
-    print(f\"        Code: {detail}\")
-    if idx < len(failures):
-        print(\"\")
-" 2>/dev/null || log_info "    (Unable to parse failure details)"
-                        fi
-                    else
-                        # No images deleted even though some were eligible - show failure reasons
-                        log_warning "  ✗ No images were deleted (0 successes, $failure_count failures)"
-                        if [ "$failure_count" -gt 0 ]; then
-                            log_info ""
-                            log_info "  Failed images (first 10):"
-                            echo "$delete_result" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-failures = data.get('failures', [])[:10]
-for idx, f in enumerate(failures, 1):
-    reason = f.get('failureReason', 'N/A')
-    detail = f.get('failureCode', 'N/A')
-    img_id = f.get('imageId', {})
-    tag = img_id.get('imageTag', '<untagged>')
-    digest = img_id.get('imageDigest', 'N/A')
-    digest_short = digest[:16] + '...' if len(digest) > 16 and digest != 'N/A' else digest
-    print(f\"    [{idx}] Tag: {tag}\")
-    print(f\"        Digest: {digest_short}\")
-    print(f\"        Reason: {reason}\")
-    print(f\"        Code: {detail}\")
-    if idx < len(failures):
-        print(\"\")
-" 2>/dev/null || log_info "    (Unable to parse failure details)"
-                            
-                            # Check if remaining failures are due to manifest lists
-                            # This can happen if the manifest list itself is not orphaned (still has tags)
-                            # or if the manifest list was not found in our deletion candidates
-                            local manifest_list_errors
-                            manifest_list_errors=$(echo "$delete_result" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-failures = data.get('failures', [])
-ml_count = sum(1 for f in failures if 'ImageReferencedByManifestList' in f.get('failureCode', '') or 'manifest list' in f.get('failureReason', '').lower())
-print(ml_count)
-" 2>/dev/null || echo "0")
-                            
-                            if [ "$manifest_list_errors" -gt 0 ]; then
-                                log_info ""
-                                log_info "  Note: $manifest_list_errors image(s) are still referenced by manifest lists"
-                                log_info "  This can happen if:"
-                                log_info "    - The manifest list itself is not orphaned (still has tags)"
-                                log_info "    - The manifest list was not found in the deletion candidates"
-                                log_info "  To delete these images, use AWS Console to delete the entire image"
-                                log_info "  (manifest list + all manifests) or ensure the manifest list is also orphaned"
-                            fi
-                        else
-                            log_info "  Raw delete_result payload:"
-                            log_info "  $delete_result"
-                        fi
-                    fi
-                else
-                    log_warning "  ✗ FAILED: Could not delete images"
-                    log_info "  Error details: $delete_result"
-                fi
-            else
-                log_warning "  ✗ Could not generate image IDs for deletion"
-            fi
-        fi
+        log_info "  No orphaned images to clean up under current retention rules"
+        return 0
     fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        log_info "  [DRY-RUN] Would delete $delete_count image(s) from repo $repo_name"
+        return 0
+    fi
+
+    # Chunk images using Python module (fixes subshell variable scoping issue)
+    local chunk_size=100
+    local total_deleted=0
+    local chunks=()
+
+    # Collect all chunks into an array (avoids subshell issue)
+    while IFS= read -r chunk_json; do
+        if [ -n "$chunk_json" ] && [ "$chunk_json" != "[]" ]; then
+            chunks+=("$chunk_json")
+        fi
+    done < <(printf '%s\n' "$images_to_delete" | python3 "$python_script" chunk --chunk-size "$chunk_size" 2>/dev/null)
+
+    # Process chunks in regular loop (no subshell, so total_deleted updates correctly)
+    for chunk_json in "${chunks[@]}"; do
+        local chunk_size_actual
+        chunk_size_actual=$(printf '%s\n' "$chunk_json" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+
+        log_info "  Deleting batch of ECR images (size: $chunk_size_actual)..."
+
+        if aws ecr batch-delete-image \
+            --repository-name "$repo_name" \
+            --image-ids "$chunk_json" \
+            --profile "$AWS_PROFILE" \
+            --region "$AWS_REGION" \
+            --output json >/dev/null 2>&1; then
+            total_deleted=$((total_deleted + chunk_size_actual))
+        else
+            log_warning "  ✗ FAILED to delete one batch of ECR images (see AWS CLI output above)"
+        fi
+    done
+
+    log_success "  ✓ Deleted $total_deleted ECR image(s) from $repo_name (best-effort)"
 }
 
 # ============================================================================
@@ -852,7 +537,7 @@ cleanup_ecs_resources() {
     echo ""
     
     # Get active task definitions (in use by services)
-    log_info "Checking active services and their task definitions..."
+    log_info "Checking services and their task definitions (treating services with desiredCount=0 AND runningCount=0 as inactive)..."
     local active_task_defs=()
     local services_json
     services_json=$(aws ecs list-services --cluster "$cluster_name" --profile "$AWS_PROFILE" --region "$AWS_REGION" --output json 2>/dev/null || echo '{"serviceArns":[]}')
@@ -860,6 +545,7 @@ cleanup_ecs_resources() {
     service_arns=$(echo "$services_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(' '.join(data.get('serviceArns', [])))" 2>/dev/null || echo "")
     
     local service_count=0
+    local active_service_count=0
     for service_arn in $service_arns; do
         if [ -z "$service_arn" ]; then
             continue
@@ -867,30 +553,74 @@ cleanup_ecs_resources() {
         service_count=$((service_count + 1))
         local service_name
         service_name=$(echo "$service_arn" | sed 's|.*/||')
-        log_info "  Service [$service_count]: $service_name"
         
-        local task_def_arn
-        task_def_arn=$(aws ecs describe-services --cluster "$cluster_name" --services "$service_arn" --profile "$AWS_PROFILE" --region "$AWS_REGION" --query 'services[0].taskDefinition' --output text 2>/dev/null || echo "")
-        if [ -n "$task_def_arn" ] && [ "$task_def_arn" != "None" ]; then
-            # Extract family:revision
-            local task_def_family_rev
-            task_def_family_rev=$(echo "$task_def_arn" | sed 's|.*/||')
-            active_task_defs+=("$task_def_family_rev")
-            log_info "    Active task definition: $task_def_family_rev"
+        # Describe service to get taskDefinition, desiredCount, runningCount
+        local svc_desc
+        svc_desc=$(aws ecs describe-services \
+            --cluster "$cluster_name" \
+            --services "$service_arn" \
+            --profile "$AWS_PROFILE" \
+            --region "$AWS_REGION" \
+            --query 'services[0].[taskDefinition,desiredCount,runningCount]' \
+            --output text 2>/dev/null || echo "")
+        
+        local task_def_arn desired_count running_count
+        # svc_desc may be empty or have fewer columns; use safe parsing
+        read -r task_def_arn desired_count running_count <<< "$svc_desc"
+        
+        # Fallback: if we couldn't parse counts, treat as active for safety
+        if [ -z "$task_def_arn" ] || [ "$task_def_arn" = "None" ]; then
+            log_info "  Service [$service_count]: $service_name (no task definition found)"
+            continue
         fi
+        
+        # Normalize counts to integers (default 0 if empty/non-numeric)
+        if ! [[ "$desired_count" =~ ^[0-9]+$ ]]; then
+            desired_count=0
+        fi
+        if ! [[ "$running_count" =~ ^[0-9]+$ ]]; then
+            running_count=0
+        fi
+        
+        if [ "$desired_count" -eq 0 ] && [ "$running_count" -eq 0 ]; then
+            log_info "  Service [$service_count]: $service_name (desiredCount=0, runningCount=0 -> treating as INACTIVE for cleanup)"
+            log_info "    Current task definition (inactive): $(echo "$task_def_arn" | sed 's|.*/||')"
+            # Do NOT add this task definition to active_task_defs
+            continue
+        fi
+        
+        active_service_count=$((active_service_count + 1))
+        log_info "  Service [$service_count]: $service_name (ACTIVE - desiredCount=$desired_count, runningCount=$running_count)"
+        
+        # Extract family:revision and add to active list
+        local task_def_family_rev
+        task_def_family_rev=$(echo "$task_def_arn" | sed 's|.*/||')
+        active_task_defs+=("$task_def_family_rev")
+        log_info "    Active task definition: $task_def_family_rev"
     done
     
     if [ "$service_count" -eq 0 ]; then
         log_info "  No services found in cluster"
     else
-        log_info "  Total active services: $service_count"
-        log_info "  Active task definitions: ${#active_task_defs[@]}"
+        log_info "  Total services: $service_count"
+        log_info "  Services considered ACTIVE for cleanup (desiredCount>0 or runningCount>0): $active_service_count"
+        log_info "  Active task definitions (protected from deletion): ${#active_task_defs[@]}"
     fi
     echo ""
     
     # List all task definitions for the project
     log_info "Checking all task definitions for family: ${PROJECT_NAME}-${ENVIRONMENT}-api"
     local task_def_families=("${PROJECT_NAME}-${ENVIRONMENT}-api")
+    # Rollback safety: by default keep 5 most recent inactive task definitions.
+    # However, if there are NO services considered ACTIVE (desiredCount>0 or runningCount>0),
+    # then we treat all inactive task definitions as eligible for deletion (nuclear cleanup).
+    local rollback_keep_limit=5
+    if [ "$active_service_count" -eq 0 ]; then
+        rollback_keep_limit=0
+        log_info "  No ACTIVE services detected; rollback safety limit reduced to $rollback_keep_limit (all inactive task definitions eligible for deletion)."
+    else
+        log_info "  ACTIVE services detected; rollback safety limit = $rollback_keep_limit (keeping up to $rollback_keep_limit inactive revisions)."
+    fi
     local old_task_defs=()
     local total_task_defs=0
     local active_task_defs_found=0
@@ -933,9 +663,9 @@ cleanup_ecs_resources() {
                 continue
             fi
             
-            # Keep the 5 most recent inactive task definitions (for rollback safety)
+            # Keep recent inactive task definitions for rollback safety (up to rollback_keep_limit)
             count=$((count + 1))
-            if [ "$count" -le 5 ]; then
+            if [ "$count" -le "$rollback_keep_limit" ]; then
                 kept_for_rollback=$((kept_for_rollback + 1))
                 log_info "    [$total_task_defs] ⊙ $task_def_id (KEEPING - recent inactive, for rollback safety)"
             else

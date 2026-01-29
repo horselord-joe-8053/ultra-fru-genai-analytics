@@ -67,7 +67,9 @@ def collect_ec2_resources(region: str, profile: str) -> Dict[str, List[Dict[str,
         "security_groups": [],
         "internet_gateways": [],
         "nat_gateways": [],
-        "elastic_ips": []
+        "elastic_ips": [],
+        "network_interfaces": [],
+        "vpc_endpoints": [],
     }
     
     # EC2 Instances
@@ -156,7 +158,49 @@ def collect_ec2_resources(region: str, profile: str) -> Dict[str, List[Dict[str,
                     "association_id": eip[2] if eip[2] else None,
                     "instance_id": eip[3] if eip[3] else None
                 })
-    
+
+    # Network interfaces (ENIs) in non-default VPCs — required for removal dependency chain (ENIs block subnet/SG/VPC deletion)
+    vpc_ids = [v["id"] for v in resources["vpcs"]]
+    if vpc_ids:
+        # describe-network-interfaces accepts one filter; pass comma-separated vpc-ids
+        vpc_filter = ",".join(vpc_ids)
+        enis = run_aws_cmd(
+            ["ec2", "describe-network-interfaces", "--filters", f"Name=vpc-id,Values={vpc_filter}",
+             "--query", "NetworkInterfaces[].[NetworkInterfaceId,Status,VpcId,SubnetId,Attachment.AttachmentId]"],
+            region, profile
+        )
+        if enis:
+            for eni in enis:
+                if len(eni) >= 4:
+                    resources["network_interfaces"].append({
+                        "region": region,
+                        "id": eni[0],
+                        "status": eni[1],
+                        "vpc_id": eni[2],
+                        "subnet_id": eni[3] if eni[3] else None,
+                        "attachment_id": eni[4] if len(eni) >= 5 and eni[4] else None,
+                    })
+
+    # VPC Endpoints
+    vpc_ids_for_endpoints = [v["id"] for v in resources["vpcs"]]
+    if vpc_ids_for_endpoints:
+        vpc_filter = ",".join(vpc_ids_for_endpoints)
+        vpces = run_aws_cmd(
+            ["ec2", "describe-vpc-endpoints", "--filters", f"Name=vpc-id,Values={vpc_filter}",
+             "--query", "VpcEndpoints[].[VpcEndpointId,VpcEndpointType,State,VpcId]"],
+            region, profile
+        )
+        if vpces:
+            for vpce in vpces:
+                if len(vpce) >= 4:
+                    resources["vpc_endpoints"].append({
+                        "region": region,
+                        "id": vpce[0],
+                        "type": vpce[1],
+                        "state": vpce[2],
+                        "vpc_id": vpce[3],
+                    })
+
     return resources
 
 
@@ -440,7 +484,9 @@ def main(profile: str = "admin", region: str = "us-east-1", check_all_regions: b
             "security_groups": [],
             "internet_gateways": [],
             "nat_gateways": [],
-            "elastic_ips": []
+            "elastic_ips": [],
+            "network_interfaces": [],
+            "vpc_endpoints": [],
         },
         "s3": {"buckets": []},
         "ecs": {"clusters": [], "task_definitions": []},
@@ -473,6 +519,8 @@ def main(profile: str = "admin", region: str = "us-east-1", check_all_regions: b
         results["ec2"]["internet_gateways"].extend(ec2_res["internet_gateways"])
         results["ec2"]["nat_gateways"].extend(ec2_res["nat_gateways"])
         results["ec2"]["elastic_ips"].extend(ec2_res["elastic_ips"])
+        results["ec2"]["network_interfaces"].extend(ec2_res["network_interfaces"])
+        results["ec2"]["vpc_endpoints"].extend(ec2_res["vpc_endpoints"])
         
         # ECS
         ecs_res = collect_ecs_resources(reg, profile)

@@ -44,6 +44,14 @@
 #      - Destroys ONLY the specified container-type layer (ecs OR eks)
 #      - Preserves shared infrastructure layer (VPC, Aurora, IAM, Secrets Manager)
 #      - Handles dependency ordering within the container-type layer
+#      - Note: Terraform may initiate CloudFront deletion, but it may not complete
+#        before we proceed to orphan cleanup
+#
+#   4.5. Teardown CloudFront Distributions
+#      - Disables CloudFront distributions (waits for deployment, ~15 minutes)
+#      - Deletes CloudFront distributions (waits for deletion, ~15 minutes)
+#      - MUST complete before Step 5 to prevent S3 bucket deletion failures
+#      - Handles both ECS and EKS CloudFront distributions
 #
 #   4. Clean Up Local Docker Images
 #      - Removes images matching pattern: fru-api:*
@@ -56,6 +64,8 @@
 #      - Cleans up unused ECR images (old versions not in use)
 #      - Cleans up old ECS task definitions (beyond safety threshold)
 #      - Uses cleanup-orphaned-resources.sh helper script
+#      - NOTE: CloudFront must be torn down (Step 4.5) before this step to prevent
+#        S3 bucket deletion failures due to CloudFront references
 #
 # SPECIAL MODES:
 #   --clean-local-only: Skips all AWS teardown steps (Steps 1-3, 5) and only
@@ -780,6 +790,56 @@ cleanup_local_images() {
 }
 
 # ============================================================================
+# Step 4.5: Teardown CloudFront Distributions
+# ============================================================================
+# This step disables and deletes CloudFront distributions BEFORE S3 bucket cleanup.
+# CloudFront distributions must be disabled/deleted before S3 buckets can be deleted,
+# as CloudFront references S3 buckets as origins.
+#
+# Process:
+# - Finds CloudFront distributions for this container type (ECS or EKS)
+# - Disables distributions (waits for deployment, ~15 minutes)
+# - Deletes distributions (waits for deletion, ~15 minutes)
+# - This prevents S3 bucket deletion failures due to CloudFront references
+teardown_cloudfront() {
+    log_step "Substep 4.5: Teardown CloudFront Distributions"
+    
+    local cloudfront_script="$SCRIPT_DIR/helpers/teardown-cloudfront.sh"
+    
+    if [ ! -f "$cloudfront_script" ]; then
+        log_warning "CloudFront teardown script not found: $cloudfront_script"
+        log_info "Skipping CloudFront teardown (S3 bucket cleanup may fail if CloudFront still references buckets)"
+        return 0
+    fi
+    
+    log_info "CloudFront distributions must be disabled/deleted before S3 bucket cleanup"
+    log_info "This prevents S3 deletion failures due to CloudFront references"
+    echo ""
+    
+    local cloudfront_cmd="$cloudfront_script $ENVIRONMENT --container-type $CONTAINER_TYPE"
+    
+    if [ "$DRY_RUN" = "true" ]; then
+        cloudfront_cmd="$cloudfront_cmd --dry-run"
+    elif [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ]; then
+        cloudfront_cmd="$cloudfront_cmd --force"
+    fi
+    
+    if [ "$DRY_RUN" = "true" ]; then
+        log_info "[DRY-RUN] Would run: $cloudfront_cmd"
+    else
+        if $cloudfront_cmd; then
+            log_success "CloudFront teardown completed"
+        else
+            log_error "CloudFront teardown had issues (S3 bucket cleanup may fail)"
+            return 1
+        fi
+    fi
+    
+    echo ""
+    return 0
+}
+
+# ============================================================================
 # Step 5: Clean Up Orphaned AWS Resources
 # ============================================================================
 # This step cleans up orphaned AWS resources that Terraform might have missed
@@ -792,6 +852,9 @@ cleanup_local_images() {
 #
 # This step uses the cleanup-orphaned-resources.sh helper script which provides
 # safe cleanup with retention policies and protection for in-use resources.
+#
+# NOTE: CloudFront distributions should be torn down BEFORE this step (Step 4.5)
+# to prevent S3 bucket deletion failures due to CloudFront references.
 cleanup_orphaned() {
     log_step "Substep 5: Cleaning Up Orphaned AWS Resources"
     
@@ -817,7 +880,7 @@ cleanup_orphaned() {
         if $cleanup_cmd; then
             log_success "Orphaned resources cleaned up"
         else
-            log_warning "Cleanup had issues (may have been partially cleaned)"
+            log_error "Cleanup had issues (may have been partially cleaned)"
         fi
     fi
     echo ""
@@ -863,6 +926,11 @@ main() {
     # Since we're preserving shared infra, we don't need to wait for VPC/Aurora deletion
     
     if ! terraform_destroy; then
+        failed=true
+    fi
+    
+    # Teardown CloudFront BEFORE orphan cleanup (prevents S3 deletion failures)
+    if ! teardown_cloudfront; then
         failed=true
     fi
     

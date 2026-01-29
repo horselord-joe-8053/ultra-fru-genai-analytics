@@ -526,7 +526,7 @@ DELTA_TABLE_PATH=data/delta/fru_sales
 - `guides/deployment_scripts_relationship.md` - Deployment scripts relationships
 
 **AWS Resource Management:**
-- `run_scripts/main_application_scripts/aws/resource-check/find-all-current-aws-resources.sh` - AWS resource inventory script that generates JSON reports of all non-default AWS resources
+- `run_scripts/main_application_scripts/aws/shared/cli/resource-check/find-all-current-aws-resources.sh` - AWS resource inventory script that generates JSON reports of all non-default AWS resources
 
 ---
 

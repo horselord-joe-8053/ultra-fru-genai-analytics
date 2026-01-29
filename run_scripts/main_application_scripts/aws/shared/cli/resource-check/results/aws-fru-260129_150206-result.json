@@ -1,0 +1,364 @@
+{
+  "metadata": {
+    "account_id": "744139897900",
+    "profile": "admin",
+    "region": "us-east-1",
+    "timestamp": "2026-01-29T15:02:30.568602",
+    "total_resources": 47
+  },
+  "results": {
+    "ec2": {
+      "instances": [
+        {
+          "region": "us-east-1",
+          "id": "i-05d62ffe656215678",
+          "state": "running",
+          "type": "t3.small",
+          "launch_time": "2026-01-21T15:15:06+00:00"
+        },
+        {
+          "region": "us-east-1",
+          "id": "i-00d2afa49e0ea7377",
+          "state": "terminated",
+          "type": "t3.medium",
+          "launch_time": "2026-01-21T10:56:55+00:00"
+        },
+        {
+          "region": "us-east-1",
+          "id": "i-0f53bac51fdafbba5",
+          "state": "terminated",
+          "type": "t3.medium",
+          "launch_time": "2026-01-21T10:56:55+00:00"
+        }
+      ],
+      "vpcs": [
+        {
+          "region": "us-east-1",
+          "id": "vpc-0545692b0d032fcfa",
+          "cidr": "10.0.0.0/16",
+          "state": "available"
+        },
+        {
+          "region": "us-east-1",
+          "id": "vpc-039c08cf088226b07",
+          "cidr": "10.0.0.0/16",
+          "state": "available"
+        }
+      ],
+      "subnets": [
+        {
+          "region": "us-east-1",
+          "id": "subnet-0d5b88f1c4b2bdf3c",
+          "vpc_id": "vpc-0545692b0d032fcfa",
+          "cidr": "10.0.11.0/24",
+          "availability_zone": "us-east-1b"
+        },
+        {
+          "region": "us-east-1",
+          "id": "subnet-0fabe97167898925e",
+          "vpc_id": "vpc-0545692b0d032fcfa",
+          "cidr": "10.0.0.0/24",
+          "availability_zone": "us-east-1a"
+        },
+        {
+          "region": "us-east-1",
+          "id": "subnet-0ba5c2b3f14f4c341",
+          "vpc_id": "vpc-039c08cf088226b07",
+          "cidr": "10.0.101.0/24",
+          "availability_zone": "us-east-1a"
+        },
+        {
+          "region": "us-east-1",
+          "id": "subnet-041d01b7d2a04d17f",
+          "vpc_id": "vpc-039c08cf088226b07",
+          "cidr": "10.0.103.0/24",
+          "availability_zone": "us-east-1c"
+        },
+        {
+          "region": "us-east-1",
+          "id": "subnet-0ec041ddd165738c4",
+          "vpc_id": "vpc-0545692b0d032fcfa",
+          "cidr": "10.0.1.0/24",
+          "availability_zone": "us-east-1b"
+        },
+        {
+          "region": "us-east-1",
+          "id": "subnet-0af0764522c94b16b",
+          "vpc_id": "vpc-039c08cf088226b07",
+          "cidr": "10.0.102.0/24",
+          "availability_zone": "us-east-1b"
+        },
+        {
+          "region": "us-east-1",
+          "id": "subnet-0dd347e22665e6b46",
+          "vpc_id": "vpc-0545692b0d032fcfa",
+          "cidr": "10.0.10.0/24",
+          "availability_zone": "us-east-1a"
+        }
+      ],
+      "security_groups": [
+        {
+          "region": "us-east-1",
+          "id": "sg-042b1703bc10f8599",
+          "name": "fru-dev-vpc-endpoint-sg",
+          "vpc_id": "vpc-0545692b0d032fcfa"
+        },
+        {
+          "region": "us-east-1",
+          "id": "sg-0d4c397545abd6496",
+          "name": "fru-dev-ecs-tasks-sg",
+          "vpc_id": "vpc-0545692b0d032fcfa"
+        },
+        {
+          "region": "us-east-1",
+          "id": "sg-02ead8655f7598555",
+          "name": "fru-dev-eks-nodes-sg",
+          "vpc_id": "vpc-0545692b0d032fcfa"
+        },
+        {
+          "region": "us-east-1",
+          "id": "sg-015b8d444b33a321d",
+          "name": "fru-dev-aurora-sg",
+          "vpc_id": "vpc-0545692b0d032fcfa"
+        },
+        {
+          "region": "us-east-1",
+          "id": "sg-0a5f3b4c8b04335b2",
+          "name": "fru-dev-ecs-placeholder-sg",
+          "vpc_id": "vpc-0545692b0d032fcfa"
+        },
+        {
+          "region": "us-east-1",
+          "id": "sg-0077a06f7e572d8ac",
+          "name": "fru-dev-alb-sg",
+          "vpc_id": "vpc-0545692b0d032fcfa"
+        },
+        {
+          "region": "us-east-1",
+          "id": "sg-043112e82d4b56f80",
+          "name": "eks-cluster-sg-fru-dev-cluster-381074846",
+          "vpc_id": "vpc-0545692b0d032fcfa"
+        },
+        {
+          "region": "us-east-1",
+          "id": "sg-016cbb482539c0a37",
+          "name": "fru-dev-eks-cluster-sg",
+          "vpc_id": "vpc-0545692b0d032fcfa"
+        }
+      ],
+      "internet_gateways": [
+        {
+          "region": "us-east-1",
+          "id": "igw-010f63b6728db2945",
+          "state": "available"
+        },
+        {
+          "region": "us-east-1",
+          "id": "igw-051b8c18e8f84fc7f",
+          "state": "available"
+        },
+        {
+          "region": "us-east-1",
+          "id": "igw-09b42de500619567c",
+          "state": "available"
+        }
+      ],
+      "nat_gateways": [
+        {
+          "region": "us-east-1",
+          "id": "nat-0f48170dea5ce117b",
+          "state": "available",
+          "vpc_id": "vpc-0545692b0d032fcfa",
+          "subnet_id": "subnet-0ec041ddd165738c4"
+        },
+        {
+          "region": "us-east-1",
+          "id": "nat-09d34512e1cc62fc0",
+          "state": "deleted",
+          "vpc_id": "vpc-039c08cf088226b07",
+          "subnet_id": "subnet-0ba5c2b3f14f4c341"
+        },
+        {
+          "region": "us-east-1",
+          "id": "nat-0d2a9e93d23523a74",
+          "state": "available",
+          "vpc_id": "vpc-0545692b0d032fcfa",
+          "subnet_id": "subnet-0fabe97167898925e"
+        }
+      ],
+      "elastic_ips": [
+        {
+          "region": "us-east-1",
+          "public_ip": "18.214.107.255",
+          "allocation_id": "eipalloc-0a3792ac305ea8393",
+          "association_id": "eipassoc-076b52dd65a6c9710",
+          "instance_id": null
+        },
+        {
+          "region": "us-east-1",
+          "public_ip": "54.147.79.116",
+          "allocation_id": "eipalloc-042e9835745528646",
+          "association_id": "eipassoc-0c5c2cfc9bc866bc6",
+          "instance_id": null
+        },
+        {
+          "region": "us-east-1",
+          "public_ip": "98.89.208.157",
+          "allocation_id": "eipalloc-078197decd6e8a0ef",
+          "association_id": "eipassoc-06e6252d3b5080a65",
+          "instance_id": null
+        }
+      ]
+    },
+    "s3": {
+      "buckets": [
+        {
+          "name": "fru-terraform-state-744139897900",
+          "creation_date": "2025-12-14T23:06:38+00:00"
+        }
+      ]
+    },
+    "ecs": {
+      "clusters": [
+        {
+          "region": "us-east-1",
+          "name": "fru-dev-cluster",
+          "arn": "arn:aws:ecs:us-east-1:744139897900:cluster/fru-dev-cluster"
+        }
+      ],
+      "task_definitions": []
+    },
+    "eks": {
+      "clusters": [
+        {
+          "region": "us-east-1",
+          "name": "fru-dev-cluster"
+        }
+      ]
+    },
+    "rds": {
+      "instances": [
+        {
+          "region": "us-east-1",
+          "id": "fru-dev-aurora-instance-1",
+          "engine": "aurora-postgresql",
+          "status": "available"
+        }
+      ],
+      "aurora_clusters": [
+        {
+          "region": "us-east-1",
+          "id": "fru-dev-aurora-cluster",
+          "engine": "aurora-postgresql",
+          "status": "available"
+        }
+      ]
+    },
+    "elb": {
+      "load_balancers": [
+        {
+          "region": "us-east-1",
+          "name": "a463d79f33c474dae83e2364778a167c",
+          "type": "network",
+          "state": "active",
+          "dns_name": "a463d79f33c474dae83e2364778a167c-76517cf1215403f4.elb.us-east-1.amazonaws.com"
+        },
+        {
+          "region": "us-east-1",
+          "name": "ad36c0036890a439eae339e83c735cdc",
+          "type": "network",
+          "state": "active",
+          "dns_name": "ad36c0036890a439eae339e83c735cdc-78ffc1fad6560c8f.elb.us-east-1.amazonaws.com"
+        },
+        {
+          "region": "us-east-1",
+          "name": "fru-dev-alb",
+          "type": "application",
+          "state": "active",
+          "dns_name": "fru-dev-alb-142007659.us-east-1.elb.amazonaws.com"
+        }
+      ]
+    },
+    "lambda": {
+      "functions": []
+    },
+    "api_gateway": {
+      "rest_apis": []
+    },
+    "cloudfront": {
+      "distributions": [
+        {
+          "id": "E25D2HWB9LQXP6",
+          "status": "Deployed",
+          "domain_name": "d39cvmbit7th1f.cloudfront.net"
+        },
+        {
+          "id": "E34NAR3WSONVIM",
+          "status": "Deployed",
+          "domain_name": "d6oiz6z0nbfmh.cloudfront.net"
+        }
+      ]
+    },
+    "ecr": {
+      "repositories": [
+        {
+          "region": "us-east-1",
+          "name": "fridge-stats-api",
+          "registry_id": "744139897900",
+          "uri": "744139897900.dkr.ecr.us-east-1.amazonaws.com/fridge-stats-api"
+        },
+        {
+          "region": "us-east-1",
+          "name": "fridge-stats-ui",
+          "registry_id": "744139897900",
+          "uri": "744139897900.dkr.ecr.us-east-1.amazonaws.com/fridge-stats-ui"
+        },
+        {
+          "region": "us-east-1",
+          "name": "fru-api",
+          "registry_id": "744139897900",
+          "uri": "744139897900.dkr.ecr.us-east-1.amazonaws.com/fru-api"
+        }
+      ]
+    },
+    "iam": {
+      "roles": [],
+      "policies": []
+    },
+    "secrets_manager": {
+      "secrets": [
+        {
+          "region": "us-east-1",
+          "name": "fru/dev/aurora-db-password",
+          "arn": "arn:aws:secretsmanager:us-east-1:744139897900:secret:fru/dev/aurora-db-password-XrR8i7"
+        },
+        {
+          "region": "us-east-1",
+          "name": "fru/dev/openai-api-key",
+          "arn": "arn:aws:secretsmanager:us-east-1:744139897900:secret:fru/dev/openai-api-key-0lcEk4"
+        },
+        {
+          "region": "us-east-1",
+          "name": "fru/dev/aurora-db-username",
+          "arn": "arn:aws:secretsmanager:us-east-1:744139897900:secret:fru/dev/aurora-db-username-wKIxX2"
+        },
+        {
+          "region": "us-east-1",
+          "name": "fru/dev/aurora-db-password-plain",
+          "arn": "arn:aws:secretsmanager:us-east-1:744139897900:secret:fru/dev/aurora-db-password-plain-KtZ7i8"
+        },
+        {
+          "region": "us-east-1",
+          "name": "fru/dev/openai-api-key-plain",
+          "arn": "arn:aws:secretsmanager:us-east-1:744139897900:secret:fru/dev/openai-api-key-plain-mQ8HZ8"
+        }
+      ]
+    },
+    "sqs": {
+      "queues": []
+    },
+    "sns": {
+      "topics": []
+    }
+  }
+}

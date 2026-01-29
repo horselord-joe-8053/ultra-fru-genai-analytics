@@ -22,14 +22,15 @@ dependency "infrastructure" {
   config_path = "../infrastructure"
   
   mock_outputs = {
-    vpc_id             = "vpc-xxxxxxxx"
-    public_subnet_ids  = ["subnet-xxxxxxxx", "subnet-yyyyyyyy"]
-    private_subnet_ids = ["subnet-zzzzzzzz", "subnet-aaaaaaaa"]
+    vpc_id                     = "vpc-xxxxxxxx"
+    public_subnet_ids          = ["subnet-xxxxxxxx", "subnet-yyyyyyyy"]
+    private_subnet_ids         = ["subnet-zzzzzzzz", "subnet-aaaaaaaa"]
+    aurora_security_group_id   = "sg-xxxxxxxx"
   }
   
-  # Allow mock outputs for plan and validate commands (dry-run scenarios)
-  # Terragrunt will use mocks if dependency outputs can't be fetched
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  # Allow mock outputs when dependency has no outputs (e.g. infra destroyed first).
+  # init + state allow EKS teardown to run without needing infrastructure layer.
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "init", "state", "destroy"]
 }
 
 # All inputs (dependency-dependent and non-dependent)
