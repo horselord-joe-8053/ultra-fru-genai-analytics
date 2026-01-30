@@ -2,6 +2,8 @@
 
 This document describes which components are created/managed by **Terraform** (by layer) and which by **shell scripts** for the EKS and ECS deployment routes. Shared infrastructure (VPC, Aurora, IAM) is in the **infrastructure** layer; container-specific app resources are in **ecs** or **eks** layers.
 
+**Target model:** Terraform/Terragrunt is the single source of truth for all AWS infrastructure (non-Kubernetes resources). Shell scripts handle minimal pre-destroy steps (scale-down, empty S3) and Kubernetes application workload deployment; they do not manage VPC/ENI lifecycle. See **"AWS Dependency Graph and Teardown"** below for setup/teardown ordering and ENI considerations.
+
 ---
 
 ## EKS Route
@@ -76,6 +78,47 @@ Rows where **both** Terraform and Shell scripts have values represent overlap. T
 - **Current:** “Pre-destroy” is the combination of stop_*_services and empty_s3_buckets, both done by scripts before `teardown.sh` runs Terraform destroy.
 - **Overlap:** Scripts prepare state (no running tasks, empty buckets); Terraform performs destroy.
 - **Summary:** Removing overlap for (1)–(3) would reduce or remove this row’s script side. If we move “empty S3” and “scale ECS to 0” into Terraform, pre-destroy for ECS could be minimal (e.g. only EKS scale-down remains in scripts).
+
+---
+
+## AWS Dependency Graph and Teardown (Refactor / Setup Considerations)
+
+VPC and its resources form a strict dependency graph. Setup and teardown must respect this order so Terraform (and any fallback scripts) succeed. See **README_WAR_STORIES.md** War Stories **6** (VPC Teardown: Dependency Graph) and **7** (ELB Deletion and ENIs: Eventual Consistency).
+
+### Dependency graph (simplified)
+
+```
+VPC
+├─ Subnets
+│  ├─ ENIs (created by ALB, NAT, EC2, ECS, EKS, RDS)
+│  │  └─ VPC Endpoints (interface)
+│  └─ Route Tables (subnet associations)
+├─ Internet Gateway
+├─ NAT Gateways
+├─ Load Balancers
+├─ VPC Endpoints (gateway)
+├─ Security Groups
+└─ Network ACLs
+```
+
+Safe teardown order: **Load balancers / NAT** → **VPC Endpoints** → **ENIs** → **Subnets** → **Route Tables (non-main)** → **Security Groups (non-default)** → **Internet Gateway** → **VPC**.
+
+### Setup (Terraform Apply)
+
+- **Terragrunt apply order:** Infrastructure layer first, then app layer (`ecs` or `eks`). This matches the graph (VPC, subnets, gateways, then ECS/EKS clusters that create ENIs).
+- **Terraform modules:** Ensure `infrastructure` (and any shared modules) define resources in dependency order so Terraform's apply order is correct (e.g. VPC → subnets → security groups → NAT/ALB as needed).
+
+### Teardown (Terraform Destroy)
+
+- **Terragrunt destroy order:** **App layer first** (`ecs` or `eks`), then **infrastructure**. This removes ALB, NAT, ECS/EKS (which create ENIs), so AWS can release ENIs asynchronously before infrastructure destroy runs.
+- **ENIs and eventual consistency:** After app-layer destroy, AWS releases ELB-managed ENIs **asynchronously** (often 10–30+ minutes). Until those ENIs are gone, subnet/VPC destroy can fail with `DependencyViolation`.
+  - **Option A (recommended):** In `terraform/teardown.sh`, add an **optional wait** (e.g. 2–5 minutes) or a short poll loop between app-layer destroy and infrastructure destroy to check for ENIs in the VPC and wait until they're gone (or timeout).
+  - **Option B:** Document that if infrastructure destroy fails due to ENIs, the user should wait 10–15 minutes and re-run `teardown.sh`, or use `remove-all-aws-resources` as a brutal-force fallback (which implements ENI/VPC endpoint steps and ELB-ENI wait/skip; see README_ALL_TEARDOWN.md).
+- **Terraform module destroy order:** Rely on Terraform's reverse dependency order; ensure modules do not define subnets/VPC before ENI-owning resources (so destroy runs in the right order). **Do not** force-delete ENIs from scripts in the Terraform path; use wait/retry or fallback script only.
+
+### Fallback: brutal-force removal
+
+`remove-all-aws-resources` (see README_ALL_TEARDOWN.md) implements the full dependency order (including ENIs step 10 and VPC Endpoints step 13) and handles ELB-attached ENIs with wait-and-retry and graceful skip (`pending_aws_elb_cleanup`). Use it when Terraform destroy fails or state is inconsistent; do not use it as the primary teardown path.
 
 ---
 
