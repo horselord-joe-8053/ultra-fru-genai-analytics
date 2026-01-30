@@ -134,7 +134,7 @@ else
     DELTA_TABLE_PATH="${S3_DELTA_PATH:-s3://$S3_BUCKET_ID/delta}/fru_sales"
     
     # Get Spark packages and convert paths using Python helpers
-    PYTHON_HELPER_OUTPUT=$(python3 -c "
+    PYTHON_HELPER_OUTPUT=$("$PYTHON_CMD" -c "
 import sys
 sys.path.insert(0, '$REPO_ROOT')
 from spark_jobs.utils.spark_config import get_spark_packages, to_spark_path

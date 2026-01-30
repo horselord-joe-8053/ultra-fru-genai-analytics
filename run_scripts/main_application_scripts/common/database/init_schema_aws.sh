@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
+source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 
 ENVIRONMENT="${1:-dev}"
 FORCE_REFRESH_DATA="${FORCE_REFRESH_DATA:-false}"
@@ -326,7 +326,7 @@ init_schema_aws() {
         exit 1
     fi
     
-    if ! python3 "$PARSE_SQL_SCRIPT" "$SCHEMA_FILE" > "$TEMP_SQL"; then
+    if ! "$PYTHON_CMD" "$PARSE_SQL_SCRIPT" "$SCHEMA_FILE" > "$TEMP_SQL"; then
         log_error "Failed to parse SQL file: $SCHEMA_FILE"
         rm -f "$TEMP_SQL"
         exit 1

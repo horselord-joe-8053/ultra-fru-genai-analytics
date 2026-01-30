@@ -1,24 +1,18 @@
 #!/bin/bash
-# Complete infrastructure destruction (including shared) - single orchestrator
+# Teardown orchestrator: destroy EKS-only, ECS-only, or everything (EKS + ECS + shared).
 #
 # SYNOPSIS:
-#   ./teardown-resources-all.sh <ENVIRONMENT> --container-type <ecs|eks> [OPTIONS]
+#   ./teardown-resources-all.sh <ENVIRONMENT> --container-type <eks|ecs|all> [OPTIONS]
 #
 # DESCRIPTION:
-#   Single teardown orchestrator: pre-destroy (stop services, empty S3) →
-#   terraform/teardown.sh (app layer then infrastructure) → optional orphan cleanup →
-#   optional local Docker cleanup. No long VPC/Aurora waits; rely on Terraform destroy
-#   order. If infra destroy fails (e.g. ENI eventual consistency), retry later or use
-#   remove-all-aws-resources as fallback (see README_ALL_TEARDOWN.md).
+#   - eks: Destroy EKS-specific infra only (EKS app layer). ECS and shared infra left standing.
+#   - ecs: Destroy ECS-specific infra only (ECS app layer). EKS and shared infra left standing.
+#   - all: Destroy EKS + ECS app layers, then shared infra (VPC, Aurora, IAM). Nothing left standing.
 #
-# EXECUTION STEPS:
-#   1. Stop ECS/EKS services (scale to 0, wait for tasks to stop)
-#   2. Empty S3 buckets (analytics, frontend) so Terraform can destroy them
-#   3. Terraform destroy: app layer (ecs|eks) then infrastructure (single terraform/teardown.sh ENV all)
-#   4. Optional: cleanup orphaned AWS resources (S3, ECR, ECS task definitions)
-#   5. Optional: clean local Docker images (fru-api:*)
+# STEPS (per mode):
+#   Pre-destroy (stop services, empty S3) → Terraform destroy (layer(s)) → optional orphan cleanup → optional local Docker cleanup.
 #
-# REQUIRED: --container-type (ecs or eks)
+# REQUIRED: --container-type (eks | ecs | all)
 #
 # OPTIONS: --force, --skip-confirmation, --dry-run, --clean-local-only, --help
 #
@@ -46,11 +40,12 @@ ECR_REPO_NAME="fru-api"
 
 show_help() {
     cat << EOF
-Usage: $0 <environment> --container-type <ecs|eks> [options...]
+Usage: $0 <environment> --container-type <eks|ecs|all> [options...]
 
-Full teardown: stop services → empty S3 → terraform destroy (app then infra) → optional orphan + local Docker cleanup.
+  --container-type eks  Destroy EKS app layer only (ECS and shared left standing).
+  --container-type ecs  Destroy ECS app layer only (EKS and shared left standing).
+  --container-type all  Destroy EKS + ECS + shared infra (everything).
 
-Required: --container-type ecs or eks
 Options: --force, --dry-run, --clean-local-only, --help
 EOF
 }
@@ -69,10 +64,10 @@ while [[ $# -gt 0 ]]; do
         --container-type)
             if [ $# -ge 2 ]; then
                 CONTAINER_TYPE="$2"
-                [[ "$CONTAINER_TYPE" != "ecs" && "$CONTAINER_TYPE" != "eks" ]] && { log_error "Invalid container type: $CONTAINER_TYPE"; exit 1; }
+                [[ "$CONTAINER_TYPE" != "ecs" && "$CONTAINER_TYPE" != "eks" && "$CONTAINER_TYPE" != "all" ]] && { log_error "Invalid container type: $CONTAINER_TYPE (must be eks, ecs, or all)"; exit 1; }
                 shift 2
             else
-                log_error "--container-type requires a value (ecs or eks)"; exit 1
+                log_error "--container-type requires a value (eks, ecs, or all)"; exit 1
             fi
             ;;
         --help|-h) show_help; exit 0 ;;
@@ -90,9 +85,13 @@ if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
     load_image_identifiers "aws" || exit 1
 fi
 
-log_step "Infrastructure Destruction (slim orchestrator)"
+log_step "Infrastructure Teardown"
 log_warning "════════════════════════════════════════════════════════════════"
-log_warning "WARNING: This will DESTROY ALL infrastructure for $ENVIRONMENT"
+if [ "$CONTAINER_TYPE" = "all" ]; then
+    log_warning "WARNING: This will DESTROY ALL infrastructure for $ENVIRONMENT (EKS + ECS + shared)"
+else
+    log_warning "WARNING: This will DESTROY $CONTAINER_TYPE-specific infrastructure for $ENVIRONMENT"
+fi
 log_warning "════════════════════════════════════════════════════════════════"
 log_info "Environment: $ENVIRONMENT | Container type: $CONTAINER_TYPE | Region: $AWS_REGION"
 [ "$DRY_RUN" = "true" ] && log_info "Mode: DRY-RUN" || log_warning "Mode: DESTRUCTION"
@@ -105,95 +104,93 @@ if [ "$DRY_RUN" = "false" ] && [ "$SKIP_CONFIRMATION" = "false" ] && [ "${PREEMP
     echo ""
 fi
 
-# --- Step 1: Stop ECS/EKS services ---
-stop_services() {
-    log_step "Step 1: Stopping $(echo "$CONTAINER_TYPE" | tr '[:lower:]' '[:upper:]') services"
-    local cluster_name="${PROJECT_NAME}-${ENVIRONMENT}-cluster"
-    if [ "$CONTAINER_TYPE" = "ecs" ]; then
-        source "$REPO_ROOT/run_scripts/main_application_scripts/aws/ecs/helpers/stop-ecs-services.sh"
-        stop_ecs_services "$cluster_name" "$AWS_PROFILE" "$AWS_REGION" "$DRY_RUN"
-    elif [ "$CONTAINER_TYPE" = "eks" ]; then
-        source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/helpers/stop-eks-services.sh"
-        stop_eks_services "$cluster_name" "$AWS_PROFILE" "$AWS_REGION" "$DRY_RUN"
-    fi
-    echo ""
-}
-
-# --- Step 2: Empty S3 buckets ---
-empty_s3_buckets() {
-    log_step "Step 2: Emptying S3 buckets"
-    local buckets_to_empty=(
-        "${PROJECT_NAME}-${ENVIRONMENT}-analytics-data-${AWS_ACCOUNT_ID}"
-        "${PROJECT_NAME}-${ENVIRONMENT}-frontend-${AWS_ACCOUNT_ID}"
-    )
-    for bucket in "${buckets_to_empty[@]}"; do
-        if aws s3 ls --profile "$AWS_PROFILE" "s3://$bucket" >/dev/null 2>&1; then
-            local count; count=$(aws s3 ls "s3://$bucket" --profile "$AWS_PROFILE" --recursive 2>/dev/null | wc -l | tr -d ' ' || echo "0")
-            if [ "$count" -gt 0 ]; then
-                [ "$DRY_RUN" = "true" ] && { log_info "  [DRY-RUN] Would empty: $bucket"; continue; }
-                log_info "  Emptying: $bucket"
-                aws s3 rm "s3://$bucket" --profile "$AWS_PROFILE" --recursive 2>&1 || true
-                local versioned_json
-                versioned_json=$(aws s3api list-object-versions --bucket "$bucket" --profile "$AWS_PROFILE" --region "$AWS_REGION" --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}, DeleteMarkers: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json 2>/dev/null || echo '{"Objects":[],"DeleteMarkers":[]}')
-                local delete_payload
-                delete_payload=$(echo "$versioned_json" | python3 -c "import sys,json; d=json.load(sys.stdin); o=d.get('Objects',[])+d.get('DeleteMarkers',[]); print(json.dumps({'Objects':o,'Quiet':True}) if o else '')" 2>/dev/null || echo "")
-                [ -n "$delete_payload" ] && echo "$delete_payload" | aws s3api delete-objects --bucket "$bucket" --delete file:///dev/stdin --profile "$AWS_PROFILE" --region "$AWS_REGION" 2>&1 || true
-                log_success "  Emptied: $bucket"
-            else
-                log_info "  Already empty: $bucket"
-            fi
-        else
-            log_info "  Bucket does not exist: $bucket"
-        fi
-    done
-    echo ""
-}
-
-# --- Step 3: Terraform destroy (app layer then infrastructure) ---
-terraform_destroy_all() {
-    log_step "Step 3: Terraform destroy (app layer then infrastructure)"
-    local tf_script="$REPO_ROOT/run_scripts/main_application_scripts/aws/terraform/teardown.sh"
-    [ ! -f "$tf_script" ] && { log_error "Terraform teardown not found: $tf_script"; return 1; }
+# --- Step 1: Pre-destroy (stop services, empty S3) via sub_proc ---
+run_pre_destroy() {
+    local ct="$1"
+    log_step "Pre-destroy ($(echo "$ct" | tr '[:lower:]' '[:upper:]'))"
+    local pre_script="$SCRIPT_DIR/sub_proc/${ct}_pre_destroy.py"
+    [ ! -f "$pre_script" ] && { log_error "Pre-destroy script not found: $pre_script"; return 1; }
     if [ "$DRY_RUN" = "true" ]; then
-        log_info "[DRY-RUN] Would run: $tf_script $ENVIRONMENT all (CONTAINER_TYPE=$CONTAINER_TYPE)"
+        log_info "[DRY-RUN] Would run: $pre_script --environment $ENVIRONMENT --dry-run"
         echo ""
         return 0
     fi
-    export CONTAINER_TYPE
+    export AWS_PROFILE AWS_REGION
+    if "$PYTHON_CMD" "$pre_script" --environment "$ENVIRONMENT" --profile "$AWS_PROFILE" --region "$AWS_REGION"; then
+        log_success "Pre-destroy ($ct) done"
+    else
+        log_warning "Pre-destroy ($ct) had issues (continuing)"
+    fi
+    echo ""
+}
+
+# --- Step 2: Terraform destroy (single app layer: eks or ecs) via sub_proc ---
+run_terraform_teardown_layer() {
+    local ct="$1"
+    log_step "Terraform destroy ($(echo "$ct" | tr '[:lower:]' '[:upper:]') layer only)"
+    local tf_wrapper="$SCRIPT_DIR/sub_proc/${ct}_terraform_teardown.sh"
+    [ ! -f "$tf_wrapper" ] && { log_error "Terraform teardown wrapper not found: $tf_wrapper"; return 1; }
+    if [ "$DRY_RUN" = "true" ]; then
+        log_info "[DRY-RUN] Would run: $tf_wrapper $ENVIRONMENT"
+        echo ""
+        return 0
+    fi
     export AWS_PROFILE AWS_REGION
     [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && export PREEMPT=true
-    if "$tf_script" "$ENVIRONMENT" "all"; then
-        log_success "Terraform teardown complete (app + infrastructure)"
+    if "$tf_wrapper" "$ENVIRONMENT"; then
+        log_success "Terraform teardown ($ct layer) complete"
     else
-        log_warning "Terraform teardown had issues (retry or use remove-all-aws-resources as fallback)"
+        log_warning "Terraform teardown ($ct) had issues (retry or use remove-all-aws-resources as fallback)"
         return 1
     fi
     echo ""
 }
 
-# --- Step 4: Optional orphan cleanup ---
-cleanup_orphaned() {
-    log_step "Step 4: Optional orphan cleanup"
-    local helper="$SCRIPT_DIR/helpers/cleanup-orphaned-resources.sh"
-    [ ! -f "$helper" ] && { log_info "Orphan cleanup script not found; skipping"; echo ""; return 0; }
+# --- Terraform destroy shared (infrastructure) layer ---
+run_terraform_teardown_shared() {
+    log_step "Terraform destroy (shared infrastructure)"
+    local tf_wrapper="$SCRIPT_DIR/sub_proc/shared_terraform_teardown.sh"
+    [ ! -f "$tf_wrapper" ] && { log_error "Shared teardown wrapper not found: $tf_wrapper"; return 1; }
     if [ "$DRY_RUN" = "true" ]; then
-        log_info "[DRY-RUN] Would run: $helper --environment $ENVIRONMENT --cont-sys $CONTAINER_TYPE"
+        log_info "[DRY-RUN] Would run: $tf_wrapper $ENVIRONMENT"
         echo ""
         return 0
     fi
-    local cmd=("$helper" "--environment" "$ENVIRONMENT" "--cont-sys" "$CONTAINER_TYPE")
-    [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && cmd+=(--force)
-    if "${cmd[@]}"; then
-        log_success "Orphan cleanup done"
+    export AWS_PROFILE AWS_REGION
+    [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && export PREEMPT=true
+    if "$tf_wrapper" "$ENVIRONMENT"; then
+        log_success "Terraform teardown (shared) complete"
     else
-        log_warning "Orphan cleanup had issues (non-fatal)"
+        log_warning "Terraform teardown (shared) had issues"
+        return 1
     fi
     echo ""
 }
 
-# --- Step 5: Optional local Docker cleanup ---
+# --- Step 3: Optional orphan cleanup (sub_proc Python) ---
+cleanup_orphaned() {
+    local ct="$1"
+    log_step "Optional orphan cleanup (container-type: $ct)"
+    local helper="$SCRIPT_DIR/sub_proc/cleanup_orphaned.py"
+    [ ! -f "$helper" ] && { log_info "Orphan cleanup script not found; skipping"; echo ""; return 0; }
+    if [ "$DRY_RUN" = "true" ]; then
+        log_info "[DRY-RUN] Would run: $helper --environment $ENVIRONMENT --container-type $ct --dry-run"
+        echo ""
+        return 0
+    fi
+    local cmd=("$PYTHON_CMD" "$helper" "--environment" "$ENVIRONMENT" "--container-type" "$ct" "--profile" "$AWS_PROFILE" "--region" "$AWS_REGION")
+    [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && cmd+=(--force)
+    if "${cmd[@]}"; then
+        log_success "Orphan cleanup ($ct) done"
+    else
+        log_warning "Orphan cleanup ($ct) had issues (non-fatal)"
+    fi
+    echo ""
+}
+
+# --- Step 4: Optional local Docker cleanup ---
 cleanup_local_images() {
-    log_step "Step 5: Local Docker image cleanup"
+    log_step "Step 4: Local Docker image cleanup"
     if [ "$DRY_RUN" = "true" ]; then
         log_info "[DRY-RUN] Would clean local images: ${ECR_REPO_NAME}:*"
         echo ""
@@ -227,10 +224,34 @@ main() {
         return 0
     fi
 
-    stop_services || failed=true
-    empty_s3_buckets || failed=true
-    terraform_destroy_all || failed=true
-    cleanup_orphaned || true
+    case "$CONTAINER_TYPE" in
+        eks)
+            run_pre_destroy "eks" || failed=true
+            run_terraform_teardown_layer "eks" || failed=true
+            cleanup_orphaned "eks" || true
+            ;;
+        ecs)
+            run_pre_destroy "ecs" || failed=true
+            run_terraform_teardown_layer "ecs" || failed=true
+            cleanup_orphaned "ecs" || true
+            ;;
+        all)
+            run_pre_destroy "eks" || failed=true
+            run_pre_destroy "ecs" || failed=true
+            run_terraform_teardown_layer "eks" || failed=true
+            run_terraform_teardown_layer "ecs" || failed=true
+            if [ "$DRY_RUN" = "false" ] && [ "${TEARDOWN_WAIT_BETWEEN_LAYERS:-0}" -gt 0 ]; then
+                log_step "Waiting ${TEARDOWN_WAIT_BETWEEN_LAYERS}s before shared destroy"
+                sleep "${TEARDOWN_WAIT_BETWEEN_LAYERS}"
+            fi
+            run_pre_destroy "shared" || failed=true
+            run_terraform_teardown_shared || failed=true
+            cleanup_orphaned "ecs" || true
+            cleanup_orphaned "eks" || true
+            ;;
+        *) log_error "Unreachable: CONTAINER_TYPE=$CONTAINER_TYPE"; exit 1 ;;
+    esac
+
     cleanup_local_images || true
 
     log_step "Destruction Summary"
@@ -239,7 +260,7 @@ main() {
     elif [ "$failed" = "true" ]; then
         log_warning "Teardown completed with issues; retry or use remove-all-aws-resources as fallback"
     else
-        log_success "Complete infrastructure destruction completed for $ENVIRONMENT"
+        log_success "Teardown completed for $ENVIRONMENT (container-type: $CONTAINER_TYPE)"
     fi
 
     [ "$failed" = "true" ] && exit 1

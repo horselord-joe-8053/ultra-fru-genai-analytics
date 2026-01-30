@@ -66,8 +66,8 @@ deploy_terragrunt() {
         fi
         
         # Fallback: Use Python for reliable UTC parsing (works on both macOS and Linux)
-        if command_exists python3; then
-            created_epoch=$(python3 -c "from datetime import datetime; print(int(datetime.fromisoformat('${created_iso}'.replace('Z', '+00:00')).timestamp()))" 2>/dev/null || echo "0")
+        if command_exists "${PYTHON_CMD:-python3}"; then
+            created_epoch=$("${PYTHON_CMD:-python3}" -c "from datetime import datetime; print(int(datetime.fromisoformat('${created_iso}'.replace('Z', '+00:00')).timestamp()))" 2>/dev/null || echo "0")
             if [ "$created_epoch" != "0" ] && [ -n "$created_epoch" ]; then
                 echo $((now_epoch - created_epoch))
                 return

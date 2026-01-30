@@ -81,14 +81,7 @@ if [ "$DRY_RUN" = "false" ] && [ "$SKIP_CONFIRMATION" = "false" ]; then
   fi
 fi
 
-# Install Python deps if missing (boto3)
-if ! python3 -c "import boto3" 2>/dev/null; then
-  log_info "Installing boto3 (required by remove-all-aws-resources.py)..."
-  python3 -m pip install --quiet boto3 || {
-    log_error "Failed to install boto3. Run: python3 -m pip install boto3"
-    exit 1
-  }
-fi
+# PYTHON_CMD is set by load-env.sh (venv if present, else python3); venv has boto3 from requirements.txt
 
 PYTHON_ARGS=(
   --result-json "$RESULT_JSON"
@@ -98,4 +91,4 @@ PYTHON_ARGS=(
 [ "$DRY_RUN" = "true" ] && PYTHON_ARGS+=(--dry-run)
 [ "$KEEP_STATE_BUCKET" = "false" ] && PYTHON_ARGS+=(--no-keep-state-bucket)
 
-python3 "$PYTHON_SCRIPT" "${PYTHON_ARGS[@]}"
+"$PYTHON_CMD" "$PYTHON_SCRIPT" "${PYTHON_ARGS[@]}"

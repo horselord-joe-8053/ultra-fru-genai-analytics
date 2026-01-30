@@ -28,12 +28,9 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-# Load environment variables if available (for AWS credentials)
-if [ -f "$REPO_ROOT/.env" ]; then
-    source "$REPO_ROOT/run_scripts/shared/load-env.sh"
-    load_env_file 2>/dev/null || true
-fi
+source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+# Load .env file if available (for AWS credentials)
+[ -f "$REPO_ROOT/.env" ] && load_env_file 2>/dev/null || true
 
 # Get task definition from service if not provided
 if [ -z "$TASK_DEF_ARN" ]; then
@@ -94,7 +91,7 @@ fi
 # Get S3A configuration from Python helper (single source of truth)
 # REPO_ROOT already defined above, but ensure it's set if not already
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../.." && pwd)}"
-S3A_CONFIG=$(python3 -c "
+S3A_CONFIG=$("$PYTHON_CMD" -c "
 import sys
 sys.path.insert(0, '$REPO_ROOT')
 from spark_jobs.utils.spark_config import get_s3a_spark_config

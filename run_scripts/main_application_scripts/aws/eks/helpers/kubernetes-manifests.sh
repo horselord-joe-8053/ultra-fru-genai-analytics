@@ -1114,8 +1114,8 @@ apply_kubernetes_manifests() {
             log_info "Editing kubeconfig to use --profile in exec.args instead of exec.env..."
             
             # Use Python to edit YAML (more robust than sed for YAML structure)
-            if command_exists python3; then
-                python3 <<PYTHON_SCRIPT
+            if command_exists "${PYTHON_CMD:-python3}"; then
+                "${PYTHON_CMD:-python3}" <<PYTHON_SCRIPT
 import yaml
 import sys
 import os

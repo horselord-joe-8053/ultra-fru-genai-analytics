@@ -160,3 +160,10 @@ if ! command -v resolve_container_image_for_aws >/dev/null 2>&1; then
     fi
 fi
 
+# Set PYTHON_CMD to project venv Python if present (so scripts use requirements.txt deps)
+# REPO_ROOT is already set above. Scripts that source load-env.sh get PYTHON_CMD automatically.
+load_python_env_file="$ENV_SCRIPT_DIR/load-python-env.sh"
+if [ -f "$load_python_env_file" ]; then
+    source "$load_python_env_file"
+fi
+

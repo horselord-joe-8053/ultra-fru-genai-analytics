@@ -93,14 +93,10 @@ if [ ! -f "$PYTHON_SCRIPT" ]; then
     exit 1
 fi
 
-# Build Python command
-PYTHON_CMD="python3 \"$PYTHON_SCRIPT\" --profile \"$AWS_PROFILE\" --region \"$AWS_REGION\""
-if [ "$CHECK_ALL_REGIONS" = "true" ]; then
-    PYTHON_CMD="$PYTHON_CMD --all-regions"
-fi
-
-# Execute Python script
-eval "$PYTHON_CMD"
+# PYTHON_CMD is set by load-env.sh (venv if present). Run script with it.
+RUN_CMD=("$PYTHON_CMD" "$PYTHON_SCRIPT" --profile "$AWS_PROFILE" --region "$AWS_REGION")
+[ "$CHECK_ALL_REGIONS" = "true" ] && RUN_CMD+=(--all-regions)
+"${RUN_CMD[@]}"
 
 # Get the generated file to display summary
 RESULTS_DIR="$SCRIPT_DIR/results"
@@ -109,7 +105,7 @@ LATEST_FILE=$(ls -t "$RESULTS_DIR"/aws-fru-*.json 2>/dev/null | head -1)
 if [ -n "$LATEST_FILE" ] && [ -f "$LATEST_FILE" ]; then
     echo ""
     log_step "Summary"
-    TOTAL_RESOURCES=$(python3 -c "import json; data = json.load(open('$LATEST_FILE')); print(data['metadata']['total_resources'])" 2>/dev/null || echo "unknown")
+    TOTAL_RESOURCES=$("$PYTHON_CMD" -c "import json; data = json.load(open('$LATEST_FILE')); print(data['metadata']['total_resources'])" 2>/dev/null || echo "unknown")
     log_info "Total resources found: $TOTAL_RESOURCES"
     log_info "Account ID: $AWS_ACCOUNT_ID"
     log_info "Profile: $AWS_PROFILE"

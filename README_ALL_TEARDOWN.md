@@ -50,37 +50,39 @@ This document explains each teardown script, their purpose, usage, and relations
 **Relationships**:
 - **Called by**: None (standalone CLI tool - run manually when needed)
 - **Calls**: AWS CLI directly
-- **Note**: This script is NOT called by teardown orchestrators. For automated teardown, use `teardown-resources-all.sh` which calls `cleanup-orphaned-resources.sh` (selective cleanup with retention policies) instead.
+- **Note**: This script is NOT called by teardown orchestrators. For automated teardown, use `teardown-resources-all.sh` which calls `resources_cleanup/sub_proc/cleanup_orphaned.py` (selective cleanup with retention policies) instead.
 
 ---
 
 ## 3. teardown-resources-all.sh
 
-**Description**: **Single slim orchestrator** for complete infrastructure destruction. Steps: (1) Stop ECS/EKS services and empty S3 buckets (pre-destroy), (2) Run `terraform/teardown.sh <ENV> all` once (destroys app layer then infrastructure in dependency order), (3) Optional orphan cleanup, (4) Optional local Docker image cleanup. No long VPC/Aurora waits in the happy path; rely on Terraform destroy order. If infrastructure destroy fails (e.g. ENI eventual consistency), retry later or use `remove-all-aws-resources` as fallback (see README_TERRA_SH_RESPONSIBILITIES.md and README_WAR_STORIES.md). Preserves Secrets Manager secrets (lifecycle.prevent_destroy).
+**Description**: Teardown orchestrator with three modes. **eks**: Destroy EKS app layer only (ECS and shared left standing). **ecs**: Destroy ECS app layer only (EKS and shared left standing). **all**: Destroy EKS + ECS app layers, then shared infrastructure (VPC, Aurora, IAM)—nothing left standing. Steps: (1) Pre-destroy (stop services, empty S3), (2) Terraform destroy (layer(s)), (3) Optional orphan cleanup, (4) Optional local Docker cleanup. If destroy fails (e.g. ENI eventual consistency), retry later or use `remove-all-aws-resources` as fallback (see README_TERRA_SH_RESPONSIBILITIES.md and README_WAR_STORIES.md). Preserves Secrets Manager secrets (lifecycle.prevent_destroy).
 
 **Usage**:
 ```bash
-./run_scripts/main_application_scripts/aws/shared/resources_cleanup/teardown-resources-all.sh <ENVIRONMENT> --container-type <ecs|eks> [OPTIONS]
+./run_scripts/main_application_scripts/aws/shared/resources_cleanup/teardown-resources-all.sh <ENVIRONMENT> --container-type <eks|ecs|all> [OPTIONS]
 ```
 
 **Required Parameters**:
 - `ENVIRONMENT`: `dev`, `staging`, or `prod`
-- `--container-type`: `ecs` or `eks`
+- `--container-type`: `eks` (EKS layer only) | `ecs` (ECS layer only) | `all` (EKS + ECS + shared)
 
 **Options**:
 - `--force`: Skip confirmation prompts
 - `--dry-run`: Preview changes
 - `--clean-local-only`: Only clean local Docker images (skip AWS teardown)
 
-**Example**:
+**Examples**:
 ```bash
-./run_scripts/main_application_scripts/aws/shared/resources_cleanup/teardown-resources-all.sh dev --container-type eks --force
+./run_scripts/main_application_scripts/aws/shared/resources_cleanup/teardown-resources-all.sh dev --container-type eks --force   # EKS layer only
+./run_scripts/main_application_scripts/aws/shared/resources_cleanup/teardown-resources-all.sh dev --container-type ecs --force   # ECS layer only
+./run_scripts/main_application_scripts/aws/shared/resources_cleanup/teardown-resources-all.sh dev --container-type all --force   # Everything (EKS + ECS + shared)
 ```
 
 **Relationships**:
 - **Called by**: `aws/run.sh` (when `--preempt` flag is used)
-- **Calls**: `terraform/teardown.sh <ENV> all` (single call; app layer then infrastructure), `cleanup-orphaned-resources.sh` (optional, after Terraform), local Docker cleanup (optional)
-- **Architecture**: Pre-destroy (stop services, empty S3) → Terraform destroy (app then infra) → optional orphan cleanup → optional local Docker. For partial teardown, call `terraform/teardown.sh` directly (see below).
+- **Calls**: `sub_proc/<ecs|eks>_pre_destroy.py` (stop services, empty S3), `sub_proc/<ecs|eks>_terraform_teardown.sh` (calls `terraform/teardown.sh <ENV> all`), `sub_proc/cleanup_orphaned.py` (optional, after Terraform), local Docker cleanup (optional)
+- **Architecture**: Pre-destroy (sub_proc Python) → Terraform destroy (sub_proc shell wrapper) → optional orphan cleanup (sub_proc Python) → optional local Docker. For partial teardown, call `terraform/teardown.sh` or sub_proc scripts directly (see below).
 
 ---
 
@@ -90,9 +92,11 @@ This document explains each teardown script, their purpose, usage, and relations
 
 | Goal | Command | Notes |
 |------|---------|--------|
-| Container-only (ECS or EKS) | `terraform/teardown.sh <ENV> ecs` or `terraform/teardown.sh <ENV> eks` | Run **pre-destroy** first: stop services (e.g. `stop-ecs-services.sh` / `stop-eks-services.sh`), empty S3 buckets (analytics, frontend), then run the command. Optional: `cleanup-orphaned-resources.sh --cont-sys ecs\|eks --environment <ENV>`. |
-| Shared-only (VPC, Aurora, IAM) | `terraform/teardown.sh <ENV> infrastructure` | Only after container layers are gone. Optional: `cleanup-orphaned-resources.sh --environment <ENV>`. |
-| Full teardown | `teardown-resources-all.sh <ENV> --container-type ecs\|eks` | Does pre-destroy + `terraform/teardown.sh <ENV> all` + optional orphan + local Docker. |
+| Container-only (ECS or EKS) | `terraform/teardown.sh <ENV> ecs` or `terraform/teardown.sh <ENV> eks` | Run **pre-destroy** first: `sub_proc/eks_pre_destroy.py` or `sub_proc/ecs_pre_destroy.py`, then the command. Optional: `sub_proc/cleanup_orphaned.py --container-type ecs\|eks --environment <ENV>`. |
+| Shared-only (VPC, Aurora, IAM) | `terraform/teardown.sh <ENV> infrastructure` or `sub_proc/shared_terraform_teardown.sh <ENV>` | Only after container layers are gone. Optional: `sub_proc/cleanup_orphaned.py --environment <ENV>`. |
+| Full teardown (everything) | `teardown-resources-all.sh <ENV> --container-type all` | Pre-destroy EKS + ECS, terraform destroy eks + ecs + infrastructure, optional orphan + local Docker. |
+| EKS layer only | `teardown-resources-all.sh <ENV> --container-type eks` | Pre-destroy EKS, terraform destroy eks layer only. ECS and shared left standing. |
+| ECS layer only | `teardown-resources-all.sh <ENV> --container-type ecs` | Pre-destroy ECS, terraform destroy ecs layer only. EKS and shared left standing. |
 
 Set `PREEMPT=true` (or confirm at prompts) and `CONTAINER_TYPE=ecs` or `eks` when using `LAYER=all`.
 
@@ -135,13 +139,12 @@ Set `PREEMPT=true` (or confirm at prompts) and `CONTAINER_TYPE=ecs` or `eks` whe
 flowchart TD
     A[aws/run.sh --preempt] --> B[teardown-resources-all.sh]
 
-    B --> B1[Step 1: stop ECS/EKS services]
-    B --> B2[Step 2: empty S3 buckets]
-    B --> B3[Step 3: terraform/teardown.sh ENV all]
-    B3 --> B3a[destroy app layer ecs_or_eks]
-    B3 --> B3b[destroy infrastructure layer]
-    B --> B4[Step 4: cleanup-orphaned-resources.sh optional]
-    B --> B5[Step 5: local Docker cleanup optional]
+    B --> B1[Step 1: sub_proc pre_destroy]
+    B1 --> B1a[stop services + empty S3]
+    B --> B2[Step 2: sub_proc terraform teardown]
+    B2 --> B2a[terraform/teardown.sh ENV all]
+    B --> B3[Step 3: sub_proc/cleanup_orphaned.py optional]
+    B --> B4[Step 4: local Docker cleanup optional]
 
     classDef orchestrator fill:#1f78b4,stroke:#0b3c68,color:#ffffff,font-size:14px;
     classDef coordinator fill:#33a02c,stroke:#145214,color:#ffffff,font-size:14px;
@@ -149,7 +152,7 @@ flowchart TD
 
     class A orchestrator
     class B coordinator
-    class B1,B2,B3,B4,B5,B3a,B3b step
+    class B1,B1a,B2,B2a,B3,B4 step
 ```
 
 ---
@@ -158,10 +161,13 @@ flowchart TD
 
 | Use Case | Script | Example |
 |----------|--------|---------|
-| Destroy everything (full teardown) | `teardown-resources-all.sh` | `teardown-resources-all.sh dev --container-type eks --force` |
+| Destroy everything (full teardown) | `teardown-resources-all.sh` | `teardown-resources-all.sh dev --container-type all --force` |
+| Destroy EKS layer only | `teardown-resources-all.sh` | `teardown-resources-all.sh dev --container-type eks --force` |
+| Destroy ECS layer only | `teardown-resources-all.sh` | `teardown-resources-all.sh dev --container-type ecs --force` |
 | Destroy one layer only (partial) | `terraform/teardown.sh` | `terraform/teardown.sh dev eks` or `terraform/teardown.sh dev infrastructure` |
 | Nuclear teardown (all recreatable resources) | `delete-recreatable-resources.sh` | `delete-recreatable-resources.sh dev --skip-confirmation` |
-| Clean up orphaned resources only | `cleanup-orphaned-resources.sh` | `cleanup-orphaned-resources.sh --environment dev --force` |
+| Clean up orphaned resources only | `sub_proc/cleanup_orphaned.py` | `sub_proc/cleanup_orphaned.py --environment dev --container-type ecs --force` |
+| Frontend bucket diagnostic | `cli/resource-check/reference_check_frontend_bucket.sh` | `reference_check_frontend_bucket.sh --environment dev` |
 | Complete teardown + deploy | `aws/run.sh --preempt` | `aws/run.sh deploy --container-type eks dev --preempt` |
 
 ---
@@ -192,9 +198,11 @@ When `--preempt` is used with `aws/run.sh`:
 
 | Need | What to run |
 |------|-------------|
-| **Full teardown** (pre-destroy + app + infra + optional orphan + local Docker) | `teardown-resources-all.sh <ENV> --container-type ecs\|eks` (single orchestrator; it calls `terraform/teardown.sh <ENV> all` once). |
-| **Partial: container-only** (ECS or EKS layer only) | Pre-destroy (stop services, empty S3) then `terraform/teardown.sh <ENV> ecs` or `terraform/teardown.sh <ENV> eks`. Optional: `cleanup-orphaned-resources.sh --cont-sys ecs\|eks --environment <ENV>`. |
-| **Partial: shared-only** (VPC, Aurora, IAM) | `terraform/teardown.sh <ENV> infrastructure`. Optional: `cleanup-orphaned-resources.sh --environment <ENV>`. |
+| **Full teardown** (EKS + ECS + shared + optional orphan + local Docker) | `teardown-resources-all.sh <ENV> --container-type all`. |
+| **EKS layer only** (leave ECS and shared standing) | `teardown-resources-all.sh <ENV> --container-type eks`. |
+| **ECS layer only** (leave EKS and shared standing) | `teardown-resources-all.sh <ENV> --container-type ecs`. |
+| **Partial: manual** (pre-destroy + terraform by hand) | Pre-destroy: `sub_proc/eks_pre_destroy.py` or `sub_proc/ecs_pre_destroy.py`, then `terraform/teardown.sh <ENV> ecs` or `eks`. Optional: `sub_proc/cleanup_orphaned.py --container-type ecs\|eks --environment <ENV>`. |
+| **Partial: shared-only** (VPC, Aurora, IAM) | `terraform/teardown.sh <ENV> infrastructure` or `sub_proc/shared_terraform_teardown.sh <ENV>`. Optional: `sub_proc/cleanup_orphaned.py --environment <ENV>`. |
 
 **Pros of removing nonshared/shared:**
 
@@ -206,7 +214,7 @@ When `--preempt` is used with `aws/run.sh`:
 **Cons / trade-offs:**
 
 - **Partial teardown is more manual:** For container-only, users must run pre-destroy (stop services, empty S3) themselves or copy the steps from teardown-resources-all; we document the commands in the "Partial teardown" section. No one-line script for "tear down EKS only" that does pre-destroy + terraform + orphan.
-- **Orphan cleanup is optional and explicit:** Shared-only teardown no longer auto-runs orphan cleanup; users run `cleanup-orphaned-resources.sh` explicitly if they want it.
+- **Orphan cleanup is optional and explicit:** Shared-only teardown no longer auto-runs orphan cleanup; users run `sub_proc/cleanup_orphaned.py` explicitly if they want it.
 
 **Conclusion:** Removing nonshared/shared is a net simplification. Full teardown stays one command (`teardown-resources-all.sh`). Partial teardown is "call `terraform/teardown.sh` with the right layer" plus documented pre-destroy and optional orphan steps. We accepted the trade-off of slightly more manual steps for partial teardown in exchange for less code and a single Terraform teardown entry point.
 

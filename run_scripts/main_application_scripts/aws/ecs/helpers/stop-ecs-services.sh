@@ -56,7 +56,7 @@ stop_ecs_services() {
     local services_json
     services_json=$(aws ecs list-services --cluster "$cluster_name" --profile "$aws_profile" --region "$aws_region" --output json 2>/dev/null || echo '{"serviceArns":[]}')
     local service_arns
-    service_arns=$(echo "$services_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(' '.join(data.get('serviceArns', [])))" 2>/dev/null || echo "")
+    service_arns=$(echo "$services_json" | "${PYTHON_CMD:-python3}" -c "import sys, json; data=json.load(sys.stdin); print(' '.join(data.get('serviceArns', [])))" 2>/dev/null || echo "")
     
     for service_arn in $service_arns; do
         if [ -z "$service_arn" ]; then

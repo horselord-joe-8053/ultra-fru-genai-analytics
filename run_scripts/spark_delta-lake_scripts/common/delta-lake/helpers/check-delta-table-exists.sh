@@ -29,16 +29,7 @@ fi
 # Use Python helper (single source of truth for verification logic)
 # Fall back to AWS CLI if Python/boto3 is not available
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../../.." && pwd)}"
-
-# Determine which Python to use: prefer venv if it exists, otherwise system Python
-# This ensures local deployments use venv Python (has boto3 from requirements.txt)
-# AWS deployments will use system Python and fall back to AWS CLI if needed
-VENV_PYTHON="$REPO_ROOT/venv/bin/python3"
-if [ -f "$VENV_PYTHON" ]; then
-    PYTHON_CMD="$VENV_PYTHON"
-else
-    PYTHON_CMD="python3"
-fi
+source "$REPO_ROOT/run_scripts/shared/load-python-env.sh"
 
 # Try Python verification first using CLI function with enhanced error handling
 # Exit codes: 0 = exists, 1 = not exists, 2 = error (fallback needed)

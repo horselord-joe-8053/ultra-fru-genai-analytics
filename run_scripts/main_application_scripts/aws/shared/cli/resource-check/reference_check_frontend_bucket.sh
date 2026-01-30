@@ -1,6 +1,6 @@
 #!/bin/bash
 # Diagnostic script to check which S3 bucket the frontend is currently using
-# Usage: ./reference-check-frontend-bucket.sh [--environment dev|prod]
+# Usage: ./reference_check_frontend_bucket.sh [--environment dev|prod]
 #
 # This script provides a comprehensive analysis by checking:
 # 1. Terraform outputs (what Terraform says should be used)
@@ -14,7 +14,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Script is in: run_scripts/main_application_scripts/aws/shared/resources_cleanup/helpers/
+# Script is in: run_scripts/main_application_scripts/aws/shared/cli/resource-check/
 # Need to go up 6 levels to reach repo root
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../.." && pwd)}"
 source "$REPO_ROOT/run_scripts/shared/logger.sh"
@@ -84,13 +84,13 @@ cloudfront_dists=$(aws cloudfront list-distributions --profile "$AWS_PROFILE" \
     --query "DistributionList.Items[?Comment=='${PROJECT_NAME}-${ENVIRONMENT}-frontend' || contains(Comment, '${PROJECT_NAME}-${ENVIRONMENT}')].{Id:Id,Comment:Comment}" \
     --output json 2>/dev/null || echo "[]")
 
-dist_count=$(echo "$cloudfront_dists" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+dist_count=$(echo "$cloudfront_dists" | "$PYTHON_CMD" -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
 
 if [ "$dist_count" -eq 0 ]; then
     log_warning "  No CloudFront distributions found for this project"
 else
     log_info "  Found $dist_count CloudFront distribution(s):"
-    echo "$cloudfront_dists" | python3 -c "
+    echo "$cloudfront_dists" | "$PYTHON_CMD" -c "
 import sys, json
 dists = json.load(sys.stdin)
 for dist in dists:
@@ -98,14 +98,14 @@ for dist in dists:
 " 2>/dev/null || log_info "    (Unable to parse)"
     
     # Get S3 origins from the first distribution
-    first_dist_id=$(echo "$cloudfront_dists" | python3 -c "import sys, json; dists=json.load(sys.stdin); print(dists[0]['Id'] if dists else '')" 2>/dev/null || echo "")
+    first_dist_id=$(echo "$cloudfront_dists" | "$PYTHON_CMD" -c "import sys, json; dists=json.load(sys.stdin); print(dists[0]['Id'] if dists else '')" 2>/dev/null || echo "")
     
     if [ -n "$first_dist_id" ]; then
         log_info ""
         log_info "  Checking S3 origins for distribution: $first_dist_id"
         dist_config=$(aws cloudfront get-distribution-config --id "$first_dist_id" --profile "$AWS_PROFILE" --output json 2>/dev/null || echo "{}")
         
-        s3_origins=$(echo "$dist_config" | python3 -c "
+        s3_origins=$(echo "$dist_config" | "$PYTHON_CMD" -c "
 import sys, json
 try:
     config = json.load(sys.stdin)
@@ -137,7 +137,7 @@ echo ""
 # ============================================================================
 log_step "3. Bucket Contents Check"
 
-# Check Terraform-managed bucket
+# Check Terraform-managed bucket (legacy single name and per-container-type names)
 terraform_bucket_name="${PROJECT_NAME}-${ENVIRONMENT}-frontend-${AWS_ACCOUNT_ID}"
 legacy_bucket_name="fru-frontend-bucket"
 
@@ -239,4 +239,3 @@ elif [ -n "$likely_bucket" ] && [ "$likely_bucket" = "$terraform_bucket_name" ];
         log_info "  - Legacy bucket $legacy_bucket_name can be deleted if not needed"
     fi
 fi
-

@@ -24,7 +24,7 @@
 #   --skip-confirmation: Skip confirmation prompts
 #
 # Note: For automated teardown via run.sh --preempt, use teardown-resources-all.sh
-#       which calls cleanup-orphaned-resources.sh (selective cleanup) instead.
+#       which calls sub_proc/cleanup_orphaned.py (selective cleanup) instead.
 
 set -e
 # Note: We use set -e but handle errors gracefully in delete_resource function
@@ -436,7 +436,7 @@ delete_ecr_resources() {
             #   failed to satisfy constraint: 'Member must have length less than or equal to 100'
             # To respect this, we delete images in chunks of at most 100 imageIds per call.
             local image_count
-            image_count=$(echo "$image_ids" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+            image_count=$(echo "$image_ids" | "$PYTHON_CMD" -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
             if [ "$image_count" -gt 0 ]; then
                 local deleted_count=0
                 local start_index=0
@@ -448,7 +448,7 @@ delete_ecr_resources() {
                 
                 while [ "$start_index" -lt "$image_count" ]; do
                     # Build a JSON array slice imageIds[start_index:start_index+chunk_size]
-                    chunk_json=$(printf '%s\n' "$image_ids" | python3 -c "
+                    chunk_json=$(printf '%s\n' "$image_ids" | "$PYTHON_CMD" -c "
 import sys, json
 ids = json.load(sys.stdin)
 start = $start_index
@@ -457,7 +457,7 @@ chunk = ids[start:start+size]
 print(json.dumps(chunk))
 " 2>/dev/null || echo "[]")
                     
-                    chunk_len=$(printf '%s\n' "$chunk_json" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+                    chunk_len=$(printf '%s\n' "$chunk_json" | "$PYTHON_CMD" -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
                     if [ "$chunk_len" -eq 0 ]; then
                         break
                     fi
@@ -531,7 +531,7 @@ delete_s3_resources() {
             versioned_json=$(aws s3api list-object-versions --bucket "$bucket" --profile "$AWS_PROFILE" --region "$AWS_REGION" --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}, DeleteMarkers: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json 2>/dev/null || echo '{"Objects":[],"DeleteMarkers":[]}')
             
             local delete_payload
-            delete_payload=$(echo "$versioned_json" | python3 -c "
+            delete_payload=$(echo "$versioned_json" | "$PYTHON_CMD" -c "
 import sys, json
 try:
     data = json.load(sys.stdin)

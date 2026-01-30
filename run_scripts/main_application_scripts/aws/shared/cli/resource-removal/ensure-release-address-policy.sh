@@ -4,4 +4,6 @@
 # Usage: ./ensure-release-address-policy.sh [--profile PROFILE] [--dry-run]
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec python3 "$SCRIPT_DIR/ensure-release-address-policy.py" "$@"
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../../.." && pwd)}"
+source "$REPO_ROOT/run_scripts/shared/load-python-env.sh"
+exec "$PYTHON_CMD" "$SCRIPT_DIR/ensure-release-address-policy.py" "$@"
