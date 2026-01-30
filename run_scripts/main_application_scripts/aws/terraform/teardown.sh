@@ -186,6 +186,14 @@ teardown_terragrunt() {
         fi
     fi
     
+    # Optional wait between app-layer destroy and infrastructure destroy (LAYER=all only).
+    # Gives AWS time to release ENIs asynchronously after ALB/EKS/ECS deletion (see README_WAR_STORIES.md).
+    # Set TEARDOWN_WAIT_BETWEEN_LAYERS=120 (seconds) to wait 2 min; default 0 = no wait.
+    if [ "$LAYER" = "all" ] && [ "${TEARDOWN_WAIT_BETWEEN_LAYERS:-0}" -gt 0 ]; then
+        log_step "Waiting ${TEARDOWN_WAIT_BETWEEN_LAYERS}s for AWS to release ENIs before infrastructure destroy"
+        sleep "${TEARDOWN_WAIT_BETWEEN_LAYERS}"
+    fi
+    
     # Destroy infrastructure layer
     if [ "$LAYER" = "infrastructure" ] || [ "$LAYER" = "all" ]; then
         log_step "Destroying infrastructure layer (VPC, Aurora, IAM, Secrets Manager)"

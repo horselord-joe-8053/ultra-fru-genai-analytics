@@ -23,7 +23,7 @@ This document explains each teardown script, their purpose, usage, and relations
 ```
 
 **Relationships**:
-- **Called by**: `teardown-resources-nonshared.sh` (container-type layer), `teardown-resources-all.sh` (infrastructure layer)
+- **Called by**: `teardown-resources-all.sh` (single call with `LAYER=all` and `CONTAINER_TYPE` set; destroys app layer then infrastructure). Also callable directly by `teardown-resources-nonshared.sh` / `teardown-resources-shared.sh` for partial teardown.
 - **Calls**: Terragrunt/Terraform directly
 - **Note**: Only destroys Terraform-managed resources. Does not stop services, empty S3 buckets, or clean orphaned resources.
 
@@ -88,7 +88,7 @@ This document explains each teardown script, their purpose, usage, and relations
 ```
 
 **Relationships**:
-- **Called by**: `teardown-resources-all.sh` (as part of complete teardown)
+- **Called by**: Manual/partial teardown only (not used by `teardown-resources-all.sh` in the main flow). Use when you want to destroy only the container-type layer (ECS or EKS) while preserving shared infrastructure.
 - **Calls**: `terraform/teardown.sh` (container-type layer), `cleanup-orphaned-resources.sh` (orphan cleanup)
 
 ---
@@ -123,14 +123,14 @@ This document explains each teardown script, their purpose, usage, and relations
 ```
 
 **Relationships**:
-- **Called by**: `teardown-resources-all.sh` (shared layer teardown)
+- **Called by**: Manual/partial teardown only (not used by `teardown-resources-all.sh` in the main flow). Use when you want to destroy only the shared infrastructure layer (VPC, Aurora, IAM) after container layers are already gone.
 - **Calls**: `terraform/teardown.sh` (infrastructure layer), `cleanup-orphaned-resources.sh` (orphan cleanup – shared-layer pass)
 
 ---
 
 ## 5. teardown-resources-all.sh
 
-**Description**: Complete infrastructure destruction including shared resources. Calls `teardown-resources-nonshared.sh` to destroy container-type layer, waits for VPC endpoints and Aurora to delete, destroys shared infrastructure via `teardown-resources-shared.sh`, and cleans local Docker images. Most destructive script - destroys VPC, Aurora, IAM, and all container-type resources. Preserves Secrets Manager secrets (30-day recovery window).
+**Description**: **Single slim orchestrator** for complete infrastructure destruction. Steps: (1) Stop ECS/EKS services and empty S3 buckets (pre-destroy), (2) Run `terraform/teardown.sh <ENV> all` once (destroys app layer then infrastructure in dependency order), (3) Optional orphan cleanup, (4) Optional local Docker image cleanup. No long VPC/Aurora waits in the happy path; rely on Terraform destroy order. If infrastructure destroy fails (e.g. ENI eventual consistency), retry later or use `remove-all-aws-resources` as fallback (see README_TERRA_SH_RESPONSIBILITIES.md and README_WAR_STORIES.md). Preserves Secrets Manager secrets (lifecycle.prevent_destroy).
 
 **Usage**:
 ```bash
@@ -153,8 +153,8 @@ This document explains each teardown script, their purpose, usage, and relations
 
 **Relationships**:
 - **Called by**: `aws/run.sh` (when `--preempt` flag is used)
-- **Calls**: `teardown-resources-nonshared.sh` (container-type layer), `teardown-resources-shared.sh` (shared layer)
-- **Architecture**: Uses DRY principle – delegates container-type destruction (and its orphan cleanup) to `teardown-resources-nonshared.sh`, and shared-layer destruction (and its orphan cleanup) to `teardown-resources-shared.sh`. As a result, `cleanup-orphaned-resources.sh` may be called twice per full teardown (once per layer, with different scopes).
+- **Calls**: `terraform/teardown.sh <ENV> all` (single call; app layer then infrastructure), `cleanup-orphaned-resources.sh` (optional, after Terraform), local Docker cleanup (optional)
+- **Architecture**: Pre-destroy (stop services, empty S3) → Terraform destroy (app then infra) → optional orphan cleanup → optional local Docker. `teardown-resources-nonshared.sh` and `teardown-resources-shared.sh` are **not** used by this flow; they remain available for partial teardown (container-only or shared-only) when run manually.
 
 ---
 
@@ -189,40 +189,27 @@ This document explains each teardown script, their purpose, usage, and relations
 
 ## Script Call Hierarchy
 
+**Main flow (slim orchestrator):**
+
 ```mermaid
 flowchart TD
     A[aws/run.sh --preempt] --> B[teardown-resources-all.sh]
 
-    B --> C[terraform_destroy_nonshared]
-    C --> D[teardown-resources-nonshared.sh]
-
-    %% Nonshared responsibilities
-    D --> D1[stop services_and_tasks]
-    D --> D2[empty app_s3_buckets]
-    D --> D3[terraform teardown ecs_or_eks]
-    D --> D4[cleanup-orphaned-resources.sh non-shared]
-
-    B --> G[terraform_destroy_shared]
-    G --> H[teardown-resources-shared.sh]
-
-    %% Shared responsibilities
-    H --> H1[terraform teardown infrastructure]
-    H --> H2[cleanup-orphaned-resources.sh shared]
+    B --> B1[Step 1: stop ECS/EKS services]
+    B --> B2[Step 2: empty S3 buckets]
+    B --> B3[Step 3: terraform/teardown.sh ENV all]
+    B3 --> B3a[destroy app layer ecs_or_eks]
+    B3 --> B3b[destroy infrastructure layer]
+    B --> B4[Step 4: cleanup-orphaned-resources.sh optional]
+    B --> B5[Step 5: local Docker cleanup optional]
 
     classDef orchestrator fill:#1f78b4,stroke:#0b3c68,color:#ffffff,font-size:14px;
     classDef coordinator fill:#33a02c,stroke:#145214,color:#ffffff,font-size:14px;
-    classDef wrapper fill:#ff7f00,stroke:#b35800,color:#ffffff,font-size:14px;
-    classDef detail fill:#6a3d9a,stroke:#3f1f5c,color:#ffffff,font-size:14px;
-    classDef helperNonShared fill:#b15928,stroke:#6b3012,color:#ffffff,font-size:14px;
-    classDef helperShared fill:#e31a1c,stroke:#990000,color:#ffffff,font-size:14px;
+    classDef step fill:#6a3d9a,stroke:#3f1f5c,color:#ffffff,font-size:12px;
 
     class A orchestrator
     class B coordinator
-    class C,G wrapper
-    class D,H wrapper
-    class D1,D2,D3,H1 detail
-    class D4 helperNonShared
-    class H2 helperShared
+    class B1,B2,B3,B4,B5,B3a,B3b step
 ```
 
 ---
