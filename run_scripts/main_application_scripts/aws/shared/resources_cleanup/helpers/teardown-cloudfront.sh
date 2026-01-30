@@ -6,8 +6,7 @@
 #   ./teardown-cloudfront.sh <ENVIRONMENT> --container-type <ecs|eks> [OPTIONS]
 #
 # DESCRIPTION:
-#   This helper is called by higher-level teardown scripts (e.g.
-#   teardown-resources-nonshared.sh) to:
+#   This helper can be run standalone or from automation. It:
 #     - Find CloudFront distributions for this project/environment/container-type
 #       using the Name tag: fru-<env>-cloudfront-<ecs|eks>
 #     - For each matching distribution, call the standalone

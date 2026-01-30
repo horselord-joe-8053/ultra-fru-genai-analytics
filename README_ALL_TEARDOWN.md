@@ -23,7 +23,7 @@ This document explains each teardown script, their purpose, usage, and relations
 ```
 
 **Relationships**:
-- **Called by**: `teardown-resources-all.sh` (single call with `LAYER=all` and `CONTAINER_TYPE` set; destroys app layer then infrastructure). Also callable directly by `teardown-resources-nonshared.sh` / `teardown-resources-shared.sh` for partial teardown.
+- **Called by**: `teardown-resources-all.sh` (full teardown: single call with `LAYER=all` and `CONTAINER_TYPE` set). For **partial teardown**, call directly (see Partial teardown below).
 - **Calls**: Terragrunt/Terraform directly
 - **Note**: Only destroys Terraform-managed resources. Does not stop services, empty S3 buckets, or clean orphaned resources.
 
@@ -54,81 +54,7 @@ This document explains each teardown script, their purpose, usage, and relations
 
 ---
 
-## 3. teardown-resources-nonshared.sh
-
-**Description**: Destroys **container-type specific infrastructure** (ECS OR EKS) while preserving **shared infrastructure** (VPC, Aurora, IAM, Secrets Manager). It is responsible for tearing down the application stack for a single container orchestrator and cleaning up its direct leftovers.
-
-**Key responsibilities**:
-- Stop ECS/EKS services and tasks for the selected container type (scale services to 0, wait for tasks to stop).
-- Empty application S3 buckets (analytics and frontend) so Terraform can destroy them cleanly.
-- Call `terraform/teardown.sh <ENV> <ecs|eks>` to destroy the container-type Terraform layer (cluster, ALB, frontend, etc.).
-- Clean up local Docker images built for ECR (`fru-api` and ECR-tagged variants).
-- Run `cleanup-orphaned-resources.sh --cont-sys <ecs|eks>` to:
-  - Identify and delete project S3 buckets not managed by Terraform (and not used by CloudFront).
-  - Delete old/unused ECR images for the app repo (respecting retention + “keep N latest” rules).
-  - Deregister old ECS task definitions beyond the rollback-safety window.
-
-**Usage**:
-```bash
-./run_scripts/main_application_scripts/aws/shared/resources_cleanup/teardown-resources-nonshared.sh <ENVIRONMENT> --container-type <ecs|eks> [OPTIONS]
-```
-
-**Required Parameters**:
-- `ENVIRONMENT`: `dev`, `staging`, or `prod`
-- `--container-type`: `ecs` or `eks`
-
-**Options**:
-- `--force`: Skip confirmation prompts
-- `--dry-run`: Preview changes
-- `--clean-local-only`: Only clean local Docker images (skip AWS teardown)
-
-**Example**:
-```bash
-./run_scripts/main_application_scripts/aws/shared/resources_cleanup/teardown-resources-nonshared.sh dev --container-type eks --force
-```
-
-**Relationships**:
-- **Called by**: Manual/partial teardown only (not used by `teardown-resources-all.sh` in the main flow). Use when you want to destroy only the container-type layer (ECS or EKS) while preserving shared infrastructure.
-- **Calls**: `terraform/teardown.sh` (container-type layer), `cleanup-orphaned-resources.sh` (orphan cleanup)
-
----
-
-## 4. teardown-resources-shared.sh
-
-**Description**: Destroys the **shared infrastructure layer** (VPC, Aurora, IAM, Secrets Manager) and then runs a **shared-layer orphan cleanup** pass. It is a thin wrapper around `terraform/teardown.sh <ENV> infrastructure` followed by `cleanup-orphaned-resources.sh`, and is intended to be called by `teardown-resources-all.sh` for the second (shared) phase of a full teardown.
-
-**Key responsibilities**:
-- Call `terraform/teardown.sh <ENV> infrastructure` to destroy VPC, subnets, gateways, security groups, Aurora, IAM, and related shared resources.
-- Respect `PREEMPT=true` via the underlying Terraform script (non-interactive Terragrunt).
-- Run `cleanup-orphaned-resources.sh --environment <ENV>` as a **shared-layer pass** to catch any remaining:
-  - Project S3 buckets not managed by Terraform and not referenced by CloudFront.
-  - Old/unused ECR images that only become orphaned after shared infra deletion.
-  - ECS-related metadata that might remain in the account after shared teardown.
-
-**Usage**:
-```bash
-./run_scripts/main_application_scripts/aws/shared/resources_cleanup/teardown-resources-shared.sh <ENVIRONMENT> [--force] [--dry-run]
-```
-
-**Required Parameters**:
-- `ENVIRONMENT`: `dev`, `staging`, or `prod`
-
-**Options**:
-- `--force`: Skip confirmation prompts for orphan cleanup (maps to `--force` for `cleanup-orphaned-resources.sh`)
-- `--dry-run`: Preview changes without destroying resources
-
-**Example**:
-```bash
-./run_scripts/main_application_scripts/aws/shared/resources_cleanup/teardown-resources-shared.sh dev --force
-```
-
-**Relationships**:
-- **Called by**: Manual/partial teardown only (not used by `teardown-resources-all.sh` in the main flow). Use when you want to destroy only the shared infrastructure layer (VPC, Aurora, IAM) after container layers are already gone.
-- **Calls**: `terraform/teardown.sh` (infrastructure layer), `cleanup-orphaned-resources.sh` (orphan cleanup – shared-layer pass)
-
----
-
-## 5. teardown-resources-all.sh
+## 3. teardown-resources-all.sh
 
 **Description**: **Single slim orchestrator** for complete infrastructure destruction. Steps: (1) Stop ECS/EKS services and empty S3 buckets (pre-destroy), (2) Run `terraform/teardown.sh <ENV> all` once (destroys app layer then infrastructure in dependency order), (3) Optional orphan cleanup, (4) Optional local Docker image cleanup. No long VPC/Aurora waits in the happy path; rely on Terraform destroy order. If infrastructure destroy fails (e.g. ENI eventual consistency), retry later or use `remove-all-aws-resources` as fallback (see README_TERRA_SH_RESPONSIBILITIES.md and README_WAR_STORIES.md). Preserves Secrets Manager secrets (lifecycle.prevent_destroy).
 
@@ -154,11 +80,25 @@ This document explains each teardown script, their purpose, usage, and relations
 **Relationships**:
 - **Called by**: `aws/run.sh` (when `--preempt` flag is used)
 - **Calls**: `terraform/teardown.sh <ENV> all` (single call; app layer then infrastructure), `cleanup-orphaned-resources.sh` (optional, after Terraform), local Docker cleanup (optional)
-- **Architecture**: Pre-destroy (stop services, empty S3) → Terraform destroy (app then infra) → optional orphan cleanup → optional local Docker. `teardown-resources-nonshared.sh` and `teardown-resources-shared.sh` are **not** used by this flow; they remain available for partial teardown (container-only or shared-only) when run manually.
+- **Architecture**: Pre-destroy (stop services, empty S3) → Terraform destroy (app then infra) → optional orphan cleanup → optional local Docker. For partial teardown, call `terraform/teardown.sh` directly (see below).
 
 ---
 
-## 6. aws/run.sh
+## 4. Partial teardown (call terraform/teardown.sh directly)
+
+**No separate nonshared/shared scripts.** Use the same Terraform teardown script with the desired layer:
+
+| Goal | Command | Notes |
+|------|---------|--------|
+| Container-only (ECS or EKS) | `terraform/teardown.sh <ENV> ecs` or `terraform/teardown.sh <ENV> eks` | Run **pre-destroy** first: stop services (e.g. `stop-ecs-services.sh` / `stop-eks-services.sh`), empty S3 buckets (analytics, frontend), then run the command. Optional: `cleanup-orphaned-resources.sh --cont-sys ecs\|eks --environment <ENV>`. |
+| Shared-only (VPC, Aurora, IAM) | `terraform/teardown.sh <ENV> infrastructure` | Only after container layers are gone. Optional: `cleanup-orphaned-resources.sh --environment <ENV>`. |
+| Full teardown | `teardown-resources-all.sh <ENV> --container-type ecs\|eks` | Does pre-destroy + `terraform/teardown.sh <ENV> all` + optional orphan + local Docker. |
+
+Set `PREEMPT=true` (or confirm at prompts) and `CONTAINER_TYPE=ecs` or `eks` when using `LAYER=all`.
+
+---
+
+## 5. aws/run.sh
 
 **Description**: Main orchestrator script for AWS deployments. When `--preempt` is used, calls `teardown-resources-all.sh` to destroy all infrastructure before deployment, ensures non-interactive execution (auto-confirms all prompts), then proceeds with fresh deployment. Orchestrates complete deployment pipeline (teardown → infrastructure setup → application deployment → verification). Suitable for CI/CD pipelines.
 
@@ -218,11 +158,10 @@ flowchart TD
 
 | Use Case | Script | Example |
 |----------|--------|---------|
-| Destroy EKS only (preserve ECS + shared) | `teardown-resources-nonshared.sh` | `teardown-resources-nonshared.sh dev --container-type eks --force` |
-| Destroy everything (complete teardown) | `teardown-resources-all.sh` | `teardown-resources-all.sh dev --container-type eks --force` |
+| Destroy everything (full teardown) | `teardown-resources-all.sh` | `teardown-resources-all.sh dev --container-type eks --force` |
+| Destroy one layer only (partial) | `terraform/teardown.sh` | `terraform/teardown.sh dev eks` or `terraform/teardown.sh dev infrastructure` |
 | Nuclear teardown (all recreatable resources) | `delete-recreatable-resources.sh` | `delete-recreatable-resources.sh dev --skip-confirmation` |
 | Clean up orphaned resources only | `cleanup-orphaned-resources.sh` | `cleanup-orphaned-resources.sh --environment dev --force` |
-| Destroy Terraform layer directly | `terraform/teardown.sh` | `terraform/teardown.sh dev infrastructure` |
 | Complete teardown + deploy | `aws/run.sh --preempt` | `aws/run.sh deploy --container-type eks dev --preempt` |
 
 ---
@@ -242,6 +181,34 @@ When `--preempt` is used with `aws/run.sh`:
 ```bash
 ./run_scripts/main_application_scripts/aws/run.sh deploy --container-type eks dev --preempt
 ```
+
+---
+
+## Analysis: Removing nonshared/shared and calling terraform/teardown directly
+
+**Idea:** Remove `teardown-resources-nonshared.sh` and `teardown-resources-shared.sh` and have everyone call `terraform/teardown.sh` directly for partial or full teardown.
+
+**What we did:** We removed both scripts. The flow is now:
+
+| Need | What to run |
+|------|-------------|
+| **Full teardown** (pre-destroy + app + infra + optional orphan + local Docker) | `teardown-resources-all.sh <ENV> --container-type ecs\|eks` (single orchestrator; it calls `terraform/teardown.sh <ENV> all` once). |
+| **Partial: container-only** (ECS or EKS layer only) | Pre-destroy (stop services, empty S3) then `terraform/teardown.sh <ENV> ecs` or `terraform/teardown.sh <ENV> eks`. Optional: `cleanup-orphaned-resources.sh --cont-sys ecs\|eks --environment <ENV>`. |
+| **Partial: shared-only** (VPC, Aurora, IAM) | `terraform/teardown.sh <ENV> infrastructure`. Optional: `cleanup-orphaned-resources.sh --environment <ENV>`. |
+
+**Pros of removing nonshared/shared:**
+
+- **Less code:** ~1,150 lines removed (nonshared ~978, shared ~187). One less layer of wrappers.
+- **Single source of truth:** Terraform teardown is the only place that runs `terragrunt destroy`; no duplicate logic in two scripts.
+- **Simpler mental model:** Full teardown = one script (teardown-resources-all). Partial = `terraform/teardown.sh` + optional pre-destroy and orphan cleanup, documented in one table.
+- **Easier maintenance:** Changes to destroy order or flags happen in `terraform/teardown.sh` and (for full flow) in `teardown-resources-all.sh` only.
+
+**Cons / trade-offs:**
+
+- **Partial teardown is more manual:** For container-only, users must run pre-destroy (stop services, empty S3) themselves or copy the steps from teardown-resources-all; we document the commands in the "Partial teardown" section. No one-line script for "tear down EKS only" that does pre-destroy + terraform + orphan.
+- **Orphan cleanup is optional and explicit:** Shared-only teardown no longer auto-runs orphan cleanup; users run `cleanup-orphaned-resources.sh` explicitly if they want it.
+
+**Conclusion:** Removing nonshared/shared is a net simplification. Full teardown stays one command (`teardown-resources-all.sh`). Partial teardown is "call `terraform/teardown.sh` with the right layer" plus documented pre-destroy and optional orphan steps. We accepted the trade-off of slightly more manual steps for partial teardown in exchange for less code and a single Terraform teardown entry point.
 
 ---
 

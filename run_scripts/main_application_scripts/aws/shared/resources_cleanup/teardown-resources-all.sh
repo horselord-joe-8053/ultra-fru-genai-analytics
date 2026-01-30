@@ -44,22 +44,21 @@ ENVIRONMENT="${1:-dev}"
 PROJECT_NAME="fru"
 ECR_REPO_NAME="fru-api"
 
-# Allow --help as first argument (no ENVIRONMENT required)
-if [ "$ENVIRONMENT" = "--help" ] || [ "$ENVIRONMENT" = "-h" ]; then
+show_help() {
     cat << EOF
 Usage: $0 <environment> --container-type <ecs|eks> [options...]
 
-Complete infrastructure destruction - single orchestrator.
-
-Steps: stop services → empty S3 → terraform destroy (app then infra) → optional orphan cleanup → optional local Docker cleanup.
+Full teardown: stop services → empty S3 → terraform destroy (app then infra) → optional orphan + local Docker cleanup.
 
 Required: --container-type ecs or eks
 Options: --force, --dry-run, --clean-local-only, --help
 EOF
+}
+if [ "$ENVIRONMENT" = "--help" ] || [ "$ENVIRONMENT" = "-h" ]; then
+    show_help
     exit 0
 fi
 
-# Parse arguments (skip first arg which is environment)
 shift 1 2>/dev/null || true
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -76,19 +75,7 @@ while [[ $# -gt 0 ]]; do
                 log_error "--container-type requires a value (ecs or eks)"; exit 1
             fi
             ;;
-        --help|-h)
-            cat << EOF
-Usage: $0 <environment> --container-type <ecs|eks> [options...]
-
-Complete infrastructure destruction - single orchestrator.
-
-Steps: stop services → empty S3 → terraform destroy (app then infra) → optional orphan cleanup → optional local Docker cleanup.
-
-Required: --container-type ecs or eks
-Options: --force, --dry-run, --clean-local-only, --help
-EOF
-            exit 0
-            ;;
+        --help|-h) show_help; exit 0 ;;
         *) log_error "Unknown option: $1"; exit 1 ;;
     esac
 done
