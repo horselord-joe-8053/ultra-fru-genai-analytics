@@ -14,8 +14,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 
 DRY_RUN="false"
 FORCE_DELETE="false"
@@ -245,7 +245,7 @@ stop_services() {
             log_info "[DRY-RUN] Would kill frontend dev server (if running on port 5173)"
         else
             # Stop Docker Compose services
-            DOCKER_DIR="$REPO_ROOT/infra/docker"
+            DOCKER_DIR="$REPO_ROOT/module_infra_nonkube/local"
             if [ -d "$DOCKER_DIR" ]; then
                 log_info "Stopping Docker Compose services..."
                 cd "$DOCKER_DIR"
@@ -286,7 +286,7 @@ stop_services() {
 remove_delta_tables() {
     log_step "Substep 2: Removing Delta Tables"
     
-    local teardown_cmd="$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/teardown-delta.sh --local"
+    local teardown_cmd="$REPO_ROOT/module_infra_spark/common/delta-lake/teardown-delta.sh --local"
     if [ "$DRY_RUN" = "true" ]; then
         teardown_cmd="$teardown_cmd --dry-run"
     else
@@ -326,7 +326,7 @@ reset_database() {
         log_warning "⚠️  Resetting database (all data will be lost)"
         
         # Option 1: Remove database data directory (bind mount)
-        DOCKER_DIR="$REPO_ROOT/infra/docker"
+        DOCKER_DIR="$REPO_ROOT/module_infra_nonkube/local"
         DB_DATA_DIR="$DOCKER_DIR/pgdata"
         
         if [ -d "$DB_DATA_DIR" ]; then

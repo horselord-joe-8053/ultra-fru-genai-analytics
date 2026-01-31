@@ -80,8 +80,8 @@ def run_stop_ecs_services(
     env["AWS_REGION"] = region
     env["DRY_RUN"] = "true" if dry_run else "false"
     stop_script = repo_root / "run_scripts/main_application_scripts/aws/ecs/helpers/stop-ecs-services.sh"
-    logger_sh = repo_root / "run_scripts/shared/logger.sh"
-    load_env_sh = repo_root / "run_scripts/shared/load-env.sh"
+    logger_sh = repo_root / "orchestration/shared/logger.sh"
+    load_env_sh = repo_root / "orchestration/shared/load-env.sh"
     if not stop_script.exists():
         print(f"  Warning: {stop_script} not found; skipping stop ECS services", file=sys.stderr)
         return True

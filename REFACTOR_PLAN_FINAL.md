@@ -54,8 +54,8 @@ Single source of truth for the major refactor. Execute phases in order. Each pha
    - `module_infra_nonkube/`
    - `module_test_verification/`
 2. **Orchestration:**
-   - Add `orchestration/shared/` and **move** from `run_scripts/shared/`: `logger.sh`, `load-env.sh`, `load-image-identifiers.sh`, `load-python-env.sh`, `performance-tracker.sh`, `progress-indicator.sh`, `git_helpers.sh`.
-   - Update every `source "$REPO_ROOT/run_scripts/shared/...` to `source "$REPO_ROOT/orchestration/shared/...` (or set `REPO_ROOT` in root scripts and use `$REPO_ROOT/orchestration/shared/...`). **Important:** After move, `load-env.sh` lives under `orchestration/`; REPO_ROOT detection in load-env.sh must be updated (e.g. `DETECTED_REPO_ROOT="$(cd "$ENV_SCRIPT_DIR/../.." && pwd)"` → one more `..` if orchestration is at root). So: if `orchestration/shared/load-env.sh`, then repo root = `$(cd "$ENV_SCRIPT_DIR/../.." && pwd)` (orchestration = parent of shared, repo = parent of orchestration). Verify and fix.
+   - Add `orchestration/shared/` and **move** from `orchestration/shared/`: `logger.sh`, `load-env.sh`, `load-image-identifiers.sh`, `load-python-env.sh`, `performance-tracker.sh`, `progress-indicator.sh`, `git_helpers.sh`.
+   - Update every `source "$REPO_ROOT/orchestration/shared/...` to `source "$REPO_ROOT/orchestration/shared/...` (or set `REPO_ROOT` in root scripts and use `$REPO_ROOT/orchestration/shared/...`). **Important:** After move, `load-env.sh` lives under `orchestration/`; REPO_ROOT detection in load-env.sh must be updated (e.g. `DETECTED_REPO_ROOT="$(cd "$ENV_SCRIPT_DIR/../.." && pwd)"` → one more `..` if orchestration is at root). So: if `orchestration/shared/load-env.sh`, then repo root = `$(cd "$ENV_SCRIPT_DIR/../.." && pwd)` (orchestration = parent of shared, repo = parent of orchestration). Verify and fix.
    - Add `orchestration/run.sh`: usage `run.sh <local|aws> <kube|nonkube> [env] [options]`. It sources `orchestration/shared/`, then dispatches to the correct script (see Phase 6–7 for targets). For now, dispatch to existing paths: `run_scripts/main_application_scripts/local/run.sh` or `run_scripts/main_application_scripts/aws/run.sh` with the right args.
    - Add `orchestration/teardown.sh`: usage `teardown.sh <local|aws> <kube|nonkube|all> [env] [options]`. Dispatch to existing teardown scripts.
    - Add **root** `run.sh` and `teardown.sh` that call `orchestration/run.sh` and `orchestration/teardown.sh` with "$@".
@@ -72,7 +72,7 @@ Single source of truth for the major refactor. Execute phases in order. Each pha
    - `data/`
    - `sql/`
    - `spark_jobs/`
-2. **Path updates:** Replace all references to `$REPO_ROOT/frontend`, `$REPO_ROOT/backend`, `$REPO_ROOT/data`, `$REPO_ROOT/sql`, `$REPO_ROOT/spark_jobs` with `$REPO_ROOT/module_app_core/frontend`, etc. (or define `APP_ROOT="$REPO_ROOT/module_app_core"` and use `$APP_ROOT/...`).
+2. **Path updates:** Replace all references to `$REPO_ROOT/module_app_core/frontend`, `$REPO_ROOT/module_app_core/backend`, `$REPO_ROOT/module_app_core/data`, `$REPO_ROOT/module_app_core/sql`, `$REPO_ROOT/module_app_core/spark_jobs` with `$REPO_ROOT/module_app_core/frontend`, etc. (or define `APP_ROOT="$REPO_ROOT/module_app_core"` and use `$APP_ROOT/...`).
 3. **requirements.txt:** Move to `module_app_core/` or keep at root and point install at `module_app_core/`; update any script that runs `pip install -r requirements.txt`.
 4. **Smoke:** Local run (nonkube) and AWS deploy (ecs or eks); fix broken paths.
 
@@ -100,7 +100,7 @@ Single source of truth for the major refactor. Execute phases in order. Each pha
 ## Phase 6: Move Spark/Delta infra (module_infra_spark)
 
 1. **Move** `run_scripts/spark_delta-lake_scripts/` into `module_infra_spark/` (e.g. `module_infra_spark/common/`, `module_infra_spark/local/`, `module_infra_spark/aws/`).
-2. **Path updates:** Scripts that reference `REPO_ROOT/run_scripts/spark_delta-lake_scripts` or `REPO_ROOT/spark_jobs` → `module_infra_spark/` and `module_app_core/spark_jobs`.
+2. **Path updates:** Scripts that reference `REPO_ROOT/run_scripts/spark_delta-lake_scripts` or `REPO_ROOT/module_app_core/spark_jobs` → `module_infra_spark/` and `module_app_core/spark_jobs`.
 3. **Smoke:** Run with ENABLE_ANALYTICS_SCHEDULER=true locally and on AWS.
 
 ---
@@ -145,7 +145,7 @@ Remove or archive paths that are now empty or fully replaced by the new layout. 
 1. **Remove empty or fully moved dirs:**
    - `run_scripts/main_application_scripts/` (contents moved to orchestration/, module_infra_*, module_test_verification). Remove entire `run_scripts/main_application_scripts/` if every script has been moved or delegated.
    - `run_scripts/spark_delta-lake_scripts/` (moved to module_infra_spark).
-   - `run_scripts/shared/` (moved to orchestration/shared/).
+   - `orchestration/shared/` (moved to orchestration/shared/).
    - `infra/terraform/` (contents moved to module_infra_basic, module_infra_db, module_infra_kube, module_infra_nonkube).
    - `infra/docker/` (moved to module_infra_nonkube/local).
    - `infra/k8s/` (moved to module_infra_kube).
@@ -175,7 +175,7 @@ Remove or archive paths that are now empty or fully replaced by the new layout. 
 | Removed / replaced by |
 |------------------------|
 | `run_scripts/main_application_scripts/` (local, aws, common) → orchestration + module_* |
-| `run_scripts/shared/` → `orchestration/shared/` |
+| `orchestration/shared/` → `orchestration/shared/` |
 | `run_scripts/spark_delta-lake_scripts/` → `module_infra_spark/` |
 | `infra/terraform/providers/aws/` (infra, ecs, eks, modules) → module_infra_basic, module_infra_db, module_infra_kube, module_infra_nonkube |
 | `infra/docker/` → `module_infra_nonkube/local/` |

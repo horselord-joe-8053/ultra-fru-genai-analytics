@@ -1,4 +1,0 @@
-# GKE Terraform Module
-# Future implementation for Google Kubernetes Engine cluster
-# Will mirror AWS EKS module structure
-

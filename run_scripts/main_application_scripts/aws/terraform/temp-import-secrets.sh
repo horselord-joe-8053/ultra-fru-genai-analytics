@@ -61,8 +61,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../" && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 load_env_file || true
 
 # ============================================================================
@@ -81,9 +81,9 @@ fi
 # Configuration
 # ============================================================================
 
-# Terraform directory for the specified environment's infrastructure layer
+# Terraform directory for the specified environment's infrastructure layer (module_infra_basic)
 # This is where the secrets_manager module is deployed
-TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT/infrastructure"
+TERRAFORM_DIR="$REPO_ROOT/module_infra_basic/aws/environments/$ENVIRONMENT/infrastructure"
 
 log_step "Importing Secrets Manager secrets into Terraform state"
 log_info "Environment: $ENVIRONMENT"

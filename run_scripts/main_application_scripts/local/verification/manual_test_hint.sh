@@ -7,8 +7,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 
 # Load environment variables
 load_env_file 2>/dev/null || true
@@ -60,7 +60,7 @@ print_manual_test_hints() {
     log_info "   - Note: This endpoint is not verified automatically (may timeout)"
     echo ""
     log_info "${GREEN}4. View Logs:${NC}"
-    log_info "   ${GREEN}cd $REPO_ROOT/infra/docker && docker compose logs -f${NC}"
+    log_info "   ${GREEN}cd $REPO_ROOT/module_infra_nonkube/local && docker compose logs -f${NC}"
     echo ""
     log_info "${GREEN}5. Stop Services:${NC}"
     log_info "   ${GREEN}./run_scripts/local/stop-services.sh${NC}"

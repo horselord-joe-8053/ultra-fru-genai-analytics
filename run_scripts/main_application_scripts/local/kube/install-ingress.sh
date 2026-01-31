@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
 
 K8S_TYPE="${1:-minikube}"
 
@@ -24,7 +24,7 @@ helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx >/dev/nul
 helm repo update >/dev/null 2>&1
 
 # Determine values file
-VALUES_FILE="$REPO_ROOT/infra/k8s/ingress-nginx-values-local.yaml"
+VALUES_FILE="$REPO_ROOT/module_infra_kube/shared/ingress-nginx-values-local.yaml"
 
 if [ ! -f "$VALUES_FILE" ]; then
   log_error "Helm values file not found: $VALUES_FILE"

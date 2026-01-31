@@ -3,8 +3,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (spark local delta setup)"
 
 # Setup and verify Delta Lake for local development
@@ -92,7 +92,7 @@ else
     export CSV_WAS_UPLOADED="false"
     
     # Determine CSV path (support relative and absolute paths)
-    csv_source="${CSV_PATH:-$REPO_ROOT/data/raw/fridge_sales_with_rating.csv}"
+    csv_source="${CSV_PATH:-$REPO_ROOT/module_app_core/data/raw/fridge_sales_with_rating.csv}"
     if [[ ! "$csv_source" = /* ]]; then
         # Relative path - resolve to absolute
         CSV_PATH="$REPO_ROOT/$csv_source"
@@ -164,7 +164,7 @@ log_info "  • Batch analytics will be computed automatically by the analytics 
 log_info "    (if ENABLE_ANALYTICS_SCHEDULER=true in your .env file)"
 log_info ""
 log_info "  • The scheduler runs every ${ANALYTICS_SCHEDULER_INTERVAL_SECONDS:-300} seconds by default"
-log_info "    and reads from the Delta table at: ${DELTA_TABLE_PATH:-$REPO_ROOT/data/delta/fru_sales}"
+log_info "    and reads from the Delta table at: ${DELTA_TABLE_PATH:-$REPO_ROOT/module_app_core/data/delta/fru_sales}"
 log_info ""
 log_info "  • Analytics results are saved to PostgreSQL batch_analytics table"
 log_info "    and displayed in the frontend Batch Analytics panel"

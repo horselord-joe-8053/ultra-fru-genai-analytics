@@ -98,7 +98,7 @@ fetch_terraform_outputs() {
         REPO_ROOT="$(cd "$script_dir/../../.." && pwd)"
     fi
     
-    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT"
+    TERRAFORM_DIR="$REPO_ROOT/module_infra_basic/aws/environments/$ENVIRONMENT"
     
     # Dispatch to container-type-specific deployment info fetching functions
     local container_type="${CONTAINER_TYPE:-ecs}"
@@ -112,12 +112,12 @@ fetch_terraform_outputs() {
             log_warning "ECS deployment info script not found at: $REPO_ROOT/run_scripts/main_application_scripts/aws/ecs/verification/fetch-deployment-info-ecs.sh"
         fi
     elif [ "$container_type" = "eks" ]; then
-        if [ -f "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/verification/fetch-deployment-info-eks.sh" ]; then
+        if [ -f "$REPO_ROOT/module_infra_kube/aws/verification/fetch-deployment-info-eks.sh" ]; then
             # shellcheck source=/dev/null
-            source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/verification/fetch-deployment-info-eks.sh"
+            source "$REPO_ROOT/module_infra_kube/aws/verification/fetch-deployment-info-eks.sh"
             fetch_eks_deployment_info
         else
-            log_warning "EKS deployment info script not found at: $REPO_ROOT/run_scripts/main_application_scripts/aws/eks/verification/fetch-deployment-info-eks.sh"
+            log_warning "EKS deployment info script not found at: $REPO_ROOT/module_infra_kube/aws/verification/fetch-deployment-info-eks.sh"
         fi
     else
         log_warning "Unknown container type: $container_type (expected 'ecs' or 'eks')"
@@ -138,7 +138,7 @@ fetch_terraform_outputs() {
     # Write to cache if USE_CACHED_AWS_VAL is set (always update cache to keep it fresh)
     # This is called from test scripts, so check if cache utilities are available
     if [[ "${USE_CACHED_AWS_VAL:-false}" == "true" ]] && [ -n "${REPO_ROOT:-}" ]; then
-        local cache_script="${REPO_ROOT}/test/common_sh/test_cache.sh"
+        local cache_script="${REPO_ROOT}/module_test_verification/common_sh/test_cache.sh"
         if [ -f "$cache_script" ]; then
             # shellcheck source=/dev/null
             source "$cache_script" 2>/dev/null || true

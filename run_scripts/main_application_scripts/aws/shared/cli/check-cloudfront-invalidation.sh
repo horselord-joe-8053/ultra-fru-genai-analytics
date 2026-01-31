@@ -38,8 +38,8 @@ SCRIPT_DIR_CLI_CF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT_CLI_CF="${REPO_ROOT:-$(cd "$SCRIPT_DIR_CLI_CF/../../../../.." && pwd)}"
 
 # Source logger if available
-if [ -f "$REPO_ROOT_CLI_CF/run_scripts/shared/logger.sh" ]; then
-    source "$REPO_ROOT_CLI_CF/run_scripts/shared/logger.sh"
+if [ -f "$REPO_ROOT_CLI_CF/orchestration/shared/logger.sh" ]; then
+    source "$REPO_ROOT_CLI_CF/orchestration/shared/logger.sh"
 else
     # Fallback logging functions
     log_info() { echo "[INFO] $*"; }

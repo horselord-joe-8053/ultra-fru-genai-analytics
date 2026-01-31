@@ -49,8 +49,8 @@ FRU (**Fridges R Us**) is a real, end-to-end **conversational analytics system**
 ## 📚 Documentation Guide
 
 **Main Documentation:**
-- **[`README_RUN.md`](README_RUN.md)** - Quick start guide for running FRU locally and on AWS
-- **[`README_INFRA.md`](README_INFRA.md)** - Complete Infrastructure as Code (IaC) documentation for Terraform + Terragrunt deployment with modular architecture, environment management, and security best practices
+- **[`docs/README_RUN.md`](docs/README_RUN.md)** - Quick start guide for running FRU locally and on AWS
+- **[`docs/README_INFRA.md`](docs/README_INFRA.md)** - Complete Infrastructure as Code (IaC) documentation for Terraform + Terragrunt deployment with modular architecture, environment management, and security best practices
 
 **Additional Guides:**
 - **[`guides/DELTA_SPARK_VS_POSTGRESQL_FULL_STACK.md`](guides/DELTA_SPARK_VS_POSTGRESQL_FULL_STACK.md)** - Detailed comparison and architecture guide for Delta Lake + Spark vs PostgreSQL + pgvector
@@ -59,6 +59,16 @@ FRU (**Fridges R Us**) is a real, end-to-end **conversational analytics system**
 - **[`guides/aws_setup_guide.md`](guides/aws_setup_guide.md)** - AWS setup and configuration guide
 - **[`guides/database_setup_explanation.md`](guides/database_setup_explanation.md)** - Database setup and schema explanation
 - **[`guides/deployment_scripts_relationship.md`](guides/deployment_scripts_relationship.md)** - Explanation of deployment scripts and their relationships
+
+**Run & Teardown (unified entrypoint):**
+- **`./run.sh help`** – Show usage
+- **`./run.sh local nonkube`** – Local Docker Compose (default)
+- **`./run.sh local kube`** – Local Kubernetes (minikube/kind)
+- **`./run.sh aws nonkube [dev|prod]`** – AWS ECS
+- **`./run.sh aws kube [dev|prod]`** – AWS EKS
+- **`./teardown.sh local nonkube`** / **`./teardown.sh aws all [env]`** – Teardown
+
+**Sub-projects:** `orchestration/`, `module_app_core/`, `module_infra_basic/`, `module_infra_db/`, `module_infra_spark/`, `module_infra_kube/`, `module_infra_nonkube/`, `module_test_verification/` (each has a README).
 
 ---
 
@@ -156,9 +166,10 @@ This separation is a fundamental architectural principle that enables scalable, 
 fru-genai-analytics-all/
 │
 ├─ README.md                     # ← This file
-├─ README_RUN.md                 # Manual runbook
-├─ README_RUN_SCRIPTS.md         # Automated scripts guide
-├─ README_INFRA.md               # Infrastructure as Code docs
+├─ docs/
+│   ├─ README_RUN.md             # Manual runbook
+│   ├─ README_INFRA.md           # Infrastructure as Code docs
+│   └─ ...                       # Other docs (teardown, multi-cloud, etc.)
 ├─ requirements.txt
 │
 ├─ data/
@@ -214,34 +225,9 @@ fru-genai-analytics-all/
 │   │   └─ terraform/             # Terraform deployment & teardown
 │   └─ common/                    # Shared utilities
 │
-├─ infra/
-│   ├─ docker/
-│   │   ├─ Dockerfile.api
-│   │   └─ docker-compose.yml
-│   └─ terraform/
-│       ├─ modules/               # Reusable Terraform modules
-│       │   ├─ vpc/
-│       │   ├─ aurora/
-│       │   ├─ iam/
-│       │   ├─ secrets-manager/
-│       │   ├─ ecs/
-│       │   ├─ eks/
-│       │   ├─ alb/
-│       │   ├─ frontend/
-│       │   ├─ infrastructure/    # Wrapper module
-│       │   └─ application/      # Wrapper module
-│       └─ environments/          # Terragrunt configs (dev/prod)
-│           ├─ root.hcl          # Root configuration
-│           ├─ dev/
-│           │   ├─ env.hcl        # Dev environment config
-│           │   ├─ infrastructure/
-│           │   ├─ application/   # ECS-specific
-│           │   └─ eks/           # EKS-specific
-│           └─ prod/
-│               ├─ env.hcl        # Prod environment config
-│               ├─ infrastructure/
-│               ├─ application/   # ECS-specific
-│               └─ eks/           # EKS-specific
+├─ module_infra_basic/             # VPC, Aurora, IAM, Secrets (Terraform)
+├─ module_infra_kube/             # EKS + k8s manifests
+├─ module_infra_nonkube/         # ECS, ALB, local Docker
 │
 ├─ guides/                        # Additional documentation and guides
 │   ├─ DELTA_SPARK_VS_POSTGRESQL_FULL_STACK.md
@@ -259,11 +245,11 @@ fru-genai-analytics-all/
 
 # ⚡️ 4. Local Quickstart
 
-For detailed instructions on running FRU locally, see **[`README_RUN.md`](README_RUN.md)**.
+For detailed instructions on running FRU locally, see **[`docs/README_RUN.md`](docs/README_RUN.md)**.
 
 **Quick summary:**
 - Set up `.env` file with your credentials
-- Run `./run_scripts/main_application_scripts/local/run.sh` for one-command setup
+- Run **`./run.sh local nonkube`** for one-command setup (or `./run.sh help` for options)
 - Access frontend at `http://localhost:5173`
 
 ---
@@ -465,13 +451,13 @@ Claude returns:
 
 # 🏗 8. Full AWS Deployment
 
-For detailed instructions on deploying FRU to AWS, see **[`README_RUN.md`](README_RUN.md)** and **[`README_INFRA.md`](README_INFRA.md)**.
+For detailed instructions on deploying FRU to AWS, see **[`docs/README_RUN.md`](docs/README_RUN.md)** and **[`docs/README_INFRA.md`](docs/README_INFRA.md)**.
 
 **Quick summary:**
 - Set up `.env` file with AWS credentials
-- Run `./run_scripts/main_application_scripts/aws/run.sh ecs-full dev` for complete ECS deployment
+- Run **`./run.sh aws nonkube dev`** for complete ECS deployment (or `./run.sh aws kube dev` for EKS)
 - Or use `eks-full` for Kubernetes deployment
-- Infrastructure is managed via Terraform + Terragrunt (see `README_INFRA.md`)
+- Infrastructure is managed via Terraform + Terragrunt (see `docs/README_INFRA.md`)
 
 ---
 

@@ -15,7 +15,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
 
 log_info "[DEBUG] Starting Docker cleanup script"
 log_info "[DEBUG] Script directory: $SCRIPT_DIR"

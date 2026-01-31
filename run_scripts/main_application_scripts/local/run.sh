@@ -25,9 +25,9 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/performance-tracker.sh"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/performance-tracker.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 load_env_file || true
 log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (local/run.sh)"
 
@@ -289,7 +289,7 @@ main() {
         K8S_TYPE="${K8S_TYPE:-minikube}"
         export K8S_TYPE
         
-        if ! "$SCRIPT_DIR/kube/setup.sh" "$K8S_TYPE"; then
+        if ! "$REPO_ROOT/module_infra_kube/local/setup.sh" "$K8S_TYPE"; then
             elapsed=$(( $(date +%s) - step_start_time ))
             perf_step_end 2 "2.1" "FAILED" "Kubernetes cluster setup failed"
             log_error "Phase 2: Step 2.1 - Step ${current_step}/${total_steps} FAILED: Kubernetes cluster setup failed (took $(format_elapsed_time $elapsed))"
@@ -304,7 +304,7 @@ main() {
         perf_step_start 2 "2.2" "Installing NGINX Ingress Controller"
         step_start_time=$(date +%s)
         log_step "Phase 2: Step 2.2 - Step ${current_step}/${total_steps}: Installing NGINX Ingress Controller"
-        if ! "$SCRIPT_DIR/kube/install-ingress.sh" "$K8S_TYPE"; then
+        if ! "$REPO_ROOT/module_infra_kube/local/install-ingress.sh" "$K8S_TYPE"; then
             elapsed=$(( $(date +%s) - step_start_time ))
             perf_step_end 2 "2.2" "FAILED" "Ingress installation failed"
             log_error "Phase 2: Step 2.2 - Step ${current_step}/${total_steps} FAILED: Ingress installation failed (took $(format_elapsed_time $elapsed))"
@@ -354,7 +354,7 @@ main() {
     perf_step_start 3 "3.1" "Initializing database schema"
     step_start_time=$(date +%s)
     log_step "Phase 3: Step 3.1 - Step ${current_step}/${total_steps}: Initializing database schema"
-    local schema_cmd="$REPO_ROOT/run_scripts/main_application_scripts/common/database/init_schema.sh local"
+    local schema_cmd="$REPO_ROOT/module_infra_db/common/database/init_schema.sh local"
     if [ "$FORCE_REFRESH_DATA" = "true" ]; then
         schema_cmd="$schema_cmd --force-refresh-data"
     fi
@@ -375,7 +375,7 @@ main() {
         perf_step_start 3 "3.2" "Loading data into database"
         step_start_time=$(date +%s)
         log_step "Phase 3: Step 3.2 - Step ${current_step}/${total_steps}: Loading data into database"
-        local load_cmd="$REPO_ROOT/run_scripts/main_application_scripts/common/database/load_data.sh local"
+        local load_cmd="$REPO_ROOT/module_infra_db/common/database/load_data.sh local"
         if [ "$FORCE_REFRESH_DATA" = "true" ]; then
             load_cmd="$load_cmd --force-refresh-data"
         fi
@@ -413,7 +413,7 @@ main() {
         step_start_time=$(date +%s)
         log_step "Phase 4: Step 4.1 - Step ${current_step}/${total_steps}: Setting up data-lake (Delta table using Docker Spark)"
         log_info "Spark runs inside the Docker container (no local Spark installation needed)"
-        local setup_cmd="$REPO_ROOT/run_scripts/spark_delta-lake_scripts/local/delta-lake/setup-and-verify.sh"
+        local setup_cmd="$REPO_ROOT/module_infra_spark/local/delta-lake/setup-and-verify.sh"
         # Note: --preempt flag is already handled in Phase 0: Step 0.3 (teardown-resources-all.sh)
         # Delta tables were already removed if --preempt was set, so no need to pass it again
         if [ "$FORCE_REFRESH_DATA" = "true" ]; then
@@ -423,7 +423,7 @@ main() {
             elapsed=$(( $(date +%s) - step_start_time ))
             perf_step_end 4 "4.1" "FAILED" "Data-lake setup had issues"
             log_warning "Phase 4: Step 4.1 - Step ${current_step}/${total_steps} had issues (application may still work without Delta tables) (took $(format_elapsed_time $elapsed))"
-            log_info "You can run data-lake setup separately: $REPO_ROOT/run_scripts/spark_delta-lake_scripts/local/delta-lake/setup-and-verify.sh"
+            log_info "You can run data-lake setup separately: $REPO_ROOT/module_infra_spark/local/delta-lake/setup-and-verify.sh"
         else
             elapsed=$(( $(date +%s) - step_start_time ))
             perf_step_end 4 "4.1" "SUCCESS" "Delta-lake ready"
@@ -491,7 +491,7 @@ main() {
         fi
         
         # Start frontend in background
-        cd "$REPO_ROOT/frontend"
+        cd "$REPO_ROOT/module_app_core/frontend"
         nohup npm run dev > /tmp/frontend.log 2>&1 &
         FRONTEND_PID=$!
         log_info "Frontend starting in background (PID: $FRONTEND_PID)"
@@ -512,7 +512,7 @@ main() {
         perf_step_start 5 "5.2" "Starting frontend development server"
         perf_step_end 5 "5.2" "SKIPPED" "Frontend startup skipped (--skip-frontend flag)"
         log_info "To start the frontend, run:"
-        log_info "  cd $REPO_ROOT/frontend && npm run dev"
+        log_info "  cd $REPO_ROOT/module_app_core/frontend && npm run dev"
         echo ""
         log_info "Or run: ./run_scripts/local/start-frontend.sh"
     fi

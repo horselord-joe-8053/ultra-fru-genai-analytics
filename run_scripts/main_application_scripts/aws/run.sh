@@ -128,15 +128,15 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/performance-tracker.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/performance-tracker.sh"
 # Source progress indicator for heartbeat during long-running operations
-if [ -f "$REPO_ROOT/run_scripts/shared/progress-indicator.sh" ]; then
-    source "$REPO_ROOT/run_scripts/shared/progress-indicator.sh"
+if [ -f "$REPO_ROOT/orchestration/shared/progress-indicator.sh" ]; then
+    source "$REPO_ROOT/orchestration/shared/progress-indicator.sh"
 fi
 # Save SCRIPT_DIR before sourcing load-env.sh (which sets its own SCRIPT_DIR)
 AWS_SCRIPT_DIR="$SCRIPT_DIR"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 load_env_file || true
 # Restore our SCRIPT_DIR and log resolved REPO_ROOT
 SCRIPT_DIR="$AWS_SCRIPT_DIR"
@@ -146,7 +146,7 @@ log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (aws/run.sh)"
 # Unset any existing AWS_ACCOUNT_ID to ensure we resolve fresh from AWS STS
 # (prevents stale dummy/test values from being used)
 unset AWS_ACCOUNT_ID
-source "$REPO_ROOT/run_scripts/shared/load-image-identifiers.sh"
+source "$REPO_ROOT/orchestration/shared/load-image-identifiers.sh"
 load_image_identifiers "aws"
 
 # Source shared deployment phases (common logic for ECS/EKS)
@@ -785,14 +785,14 @@ deploy_eks_full() {
     log_step "Phase 5: Step 5.2 - Step ${step_num}/${total_steps}: Configuring kubectl and deploying Kubernetes manifests"
     log_info "Using container image: $CONTAINER_IMAGE"
     
-    # Get cluster name from Terraform output
-    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments"
-    ENV_DIR="$TERRAFORM_DIR/$ENVIRONMENT"
+    # Get cluster name from Terraform output (EKS lives in module_infra_kube)
+    EKS_TERRAFORM_DIR="$REPO_ROOT/module_infra_kube/aws/environments"
+    ENV_DIR="$EKS_TERRAFORM_DIR/$ENVIRONMENT"
     
     if [ "$DRY_RUN" = "true" ]; then
         log_info "[DRY-RUN] Would configure kubectl and deploy Kubernetes manifests"
         log_info "[DRY-RUN] Would run: aws eks update-kubeconfig --region $AWS_REGION --name <cluster-name> --profile admin"
-        log_info "[DRY-RUN] Would run: kubectl apply -f infra/k8s/"
+        log_info "[DRY-RUN] Would run: kubectl apply -f module_infra_kube/shared/"
     else
         # Configure kubectl
         log_info "Configuring kubectl for EKS cluster..."
@@ -867,7 +867,7 @@ deploy_eks_full() {
         
         # Deploy Kubernetes manifests
         local k8s_deploy_result=0
-        if ! "$SCRIPT_DIR/eks/deploy.sh"; then
+        if ! "$REPO_ROOT/module_infra_kube/aws/deploy.sh"; then
             k8s_deploy_result=1
         fi
         

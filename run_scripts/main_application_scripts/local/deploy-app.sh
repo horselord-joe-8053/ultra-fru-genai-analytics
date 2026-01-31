@@ -6,8 +6,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 
 K8S_TYPE="${1:-minikube}"
 NAMESPACE="${2:-default}"
@@ -45,10 +45,10 @@ log_info "  ALLOWED_ORIGINS: $ALLOWED_ORIGINS"
 log_info "Generating Kubernetes manifests..."
 
 # Source the helper to get generate_kubernetes_manifests function
-source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/helpers/kubernetes-manifests.sh"
+source "$REPO_ROOT/module_infra_kube/aws/helpers/kubernetes-manifests.sh"
 
 # Generate all manifests (including namespace, ingress, service)
-if ! generate_kubernetes_manifests "$REPO_ROOT/infra/k8s"; then
+if ! generate_kubernetes_manifests "$REPO_ROOT/module_infra_kube/shared"; then
   log_error "Failed to generate Kubernetes manifests"
   exit 1
 fi
@@ -57,12 +57,12 @@ fi
 log_info "Applying Kubernetes manifests..."
 
 # Apply generated manifests
-kubectl apply -f "$REPO_ROOT/infra/k8s/generated/namespace-generated.yaml" 2>/dev/null || true
-kubectl apply -f "$REPO_ROOT/infra/k8s/generated/configmap-generated.yaml"
-kubectl apply -f "$REPO_ROOT/infra/k8s/generated/secret-generated.yaml"
-kubectl apply -f "$REPO_ROOT/infra/k8s/generated/deployment-generated.yaml"
-kubectl apply -f "$REPO_ROOT/infra/k8s/generated/service-generated.yaml"
-kubectl apply -f "$REPO_ROOT/infra/k8s/generated/ingress-generated.yaml"
+kubectl apply -f "$REPO_ROOT/module_infra_kube/shared/generated/namespace-generated.yaml" 2>/dev/null || true
+kubectl apply -f "$REPO_ROOT/module_infra_kube/shared/generated/configmap-generated.yaml"
+kubectl apply -f "$REPO_ROOT/module_infra_kube/shared/generated/secret-generated.yaml"
+kubectl apply -f "$REPO_ROOT/module_infra_kube/shared/generated/deployment-generated.yaml"
+kubectl apply -f "$REPO_ROOT/module_infra_kube/shared/generated/service-generated.yaml"
+kubectl apply -f "$REPO_ROOT/module_infra_kube/shared/generated/ingress-generated.yaml"
 
 log_success "Application deployed to local Kubernetes!"
 log_info "Waiting for pods to be ready..."

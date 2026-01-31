@@ -17,8 +17,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Script is in: run_scripts/main_application_scripts/aws/shared/cli/resource-check/
 # Need to go up 6 levels to reach repo root
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 
 AWS_PROFILE="${AWS_PROFILE:-admin}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
@@ -27,7 +27,7 @@ PROJECT_NAME="fru"
 
 # Get AWS account ID (using centralized resolution)
 if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
-    source "$REPO_ROOT/run_scripts/shared/load-image-identifiers.sh"
+    source "$REPO_ROOT/orchestration/shared/load-image-identifiers.sh"
     load_image_identifiers "aws" || exit 1
 fi
 # Use AWS_ACCOUNT_ID directly (no need for separate ACCOUNT_ID variable)

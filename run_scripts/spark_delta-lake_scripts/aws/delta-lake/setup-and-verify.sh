@@ -3,8 +3,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../" && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 # Source CSV upload helper
 source "$REPO_ROOT/run_scripts/spark_delta-lake_scripts/common/delta-lake/helpers/local_to_s3_data_upload.sh"
 log_info "[debug] REPO_ROOT resolved to: $REPO_ROOT (spark aws delta setup)"
@@ -100,7 +100,7 @@ else
     export CSV_WAS_UPLOADED="false"
     
     # Determine CSV path (support both local and S3 paths)
-    local_csv_path="${CSV_PATH:-$REPO_ROOT/data/raw/fridge_sales_with_rating.csv}"
+    local_csv_path="${CSV_PATH:-$REPO_ROOT/module_app_core/data/raw/fridge_sales_with_rating.csv}"
     s3_csv_path="s3://${S3_BUCKET_ID}/raw/fridge_sales_with_rating.csv"
     
     # Check if CSV_PATH is already an S3 path

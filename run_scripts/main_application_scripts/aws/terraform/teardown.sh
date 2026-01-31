@@ -7,10 +7,13 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 
-TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments"
+TERRAFORM_DIR="$REPO_ROOT/module_infra_basic/aws/environments"
+INFRA_TERRAFORM_DIR="$REPO_ROOT/module_infra_basic/aws/environments"
+EKS_TERRAFORM_DIR="$REPO_ROOT/module_infra_kube/aws/environments"
+ECS_TERRAFORM_DIR="$REPO_ROOT/module_infra_nonkube/aws/environments"
 
 # Parse arguments
 ENVIRONMENT="${1:-dev}"
@@ -67,6 +70,9 @@ teardown_terragrunt() {
     export AWS_REGION="${AWS_REGION:-us-east-1}"
     
     ENV_DIR="$TERRAFORM_DIR/$ENVIRONMENT"
+    INFRA_ENV_DIR="$INFRA_TERRAFORM_DIR/$ENVIRONMENT"
+    EKS_ENV_DIR="$EKS_TERRAFORM_DIR/$ENVIRONMENT"
+    ECS_ENV_DIR="$ECS_TERRAFORM_DIR/$ENVIRONMENT"
     
     if [ ! -d "$ENV_DIR" ]; then
         log_error "Environment directory not found at $ENV_DIR"
@@ -76,11 +82,10 @@ teardown_terragrunt() {
     # Destroy in reverse order: application first, then infrastructure
     # This is because application depends on infrastructure
     
-    # Destroy ecs layer
+    # Destroy ecs layer (lives in module_infra_nonkube)
     if [ "$LAYER" = "ecs" ] || ([ "$LAYER" = "all" ] && [ "$CONTAINER_TYPE" = "ecs" ]); then
         log_step "Destroying ecs layer (ECS, ALB, Frontend)"
-        
-        cd "$ENV_DIR/ecs"
+        cd "$ECS_ENV_DIR/ecs"
         
         # Ensure backend is configured so we can read state from S3 (idempotent).
         log_info "Initializing Terragrunt for ecs layer (configures remote state)..."
@@ -123,11 +128,10 @@ teardown_terragrunt() {
         fi
     fi
     
-    # Destroy eks layer (same pattern as ecs: cluster + frontend, depends on infrastructure)
+    # Destroy eks layer (lives in module_infra_kube)
     if [ "$LAYER" = "eks" ] || ([ "$LAYER" = "all" ] && [ "$CONTAINER_TYPE" = "eks" ]); then
         log_step "Destroying eks layer (EKS cluster, node group, Fargate, Frontend)"
-        
-        cd "$ENV_DIR/eks"
+        cd "$EKS_ENV_DIR/eks"
         
         # Ensure backend is configured so we can read state from S3 (idempotent).
         log_info "Initializing Terragrunt for eks layer (configures remote state)..."
@@ -194,11 +198,11 @@ teardown_terragrunt() {
         sleep "${TEARDOWN_WAIT_BETWEEN_LAYERS}"
     fi
     
-    # Destroy infrastructure layer
+    # Destroy infrastructure layer (lives in module_infra_basic/aws)
     if [ "$LAYER" = "infrastructure" ] || [ "$LAYER" = "all" ]; then
         log_step "Destroying infrastructure layer (VPC, Aurora, IAM, Secrets Manager)"
         
-        cd "$ENV_DIR/infrastructure"
+        cd "$INFRA_ENV_DIR/infrastructure"
         
         # Ensure backend is configured so we can read state from S3 (idempotent).
         log_info "Initializing Terragrunt for infrastructure layer (configures remote state)..."

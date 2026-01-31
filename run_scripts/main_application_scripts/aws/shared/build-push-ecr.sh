@@ -7,10 +7,10 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../" && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
 # Save SCRIPT_DIR before sourcing load-env.sh (which sets its own SCRIPT_DIR)
 BUILD_SCRIPT_DIR="$SCRIPT_DIR"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 # Restore our SCRIPT_DIR
 SCRIPT_DIR="$BUILD_SCRIPT_DIR"
 ECR_REPO_NAME="fru-api"
@@ -201,7 +201,7 @@ build_and_push_ecr() {
         --build-arg SPARK_VERSION=${SPARK_VERSION:-4.0.1} \
         --build-arg HADOOP_VERSION=${HADOOP_VERSION:-3} \
         -t "$ECR_REPO_NAME:$IMAGE_TAG" \
-        -f $REPO_ROOT/infra/docker/Dockerfile.api .
+        -f $REPO_ROOT/module_infra_nonkube/local/Dockerfile.api .
     
     # Tag image
     log_info "Tagging image..."

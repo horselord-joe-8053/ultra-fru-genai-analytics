@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
 
 K8S_TYPE="${1:-minikube}"
 
@@ -26,13 +26,13 @@ log_info "Step 3: Building application image..."
 if [ "$K8S_TYPE" = "minikube" ]; then
   log_info "Using minikube's Docker daemon..."
   eval $(minikube docker-env)
-  docker build -t fru-api:local -f "$REPO_ROOT/infra/docker/Dockerfile.api" "$REPO_ROOT" || {
+  docker build -t fru-api:local -f "$REPO_ROOT/module_infra_nonkube/local/Dockerfile.api" "$REPO_ROOT" || {
     log_error "Failed to build Docker image"
     exit 1
   }
 elif [ "$K8S_TYPE" = "kind" ]; then
   log_info "Building image for kind..."
-  docker build -t fru-api:local -f "$REPO_ROOT/infra/docker/Dockerfile.api" "$REPO_ROOT" || {
+  docker build -t fru-api:local -f "$REPO_ROOT/module_infra_nonkube/local/Dockerfile.api" "$REPO_ROOT" || {
     log_error "Failed to build Docker image"
     exit 1
   }
@@ -42,7 +42,7 @@ elif [ "$K8S_TYPE" = "kind" ]; then
   }
 else
   log_info "Building image for Docker Desktop..."
-  docker build -t fru-api:local -f "$REPO_ROOT/infra/docker/Dockerfile.api" "$REPO_ROOT" || {
+  docker build -t fru-api:local -f "$REPO_ROOT/module_infra_nonkube/local/Dockerfile.api" "$REPO_ROOT" || {
     log_error "Failed to build Docker image"
     exit 1
   }

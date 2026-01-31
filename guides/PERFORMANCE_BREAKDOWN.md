@@ -47,8 +47,8 @@
 
 ### Cache Flag
 
-- **Without cache**: `./test/test_query_1_AVG.sh --test-env aws`
-- **With cache**: `./test/test_query_1_AVG.sh --test-env aws --use-cached-aws-val`
+- **Without cache**: `./module_test_verification/test_query_1_AVG.sh --test-env aws`
+- **With cache**: `./module_test_verification/test_query_1_AVG.sh --test-env aws --use-cached-aws-val`
 
 ---
 

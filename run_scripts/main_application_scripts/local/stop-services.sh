@@ -6,9 +6,9 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
 
-DOCKER_DIR="$REPO_ROOT/infra/docker"
+DOCKER_DIR="$REPO_ROOT/module_infra_nonkube/local"
 
 stop_services() {
     log_step "Stopping Docker services"

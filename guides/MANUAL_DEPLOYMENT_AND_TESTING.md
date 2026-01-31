@@ -76,20 +76,20 @@ To preview what would be deployed without making changes:
 From the repository root:
 
 ```bash
-./test/test_query_1.sh --test-env aws
+./module_test_verification/test_query_1.sh --test-env aws
 ```
 
 **What this does:**
 - Connects to the deployed AWS API endpoint
 - Runs query: "Top 3 problems for low-rating feedbacks"
 - Tests with code: `AVG` (as configured in the script)
-- Generates test results in `test/test_results/query_1_<timestamp>/`
+- Generates test results in `module_test_verification/test_results/query_1_<timestamp>/`
 
 **Expected duration:** 1-2 minutes
 
 **Test output location:**
 ```
-test/test_results/query_1_<timestamp>/
+module_test_verification/test_results/query_1_<timestamp>/
 ├── query_1_AVG_<timestamp>.json
 └── query_1_AVG_<timestamp>.log
 ```
@@ -148,8 +148,8 @@ aws ecr get-login-password --region us-east-1 --profile admin | \
 
 | Command | Purpose | Duration |
 |---------|---------|----------|
-| `./test/test_query_1.sh --test-env aws` | Test query 1 | 1-2 min |
-| `./test/test_query_10.sh --test-env aws` | Test query 10 | 1-2 min |
+| `./module_test_verification/test_query_1.sh --test-env aws` | Test query 1 | 1-2 min |
+| `./module_test_verification/test_query_10.sh --test-env aws` | Test query 10 | 1-2 min |
 
 ### Verification Commands
 
@@ -201,7 +201,7 @@ aws ecr get-login-password --region us-east-1 --profile admin | \
 ./run_scripts/aws/run.sh ecs-full dev
 
 # 2. Test
-./test/test_query_1.sh --test-env aws
+./module_test_verification/test_query_1.sh --test-env aws
 ```
 
 **Quick update workflow:**
@@ -210,6 +210,6 @@ aws ecr get-login-password --region us-east-1 --profile admin | \
 ./run_scripts/aws/run.sh terraform dev application
 
 # 2. Test
-./test/test_query_1.sh --test-env aws
+./module_test_verification/test_query_1.sh --test-env aws
 ```
 

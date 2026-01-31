@@ -6,10 +6,10 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
 
 VENV_DIR="$REPO_ROOT/venv"
-REQUIREMENTS_FILE="$REPO_ROOT/requirements.txt"
+REQUIREMENTS_FILE="$REPO_ROOT/module_app_core/requirements.txt"
 
 setup_python_env() {
     log_step "Setting up Python environment"

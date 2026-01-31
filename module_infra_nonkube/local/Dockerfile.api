@@ -1,0 +1,50 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install Java 21 (required for Spark 4.0.x) and Spark dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        openjdk-21-jdk-headless \
+        curl \
+        wget \
+        && rm -rf /var/lib/apt/lists/*
+
+# Install Spark (version passed as build arg from .env via docker-compose.yml or build script)
+# ARG values are build-time variables that can be passed during docker build
+ARG SPARK_VERSION=4.0.1
+ARG HADOOP_VERSION=3
+# Convert ARG to ENV so they're available at runtime
+ENV SPARK_VERSION=${SPARK_VERSION}
+ENV HADOOP_VERSION=${HADOOP_VERSION}
+ENV SPARK_HOME=/opt/spark
+# JAVA_HOME will be set dynamically based on architecture (arm64 or amd64)
+ENV PATH=$SPARK_HOME/bin:$PATH
+
+# Use dlcdn.apache.org (CDN mirror) - works better with Docker networking
+RUN curl -fSL https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz -o spark.tgz && \
+    tar -xzf spark.tgz && \
+    mv spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION} ${SPARK_HOME} && \
+    rm spark.tgz
+
+# Set JAVA_HOME dynamically based on architecture
+RUN JAVA_DIR=$(ls -d /usr/lib/jvm/java-21-openjdk-* | head -1) && \
+    echo "export JAVA_HOME=$JAVA_DIR" >> /etc/profile.d/java.sh && \
+    echo "export PATH=\$JAVA_HOME/bin:\$PATH" >> /etc/profile.d/java.sh
+
+COPY module_app_core/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY module_app_core/backend /app/backend
+COPY module_app_core/spark_jobs /app/spark_jobs
+COPY infra/docker/docker-entrypoint.sh /app/docker-entrypoint.sh
+
+RUN chmod +x /app/docker-entrypoint.sh
+
+ENV FLASK_APP=backend.api.app:app
+EXPOSE 5000
+
+# Use entrypoint script to run both Flask and scheduler (if enabled).
+# Note: this script lives under infra/docker in the source tree and is
+# copied into the image as /app/docker-entrypoint.sh.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

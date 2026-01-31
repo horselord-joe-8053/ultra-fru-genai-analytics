@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 
 ENVIRONMENT="${1:-dev}"
 FORCE_REFRESH_DATA="${FORCE_REFRESH_DATA:-false}"
@@ -40,9 +40,9 @@ init_schema_aws() {
     fi
     
     # Determine Terraform environment directory
-    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments"
+    TERRAFORM_DIR="$REPO_ROOT/module_infra_basic/aws/environments"
     INFRA_DIR="$TERRAFORM_DIR/$env/infrastructure"
-    SCHEMA_FILE="$REPO_ROOT/sql/schema_pgvector.sql"
+    SCHEMA_FILE="$REPO_ROOT/module_app_core/sql/schema_pgvector.sql"
     
     if [ ! -d "$INFRA_DIR" ]; then
         log_error "Infrastructure directory not found at $INFRA_DIR; cannot fetch outputs."

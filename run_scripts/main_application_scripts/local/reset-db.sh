@@ -7,8 +7,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 
 reset_database() {
     log_step "Resetting fru_sales_embeddings table"
@@ -43,7 +43,7 @@ reset_database() {
     
     # Step 2: Recreate schema
     log_step "Substep 2/3: Recreating schema..."
-    SCHEMA_FILE="$REPO_ROOT/sql/schema_pgvector.sql"
+    SCHEMA_FILE="$REPO_ROOT/module_app_core/sql/schema_pgvector.sql"
     if [ ! -f "$SCHEMA_FILE" ]; then
         log_error "Schema file not found at $SCHEMA_FILE"
         exit 1

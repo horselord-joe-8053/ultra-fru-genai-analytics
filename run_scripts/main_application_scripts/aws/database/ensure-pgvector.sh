@@ -8,7 +8,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
 
 ENVIRONMENT="${1:-dev}"
 FORCE_REFRESH_DATA="${FORCE_REFRESH_DATA:-false}"
@@ -39,9 +39,9 @@ ensure_pgvector() {
         exit 1
     fi
     
-    # Determine Terraform environment directory
-    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments"
-    INFRA_DIR="$TERRAFORM_DIR/$env/infrastructure"
+    # Determine Terraform environment directory (infrastructure lives in module_infra_basic)
+    INFRA_TERRAFORM_DIR="$REPO_ROOT/module_infra_basic/aws/environments"
+    INFRA_DIR="$INFRA_TERRAFORM_DIR/$env/infrastructure"
     
     if [ ! -d "$INFRA_DIR" ]; then
         log_warning "Infrastructure directory not found at $INFRA_DIR; skipping pgvector extension step"

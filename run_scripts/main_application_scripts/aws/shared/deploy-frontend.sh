@@ -6,10 +6,10 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
 # Save SCRIPT_DIR before sourcing load-env.sh (which sets its own SCRIPT_DIR)
 FRONTEND_SCRIPT_DIR="$SCRIPT_DIR"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 # Restore our SCRIPT_DIR
 SCRIPT_DIR="$FRONTEND_SCRIPT_DIR"
 
@@ -22,7 +22,7 @@ command_exists() {
 # Phase 2: Frontend Version Verification
 # Stores version in .frontend-version.txt for later verification
 extract_frontend_version() {
-    local dist_dir="${1:-$REPO_ROOT/frontend/dist}"
+    local dist_dir="${1:-$REPO_ROOT/module_app_core/frontend/dist}"
     local version_file="${2:-$REPO_ROOT/.frontend-version.txt}"
     
     if [ ! -d "$dist_dir" ]; then
@@ -88,7 +88,7 @@ deploy_frontend() {
     
     # Get S3 bucket name from Terraform outputs
     # Use eks for EKS, ecs for ECS
-    TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments/$ENVIRONMENT"
+    TERRAFORM_DIR="$REPO_ROOT/module_infra_basic/aws/environments/$ENVIRONMENT"
     CONTAINER_TYPE="${CONTAINER_TYPE:-ecs}"
     if [ "$CONTAINER_TYPE" = "eks" ]; then
         APP_DIR="$TERRAFORM_DIR/eks"
@@ -137,7 +137,7 @@ deploy_frontend() {
     # Frontend uses relative URLs - CloudFront will proxy /query and /analytics to ALB
     local needs_build=false
     
-    if [ ! -d "$REPO_ROOT/frontend/dist" ]; then
+    if [ ! -d "$REPO_ROOT/module_app_core/frontend/dist" ]; then
         log_info "Frontend dist directory not found, will build"
         needs_build=true
     else
@@ -145,7 +145,7 @@ deploy_frontend() {
         # This ensures we rebuild when source code changes
         # Use cross-platform stat command (macOS: -f, Linux: -c)
         local dist_file
-        dist_file=$(find "$REPO_ROOT/frontend/dist" -type f \( -name "*.html" -o -name "*.js" -o -name "*.css" \) 2>/dev/null | head -1)
+        dist_file=$(find "$REPO_ROOT/module_app_core/frontend/dist" -type f \( -name "*.html" -o -name "*.js" -o -name "*.css" \) 2>/dev/null | head -1)
         local dist_mtime="0"
         if [ -n "$dist_file" ]; then
             dist_mtime=$(stat -f "%m" "$dist_file" 2>/dev/null || stat -c "%Y" "$dist_file" 2>/dev/null || echo "0")
@@ -153,7 +153,7 @@ deploy_frontend() {
         
         local src_mtime="0"
         local src_files
-        src_files=$(find "$REPO_ROOT/frontend/src" -type f \( -name "*.tsx" -o -name "*.ts" -o -name "*.jsx" -o -name "*.js" -o -name "*.css" \) 2>/dev/null)
+        src_files=$(find "$REPO_ROOT/module_app_core/frontend/src" -type f \( -name "*.tsx" -o -name "*.ts" -o -name "*.jsx" -o -name "*.js" -o -name "*.css" \) 2>/dev/null)
         if [ -n "$src_files" ]; then
             # Get the most recent source file modification time
             local src_file
@@ -183,7 +183,7 @@ deploy_frontend() {
     
     if [ "$needs_build" = "true" ]; then
         log_info "Building frontend..."
-        cd "$REPO_ROOT/frontend"
+        cd "$REPO_ROOT/module_app_core/frontend"
         
         # Check if node_modules exists, install if needed
         if [ ! -d "node_modules" ]; then
@@ -220,7 +220,7 @@ deploy_frontend() {
             log_info "Frontend uses relative URLs - CloudFront will proxy /query and /analytics to ALB"
             
             # Phase 2: Extract and track frontend version after build
-            extract_frontend_version "$REPO_ROOT/frontend/dist" "$REPO_ROOT/.frontend-version.txt" || true
+            extract_frontend_version "$REPO_ROOT/module_app_core/frontend/dist" "$REPO_ROOT/.frontend-version.txt" || true
         fi
         cd "$REPO_ROOT"
     fi
@@ -241,7 +241,7 @@ deploy_frontend() {
             log_info "[DRY-RUN]   - Configure static website hosting"
         fi
         log_info "[DRY-RUN]   - Sync frontend files to S3 (showing what would be synced)..."
-        aws s3 sync --dryrun --profile "$AWS_PROFILE" "$REPO_ROOT/frontend/dist" "s3://$S3_BUCKET_NAME" --delete
+        aws s3 sync --dryrun --profile "$AWS_PROFILE" "$REPO_ROOT/module_app_core/frontend/dist" "s3://$S3_BUCKET_NAME" --delete
         log_info "[DRY-RUN] Bucket: $S3_BUCKET_NAME"
         log_info "[DRY-RUN] Website URL: http://$S3_BUCKET_NAME.s3-website-$AWS_REGION.amazonaws.com"
         return 0
@@ -266,7 +266,7 @@ deploy_frontend() {
     
     # Sync files to S3
     log_info "Syncing frontend files to S3..."
-    aws s3 sync --profile "$AWS_PROFILE" "$REPO_ROOT/frontend/dist" "s3://$S3_BUCKET_NAME" --delete
+    aws s3 sync --profile "$AWS_PROFILE" "$REPO_ROOT/module_app_core/frontend/dist" "s3://$S3_BUCKET_NAME" --delete
     
     log_success "Frontend deployed to S3"
     log_info "  Bucket: $S3_BUCKET_NAME"

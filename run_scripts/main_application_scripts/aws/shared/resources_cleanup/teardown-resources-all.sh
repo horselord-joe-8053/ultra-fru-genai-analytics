@@ -31,8 +31,8 @@ HEARTBEAT_INTERVAL_SEC="${TEARDOWN_HEARTBEAT_INTERVAL:-60}"   # Heartbeat messag
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 
 # Optional: reuse cleanup helper for local Docker images
 CLEANUP_HELPER="$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/cleanup-local-docker-images.sh"
@@ -106,7 +106,7 @@ done
 # AWS account ID for S3 bucket names (can take up to ~3 min; no heartbeat during this phase)
 if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
     log_info "Resolving AWS account and ECR URI (may take up to ~3 min; no heartbeat during this phase)..."
-    source "$REPO_ROOT/run_scripts/shared/load-image-identifiers.sh"
+    source "$REPO_ROOT/orchestration/shared/load-image-identifiers.sh"
     load_image_identifiers "aws" || exit 1
 fi
 

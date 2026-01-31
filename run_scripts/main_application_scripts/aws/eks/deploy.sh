@@ -15,8 +15,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Resolve repo root. Prefer existing REPO_ROOT if set (from parent orchestrator),
 # otherwise go up to the monorepo root from this script's directory.
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 
 # Source helper scripts
 source "$REPO_ROOT/run_scripts/main_application_scripts/aws/eks/helpers/check-kubectl.sh"

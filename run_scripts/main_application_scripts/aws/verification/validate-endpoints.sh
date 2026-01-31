@@ -868,8 +868,8 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     
     # Source logger if not already sourced
     if [ -z "${log_info:-}" ]; then
-        source "$REPO_ROOT/run_scripts/shared/logger.sh" 2>/dev/null || true
-        source "$REPO_ROOT/run_scripts/shared/load-env.sh" 2>/dev/null || true
+        source "$REPO_ROOT/orchestration/shared/logger.sh" 2>/dev/null || true
+        source "$REPO_ROOT/orchestration/shared/load-env.sh" 2>/dev/null || true
         load_env_file 2>/dev/null || true
     fi
     

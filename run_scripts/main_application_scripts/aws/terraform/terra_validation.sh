@@ -7,10 +7,13 @@ set -e  # Fail-fast: exit on any error
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 
-TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments"
+# Search all Terraform layers (module_infra_basic, module_infra_kube, module_infra_nonkube)
+INFRA_TERRAFORM_DIR="$REPO_ROOT/module_infra_basic/aws/environments"
+EKS_TERRAFORM_DIR="$REPO_ROOT/module_infra_kube/aws/environments"
+ECS_TERRAFORM_DIR="$REPO_ROOT/module_infra_nonkube/aws/environments"
 RESULTS_DIR="$REPO_ROOT/temp_terra_gen/validation_sh_results"
 TIMESTAMP=$(date +%y%m%d-%H%M%S)
 SCRIPT_PREFIX="terra_validation"
@@ -90,22 +93,24 @@ plan_config() {
     fi
 }
 
-# Function to find all deepest-level HCL files
+# Function to find all deepest-level HCL files (searches all module Terraform dirs)
 find_hcl_files() {
     local env_filter=$1
     local files=()
+    local search_dirs=("$INFRA_TERRAFORM_DIR" "$EKS_TERRAFORM_DIR" "$ECS_TERRAFORM_DIR")
     
-    if [ "$env_filter" = "all" ]; then
-        # Find all terragrunt.hcl files in infrastructure and application directories (exclude .terragrunt-cache)
-        while IFS= read -r file; do
-            files+=("$file")
-        done < <(find "$TERRAFORM_DIR" -type f -name "terragrunt.hcl" ! -path "*/.terragrunt-cache/*" ! -path "*/root.hcl" ! -path "*/env.hcl" | sort)
-    else
-        # Find files for specific environment (exclude .terragrunt-cache)
-        while IFS= read -r file; do
-            files+=("$file")
-        done < <(find "$TERRAFORM_DIR/$env_filter" -type f -name "terragrunt.hcl" ! -path "*/.terragrunt-cache/*" | sort)
-    fi
+    for base in "${search_dirs[@]}"; do
+        [ ! -d "$base" ] && continue
+        if [ "$env_filter" = "all" ]; then
+            while IFS= read -r file; do
+                files+=("$file")
+            done < <(find "$base" -type f -name "terragrunt.hcl" ! -path "*/.terragrunt-cache/*" ! -path "*/root.hcl" ! -path "*/env.hcl" 2>/dev/null | sort)
+        else
+            while IFS= read -r file; do
+                files+=("$file")
+            done < <(find "$base/$env_filter" -type f -name "terragrunt.hcl" ! -path "*/.terragrunt-cache/*" 2>/dev/null | sort)
+        fi
+    done
     
     echo "${files[@]}"
 }
@@ -119,6 +124,10 @@ get_env_and_layer() {
         layer="infrastructure"
     elif [[ "$file_path" == *"/application/"* ]]; then
         layer="application"
+    elif [[ "$file_path" == *"/eks/"* ]]; then
+        layer="eks"
+    elif [[ "$file_path" == *"/ecs/"* ]]; then
+        layer="ecs"
     fi
     echo "$env $layer"
 }

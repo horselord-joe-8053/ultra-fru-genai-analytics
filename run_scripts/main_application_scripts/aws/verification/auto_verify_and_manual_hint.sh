@@ -11,8 +11,8 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 VERIFICATION_DIR="$SCRIPT_DIR"
 
 # Source common utilities
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 load_env_file || log_warning "Could not load .env"
 
 # Get parameters

@@ -7,10 +7,14 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../" && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
-source "$REPO_ROOT/run_scripts/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/load-env.sh"
 
-TERRAFORM_DIR="$REPO_ROOT/infra/terraform/providers/aws/environments"
+# Legacy name: ENV_DIR/LAYER_TERRAFORM_BASE fallback; actual layers use INFRA/EKS/ECS_TERRAFORM_DIR
+TERRAFORM_DIR="${REPO_ROOT}/module_infra_basic/aws/environments"
+INFRA_TERRAFORM_DIR="${REPO_ROOT}/module_infra_basic/aws/environments"
+EKS_TERRAFORM_DIR="${REPO_ROOT}/module_infra_kube/aws/environments"
+ECS_TERRAFORM_DIR="${REPO_ROOT}/module_infra_nonkube/aws/environments"
 
 # Check for dry-run mode (from parent script)
 DRY_RUN="${DRY_RUN:-false}"
@@ -237,7 +241,7 @@ deploy_terragrunt() {
                         log_error "Please ensure no other Terraform operations are active for this state."
                         log_error ""
                         log_error "To manually unlock (if safe):"
-                        log_error "  cd $TERRAFORM_DIR/$ENVIRONMENT/$LAYER && terragrunt force-unlock $lock_id -force"
+                        log_error "  cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LAYER && terragrunt force-unlock $lock_id -force"
                         rm -f "$tmp_out"
                         return 1  # Fail fast
                     elif [ "$processes_running" = true ] && [ $lock_age -ge $stale_threshold ]; then
@@ -268,7 +272,7 @@ deploy_terragrunt() {
                             log_error "  This may indicate S3 propagation delay or unlock failed silently."
                             log_error ""
                             log_error "Manual intervention required:"
-                            log_error "  cd $TERRAFORM_DIR/$ENVIRONMENT/$LAYER"
+                            log_error "  cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LAYER"
                             log_error "  terragrunt force-unlock $lock_id -force"
                             rm -f "$tmp_out"
                             return 1
@@ -283,7 +287,7 @@ deploy_terragrunt() {
                         done
                         log_error ""
                         log_error "Manual intervention required:"
-                        log_error "  cd $TERRAFORM_DIR/$ENVIRONMENT/$LAYER"
+                        log_error "  cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LAYER"
                         log_error "  terragrunt force-unlock $lock_id -force"
                         rm -f "$tmp_out"
                         return 1
@@ -398,7 +402,7 @@ deploy_terragrunt() {
                     log_error "  ps aux | grep -E 'terraform|terragrunt'"
                     log_error ""
                     log_error "To manually unlock (if safe):"
-                    log_error "  cd $TERRAFORM_DIR/$ENVIRONMENT/$LAYER"
+                    log_error "  cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LAYER"
                     log_error "  terragrunt force-unlock $lock_id -force"
                     rm -f "$tmp_out" "$clean_out"
                     return 1  # Fail fast
@@ -425,7 +429,7 @@ deploy_terragrunt() {
                         log_error "Manual intervention required:"
                         log_error "  1. Wait a few more seconds and retry"
                         log_error "  2. Check lock file in S3: s3://${TF_STATE_BUCKET:-fru-terraform-state-*}/$ENVIRONMENT/$LAYER/terraform.tfstate.tflock"
-                        log_error "  3. Manually unlock: cd $TERRAFORM_DIR/$ENVIRONMENT/$LAYER && terragrunt force-unlock $lock_id -force"
+                        log_error "  3. Manually unlock: cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LAYER && terragrunt force-unlock $lock_id -force"
                         rm -f "$tmp_out" "$clean_out"
                         return 1  # Fail fast
                     fi
@@ -470,7 +474,7 @@ deploy_terragrunt() {
                     log_error "Manual intervention required:"
                     log_error "  1. Verify no Terraform processes are running: ps aux | grep -E 'terraform|terragrunt'"
                     log_error "  2. Check lock file in S3: s3://${TF_STATE_BUCKET:-fru-terraform-state-*}/$ENVIRONMENT/$LAYER/terraform.tfstate.tflock"
-                    log_error "  3. Manually unlock: cd $TERRAFORM_DIR/$ENVIRONMENT/$LAYER && terragrunt force-unlock $lock_id -force"
+                    log_error "  3. Manually unlock: cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LAYER && terragrunt force-unlock $lock_id -force"
                     rm -f "$tmp_out" "$clean_out"
                     return 1  # Fail fast
                 fi
@@ -541,17 +545,18 @@ deploy_terragrunt() {
     # No need to re-export here - they're already available for Terragrunt's get_env()
     
     ENV_DIR="$TERRAFORM_DIR/$ENVIRONMENT"
+    LAYER_TERRAFORM_BASE="$TERRAFORM_DIR"
     
     if [ ! -d "$ENV_DIR" ]; then
         log_error "Environment directory not found at $ENV_DIR"
         exit 1
     fi
     
-    # Deploy infrastructure layer
+    # Deploy infrastructure layer (lives in module_infra_basic/aws)
     if [ "$LAYER" = "infrastructure" ] || [ "$LAYER" = "all" ]; then
         log_step "Deploying infrastructure layer (VPC, Aurora, IAM, Secrets Manager)"
-        
-        cd "$ENV_DIR/infrastructure"
+        LAYER_TERRAFORM_BASE="$INFRA_TERRAFORM_DIR"
+        cd "$INFRA_TERRAFORM_DIR/$ENVIRONMENT/infrastructure"
         
         # Refresh state before planning to ensure we have latest state (especially after imports)
         log_info "Refreshing Terraform state to ensure latest state..."
@@ -580,8 +585,9 @@ deploy_terragrunt() {
         fi
     fi
     
-    # Deploy application layer
+    # Deploy application layer (ECS; lives in module_infra_nonkube)
     if [ "$LAYER" = "application" ] || [ "$LAYER" = "all" ]; then
+        LAYER_TERRAFORM_BASE="$ECS_TERRAFORM_DIR"
         log_step "Deploying application layer (ECS, ALB, Frontend)"
         
         # Check if container image is set
@@ -602,7 +608,7 @@ deploy_terragrunt() {
             log_info "      and create a new task definition, triggering ECS to deploy the new image"
         fi
         
-        cd "$ENV_DIR/ecs"
+        cd "$ECS_TERRAFORM_DIR/$ENVIRONMENT/ecs"
         
         # Refresh state before planning to ensure we have latest state
         log_info "Refreshing Terraform state to ensure latest state..."
@@ -634,11 +640,11 @@ deploy_terragrunt() {
         fi
     fi
     
-    # Deploy eks layer (EKS cluster + Frontend for EKS)
+    # Deploy eks layer (EKS cluster + Frontend for EKS; lives in module_infra_kube)
     if [ "$LAYER" = "eks" ] || ([ "$LAYER" = "all" ] && [ "$CONTAINER_TYPE" = "eks" ]); then
+        LAYER_TERRAFORM_BASE="$EKS_TERRAFORM_DIR"
         log_step "Deploying eks layer (EKS cluster, node groups, OIDC provider, Frontend)"
-        
-        cd "$ENV_DIR/eks"
+        cd "$EKS_TERRAFORM_DIR/$ENVIRONMENT/eks"
         
         # Ensure AWS credentials are available for Terragrunt (needed for root.hcl get_aws_account_id)
         export AWS_PROFILE="${AWS_PROFILE:-admin}"

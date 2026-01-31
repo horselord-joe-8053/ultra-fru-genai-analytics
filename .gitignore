@@ -77,8 +77,9 @@ data/raw/*.backup*
 # Backup files
 .env.example.bk1
 
-# Kubernetes generated files
+# Kubernetes generated files (may contain secrets; do not commit)
 infra/k8s/generated/
+module_infra_kube/shared/generated/
 
 # Deployment state files (Phase 5: Deployment State Tracking)
 .frontend-version.txt

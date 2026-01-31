@@ -10,12 +10,12 @@ echo "[DEBUG] container-deploy-common.sh: Starting to source progress-indicator.
 SCRIPT_DIR_COMMON="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT_COMMON="${REPO_ROOT:-$(cd "$SCRIPT_DIR_COMMON/../../../../.." && pwd)}"
 echo "[DEBUG] container-deploy-common.sh: SCRIPT_DIR_COMMON=$SCRIPT_DIR_COMMON, REPO_ROOT_COMMON=$REPO_ROOT_COMMON" >&2
-if [ -f "$REPO_ROOT_COMMON/run_scripts/shared/progress-indicator.sh" ]; then
+if [ -f "$REPO_ROOT_COMMON/orchestration/shared/progress-indicator.sh" ]; then
     echo "[DEBUG] container-deploy-common.sh: Found progress-indicator.sh, sourcing..." >&2
-    source "$REPO_ROOT_COMMON/run_scripts/shared/progress-indicator.sh"
+    source "$REPO_ROOT_COMMON/orchestration/shared/progress-indicator.sh"
     echo "[DEBUG] container-deploy-common.sh: progress-indicator.sh sourced successfully" >&2
 else
-    echo "[DEBUG] container-deploy-common.sh: progress-indicator.sh not found at $REPO_ROOT_COMMON/run_scripts/shared/progress-indicator.sh" >&2
+    echo "[DEBUG] container-deploy-common.sh: progress-indicator.sh not found at $REPO_ROOT_COMMON/orchestration/shared/progress-indicator.sh" >&2
 fi
 echo "[DEBUG] container-deploy-common.sh: Finished sourcing, continuing..." >&2
 
@@ -199,7 +199,8 @@ deploy_phase_setup_database() {
         local step_start_time=$(date +%s)
         log_step "Phase 3: Step 3.3 - Step ${step_num}/${total_steps}: Setting up database (pgvector, schema, data)"
         
-        local db_setup_cmd="$script_dir/database/setup-database.sh $environment"
+        local repo_root="${REPO_ROOT:-$REPO_ROOT_COMMON}"
+        local db_setup_cmd="$repo_root/module_infra_db/aws/setup-database.sh $environment"
         if [ "$force_refresh_data" = "true" ]; then
             db_setup_cmd="$db_setup_cmd --force-refresh-data"
         fi
@@ -220,7 +221,7 @@ deploy_phase_setup_database() {
         step_start_time=$(date +%s)
         log_step "Phase 3: Step 3.4 - Step ${step_num}/${total_steps}: Validating infrastructure outputs"
         
-        if ! "$script_dir/database/validate-infra-outputs.sh" "$environment"; then
+        if ! "$repo_root/module_infra_db/aws/validate-infra-outputs.sh" "$environment"; then
             local elapsed=$(( $(date +%s) - step_start_time ))
             perf_step_end 3 "3.4" "FAILED" "Infrastructure outputs validation failed"
             log_error "Phase 3: Step 3.4 - Step ${step_num}/${total_steps} FAILED: Infrastructure outputs validation failed (took $(format_elapsed_time $elapsed))"
@@ -272,14 +273,14 @@ deploy_phase_setup_data_lake() {
         log_step "Phase 5: Step 5.1 - Step ${step_num}/${total_steps}: Setting up data-lake (S3 + Delta table)"
         
         if [ "$dry_run" = "true" ]; then
-            log_info "[DRY-RUN] Would run: $repo_root/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
+            log_info "[DRY-RUN] Would run: $repo_root/module_infra_spark/aws/delta-lake/setup-and-verify.sh"
             if [ "$preempt" = "true" ]; then
                 log_info "[DRY-RUN] Would pass --preempt flag to teardown Delta tables first"
             fi
         else
             export ENVIRONMENT="$environment"
             export DRY_RUN="$dry_run"
-            local setup_cmd="$repo_root/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
+            local setup_cmd="$repo_root/module_infra_spark/aws/delta-lake/setup-and-verify.sh"
             if [ "$preempt" = "true" ]; then
                 setup_cmd="$setup_cmd --preempt"
             fi
@@ -296,12 +297,12 @@ deploy_phase_setup_data_lake() {
                     log_error "Reason: Delta table creation failed, but ENABLE_ANALYTICS_SCHEDULER=true requires Delta tables"
                     log_error "Analytics scheduler will not work without Delta tables - deployment cannot proceed"
                     log_info "Fix Delta table setup issues before continuing, or set ENABLE_ANALYTICS_SCHEDULER=false to skip"
-                    log_info "You can run data-lake setup separately: $repo_root/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
+                    log_info "You can run data-lake setup separately: $repo_root/module_infra_spark/aws/delta-lake/setup-and-verify.sh"
                     exit 1
                 else
                     perf_step_end 5 "5.1" "FAILED" "Delta-lake setup had issues"
                     log_warning "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} had issues (application may still work without Delta tables) (took $(format_elapsed_time $elapsed))"
-                    log_info "You can run data-lake setup separately: $repo_root/run_scripts/spark_delta-lake_scripts/aws/delta-lake/setup-and-verify.sh"
+                    log_info "You can run data-lake setup separately: $repo_root/module_infra_spark/aws/delta-lake/setup-and-verify.sh"
                 fi
             else
                 local elapsed=$(( $(date +%s) - step_start_time ))

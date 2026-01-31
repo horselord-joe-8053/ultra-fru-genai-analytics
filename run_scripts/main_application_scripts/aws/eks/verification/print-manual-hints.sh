@@ -17,7 +17,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
 # Source shared logger if not already available
 if ! command -v log_info >/dev/null 2>&1; then
     # shellcheck source=/dev/null
-    source "$REPO_ROOT/run_scripts/shared/logger.sh" 2>/dev/null || true
+    source "$REPO_ROOT/orchestration/shared/logger.sh" 2>/dev/null || true
 fi
 
 # Print EKS-specific manual test hints

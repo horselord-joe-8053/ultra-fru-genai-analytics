@@ -8,7 +8,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREREQUISITES_DIR="$SCRIPT_DIR"  # Save the prerequisites directory
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
-source "$REPO_ROOT/run_scripts/shared/logger.sh"
+source "$REPO_ROOT/orchestration/shared/logger.sh"
 source "$SCRIPT_DIR/shared/detect-os.sh"
 
 WORKFLOW="${1:-local}"  # Default to "local" if not specified
