@@ -12,11 +12,22 @@
 # STEPS (per mode):
 #   Pre-destroy (stop services, empty S3) → Terraform destroy (layer(s)) → optional orphan cleanup → optional local Docker cleanup.
 #
+# HEARTBEAT: Shown every HEARTBEAT_INTERVAL_SEC during pre-destroy, terraform, and cleanup steps only.
+#   Initial "Loading AWS image identifiers" (before steps) is not wrapped; it may take up to ~3 min with no heartbeat.
+#
+# TIMEOUT: Script has no overall run timeout. To limit per-step duration, set TEARDOWN_STEP_TIMEOUT_SEC (seconds).
+#   Example: TEARDOWN_STEP_TIMEOUT_SEC=1800 ./teardown-resources-all.sh ... (30 min per step; step is killed and script exits non-zero).
+#   If unset or 0, steps run until completion. (External timeouts, e.g. CI/IDE, may still kill the process.)
+#
 # REQUIRED: --container-type (eks | ecs | all)
 #
 # OPTIONS: --force, --skip-confirmation, --dry-run, --clean-local-only, --help
 #
 set -e
+
+# --- Timeouts and heartbeat (override via env) ---
+TEARDOWN_STEP_TIMEOUT_SEC="${TEARDOWN_STEP_TIMEOUT_SEC:-0}"   # Per-step timeout (seconds). 0 = no timeout.
+HEARTBEAT_INTERVAL_SEC="${TEARDOWN_HEARTBEAT_INTERVAL:-60}"   # Heartbeat message interval (seconds).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
@@ -26,6 +37,19 @@ source "$REPO_ROOT/run_scripts/shared/load-env.sh"
 # Optional: reuse cleanup helper for local Docker images
 CLEANUP_HELPER="$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/cleanup-local-docker-images.sh"
 [ -f "$CLEANUP_HELPER" ] && source "$CLEANUP_HELPER" || true
+# Heartbeat helper for long-running steps (continuous feedback)
+HEARTBEAT_HELPER="$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/run-with-heartbeat.sh"
+[ -f "$HEARTBEAT_HELPER" ] && source "$HEARTBEAT_HELPER" || true
+# Wrapper: run with heartbeat and optional per-step timeout (TEARDOWN_STEP_TIMEOUT_SEC)
+_run_with_heartbeat_step() {
+    local desc="$1"
+    shift
+    if [ -n "$TEARDOWN_STEP_TIMEOUT_SEC" ] && [ "$TEARDOWN_STEP_TIMEOUT_SEC" -gt 0 ]; then
+        run_with_heartbeat "$desc" "$HEARTBEAT_INTERVAL_SEC" "$TEARDOWN_STEP_TIMEOUT_SEC" "$@"
+    else
+        run_with_heartbeat "$desc" "$HEARTBEAT_INTERVAL_SEC" "$@"
+    fi
+}
 
 DRY_RUN="false"
 FORCE_DELETE="false"
@@ -79,8 +103,9 @@ done
 [[ ! "$ENVIRONMENT" =~ ^(dev|staging|prod)$ ]] && { log_error "Invalid environment: $ENVIRONMENT"; exit 1; }
 [ -z "$CONTAINER_TYPE" ] && { log_error "--container-type is required"; exit 1; }
 
-# AWS account ID for S3 bucket names
+# AWS account ID for S3 bucket names (can take up to ~3 min; no heartbeat during this phase)
 if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
+    log_info "Resolving AWS account and ECR URI (may take up to ~3 min; no heartbeat during this phase)..."
     source "$REPO_ROOT/run_scripts/shared/load-image-identifiers.sh"
     load_image_identifiers "aws" || exit 1
 fi
@@ -116,7 +141,15 @@ run_pre_destroy() {
         return 0
     fi
     export AWS_PROFILE AWS_REGION
-    if "$PYTHON_CMD" "$pre_script" --environment "$ENVIRONMENT" --profile "$AWS_PROFILE" --region "$AWS_REGION"; then
+    local r=0
+    if type run_with_heartbeat >/dev/null 2>&1; then
+        _run_with_heartbeat_step "Pre-destroy ($ct)" -- "$PYTHON_CMD" "$pre_script" --environment "$ENVIRONMENT" --profile "$AWS_PROFILE" --region "$AWS_REGION"
+        r=$?
+    else
+        "$PYTHON_CMD" "$pre_script" --environment "$ENVIRONMENT" --profile "$AWS_PROFILE" --region "$AWS_REGION"
+        r=$?
+    fi
+    if [ "$r" -eq 0 ]; then
         log_success "Pre-destroy ($ct) done"
     else
         log_warning "Pre-destroy ($ct) had issues (continuing)"
@@ -137,7 +170,15 @@ run_terraform_teardown_layer() {
     fi
     export AWS_PROFILE AWS_REGION
     [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && export PREEMPT=true
-    if "$tf_wrapper" "$ENVIRONMENT"; then
+    local r=0
+    if type run_with_heartbeat >/dev/null 2>&1; then
+        _run_with_heartbeat_step "Terraform destroy ($ct layer)" -- "$tf_wrapper" "$ENVIRONMENT"
+        r=$?
+    else
+        "$tf_wrapper" "$ENVIRONMENT"
+        r=$?
+    fi
+    if [ "$r" -eq 0 ]; then
         log_success "Terraform teardown ($ct layer) complete"
     else
         log_warning "Terraform teardown ($ct) had issues (retry or use remove-all-aws-resources as fallback)"
@@ -158,7 +199,15 @@ run_terraform_teardown_shared() {
     fi
     export AWS_PROFILE AWS_REGION
     [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && export PREEMPT=true
-    if "$tf_wrapper" "$ENVIRONMENT"; then
+    local r=0
+    if type run_with_heartbeat >/dev/null 2>&1; then
+        _run_with_heartbeat_step "Terraform destroy (shared)" -- "$tf_wrapper" "$ENVIRONMENT"
+        r=$?
+    else
+        "$tf_wrapper" "$ENVIRONMENT"
+        r=$?
+    fi
+    if [ "$r" -eq 0 ]; then
         log_success "Terraform teardown (shared) complete"
     else
         log_warning "Terraform teardown (shared) had issues"
@@ -180,7 +229,15 @@ cleanup_orphaned() {
     fi
     local cmd=("$PYTHON_CMD" "$helper" "--environment" "$ENVIRONMENT" "--container-type" "$ct" "--profile" "$AWS_PROFILE" "--region" "$AWS_REGION")
     [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && cmd+=(--force)
-    if "${cmd[@]}"; then
+    local r=0
+    if type run_with_heartbeat >/dev/null 2>&1; then
+        _run_with_heartbeat_step "Orphan cleanup ($ct)" -- "${cmd[@]}"
+        r=$?
+    else
+        "${cmd[@]}"
+        r=$?
+    fi
+    if [ "$r" -eq 0 ]; then
         log_success "Orphan cleanup ($ct) done"
     else
         log_warning "Orphan cleanup ($ct) had issues (non-fatal)"
@@ -242,7 +299,11 @@ main() {
             run_terraform_teardown_layer "ecs" || failed=true
             if [ "$DRY_RUN" = "false" ] && [ "${TEARDOWN_WAIT_BETWEEN_LAYERS:-0}" -gt 0 ]; then
                 log_step "Waiting ${TEARDOWN_WAIT_BETWEEN_LAYERS}s before shared destroy"
-                sleep "${TEARDOWN_WAIT_BETWEEN_LAYERS}"
+                if type sleep_with_heartbeat >/dev/null 2>&1; then
+                    sleep_with_heartbeat "${TEARDOWN_WAIT_BETWEEN_LAYERS}" 30 "Waiting before shared destroy"
+                else
+                    sleep "${TEARDOWN_WAIT_BETWEEN_LAYERS}"
+                fi
             fi
             run_pre_destroy "shared" || failed=true
             run_terraform_teardown_shared || failed=true

@@ -9,6 +9,7 @@ import os
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 try:
@@ -18,47 +19,15 @@ except ImportError:
     print("Error: boto3 is required. pip install boto3", file=sys.stderr)
     sys.exit(1)
 
-
-# ANSI colors (only when stderr is a TTY)
-def _color(s: str, code: str) -> str:
-    if hasattr(sys.stderr, "isatty") and sys.stderr.isatty():
-        return f"\033[{code}m{s}\033[0m"
-    return s
-
-
-def _green(s: str) -> str:
-    return _color(s, "32")
-
-
-def _red(s: str) -> str:
-    return _color(s, "31")
-
-
-def _yellow(s: str) -> str:
-    return _color(s, "33")
-
-
-def _progress(msg: str) -> None:
-    """Print a progress line to stderr (visible to user)."""
-    print(f"  {msg}", file=sys.stderr, flush=True)
-
-
-def _print_status(resource_id: str, status: str, detail: Optional[str] = None) -> None:
-    """Print per-resource outcome: success (green), failed (red), skipped (yellow)."""
-    if status == "success":
-        print(f"  {resource_id}: {_green('success')}", file=sys.stderr, flush=True)
-    elif status == "failed":
-        line = f"  {resource_id}: {_red('failed')}"
-        if detail:
-            line += f" — {detail}"
-        print(line, file=sys.stderr, flush=True)
-    else:
-        # skipped (already_deleted, dry_run, etc.)
-        line = f"  {resource_id}: {_yellow('skipped')}"
-        if detail:
-            line += f" ({detail})"
-        print(line, file=sys.stderr, flush=True)
-
+# Shared feedback helpers (progress, status, wait-with-heartbeat)
+_helpers_dir = Path(__file__).resolve().parent.parent.parent / "helpers"
+if _helpers_dir.is_dir():
+    sys.path.insert(0, str(_helpers_dir))
+try:
+    from long_running_feedback import progress, print_status, log_timeout, wait_with_heartbeat  # pyright: ignore[reportMissingImports]
+except ImportError as e:
+    print(f"Error: could not import long_running_feedback from {_helpers_dir}: {e}", file=sys.stderr)
+    sys.exit(1)
 
 # Timeouts (minutes) for long-running deletions; shown at start of each component
 TIMEOUT_CLOUDFRONT_DEPLOY_MIN = 20
@@ -87,39 +56,6 @@ def _is_idempotent_success(e: ClientError) -> bool:
     if "not found" in (msg or "").lower() or "does not exist" in (msg or "").lower():
         return True
     return False
-
-
-def _wait_with_heartbeat(
-    description: str,
-    check_fn,
-    timeout_sec: int,
-    interval_sec: int = 60,
-) -> bool:
-    """Wait until check_fn() returns True or timeout. Print heartbeat every interval_sec. Returns True if done."""
-    timeout_min = timeout_sec // 60
-    print(f"  Waiting for {description} (timeout: {timeout_min} min)...", file=sys.stderr)
-    start = time.monotonic()
-    last_heartbeat = 0
-    while True:
-        try:
-            if check_fn():
-                return True
-        except Exception:
-            pass
-        elapsed = int(time.monotonic() - start)
-        if elapsed >= timeout_sec:
-            print(f"  Timeout after {timeout_min} min.", file=sys.stderr)
-            return False
-        if elapsed - last_heartbeat >= interval_sec:
-            mins = elapsed // 60
-            print(f"  ... have waited for {description} - {mins} min", file=sys.stderr)
-            last_heartbeat = elapsed
-        time.sleep(min(interval_sec, timeout_sec - elapsed))
-
-
-def _log_timeout(component: str, resource_id: str, timeout_min: int) -> None:
-    """Print timeout at start of deletion for a component (DRY)."""
-    print(f"  {component} {resource_id}: timeout {timeout_min} min", file=sys.stderr)
 
 
 def _get_results(data: dict, *keys: str, default: Optional[list] = None) -> List[dict]:
@@ -186,35 +122,35 @@ def _delete_cloudfront(data: dict, session: boto3.Session, dry_run: bool) -> Dic
             continue
         if dry_run:
             out["skipped"].append({"id": dist_id, "reason": "dry_run"})
-            _print_status(dist_id, "skipped", "dry_run")
+            print_status(dist_id, "skipped", "dry_run")
             continue
-        _progress(f"Deleting CloudFront {dist_id}...")
-        _log_timeout("CloudFront", dist_id, TIMEOUT_CLOUDFRONT_DEPLOY_MIN)
+        progress(f"Deleting CloudFront {dist_id}...")
+        log_timeout("CloudFront", dist_id, TIMEOUT_CLOUDFRONT_DEPLOY_MIN)
         try:
             cfg = cf.get_distribution_config(Id=dist_id)
             etag = cfg["ETag"]
             config = cfg["DistributionConfig"]
             if config.get("Enabled", True):
-                _progress("Disabling distribution...")
+                progress("Disabling distribution...")
                 config["Enabled"] = False
                 cf.update_distribution(Id=dist_id, IfMatch=etag, DistributionConfig=config)
-                done = _wait_with_heartbeat(
+                done = wait_with_heartbeat(
                     f"CloudFront {dist_id} to deploy (disabled)",
                     lambda c=cf, i=dist_id: c.get_distribution(Id=i)["Distribution"]["Status"] == "Deployed",
                     timeout_sec,
                 )
                 if not done:
                     out["failed"].append({"id": dist_id, "error": "timeout waiting for disable"})
-                    _print_status(dist_id, "failed", "timeout waiting for disable")
+                    print_status(dist_id, "failed", "timeout waiting for disable")
                     continue
-            _progress("Deleting distribution...")
+            progress("Deleting distribution...")
             etag2 = cf.get_distribution(Id=dist_id)["ETag"]
             cf.delete_distribution(Id=dist_id, IfMatch=etag2)
             out["deleted"].append(dist_id)
-            _print_status(dist_id, "success")
+            print_status(dist_id, "success")
         except ClientError as e:
             kind = _handle_delete_error(e, dist_id, out)
-            _print_status(dist_id, kind, "already_deleted" if kind == "skipped" else str(e))
+            print_status(dist_id, kind, "already_deleted" if kind == "skipped" else str(e))
     return out
 
 
@@ -237,12 +173,12 @@ def _delete_eks(data: dict, session: boto3.Session, region: str, dry_run: bool) 
             continue
         if dry_run:
             out["skipped"].append({"id": name, "reason": "dry_run"})
-            _print_status(name, "skipped", "dry_run")
+            print_status(name, "skipped", "dry_run")
             continue
-        _progress(f"Deleting EKS cluster {name}...")
-        _log_timeout("EKS cluster", name, TIMEOUT_EKS_DELETE_MIN)
+        progress(f"Deleting EKS cluster {name}...")
+        log_timeout("EKS cluster", name, TIMEOUT_EKS_DELETE_MIN)
         try:
-            _progress("Removing Fargate profiles and node groups...")
+            progress("Removing Fargate profiles and node groups...")
             for fp in (eks.list_fargate_profiles(clusterName=name).get("fargateProfileNames") or []):
                 try:
                     eks.delete_fargate_profile(clusterName=name, fargateProfileName=fp)
@@ -254,18 +190,18 @@ def _delete_eks(data: dict, session: boto3.Session, region: str, dry_run: bool) 
                 except ClientError:
                     pass
             time.sleep(30)
-            _progress("Deleting cluster...")
+            progress("Deleting cluster...")
             eks.delete_cluster(name=name)
-            _wait_with_heartbeat(
+            wait_with_heartbeat(
                 f"EKS cluster {name} to be deleted",
                 lambda e=eks, n=name: _check_eks_gone(e, n),
                 timeout_sec,
             )
             out["deleted"].append(name)
-            _print_status(name, "success")
+            print_status(name, "success")
         except ClientError as e:
             kind = _handle_delete_error(e, name, out)
-            _print_status(name, kind, "already_deleted" if kind == "skipped" else str(e))
+            print_status(name, kind, "already_deleted" if kind == "skipped" else str(e))
     return out
 
 
@@ -290,12 +226,12 @@ def _delete_ecs(data: dict, session: boto3.Session, region: str, dry_run: bool) 
             continue
         if dry_run:
             out["skipped"].append({"id": name, "reason": "dry_run"})
-            _print_status(name, "skipped", "dry_run")
+            print_status(name, "skipped", "dry_run")
             continue
-        _progress(f"Deleting ECS cluster {name}...")
-        _log_timeout("ECS cluster", name, TIMEOUT_ECS_DELETE_MIN)
+        progress(f"Deleting ECS cluster {name}...")
+        log_timeout("ECS cluster", name, TIMEOUT_ECS_DELETE_MIN)
         try:
-            _progress("Stopping and deleting services...")
+            progress("Stopping and deleting services...")
             for arn in (ecs.list_services(cluster=name).get("serviceArns") or []):
                 svc = arn.split("/")[-1]
                 try:
@@ -304,18 +240,18 @@ def _delete_ecs(data: dict, session: boto3.Session, region: str, dry_run: bool) 
                 except ClientError:
                     pass
             time.sleep(5)
-            _progress("Deleting cluster...")
+            progress("Deleting cluster...")
             ecs.delete_cluster(cluster=name)
-            _wait_with_heartbeat(
+            wait_with_heartbeat(
                 f"ECS cluster {name} to be deleted",
                 lambda e=ecs, n=name: _check_ecs_gone(e, n),
                 timeout_sec,
             )
             out["deleted"].append(name)
-            _print_status(name, "success")
+            print_status(name, "success")
         except ClientError as e:
             kind = _handle_delete_error(e, name, out)
-            _print_status(name, kind, "already_deleted" if kind == "skipped" else str(e))
+            print_status(name, kind, "already_deleted" if kind == "skipped" else str(e))
     return out
 
 
@@ -338,12 +274,12 @@ def _delete_rds(data: dict, session: boto3.Session, region: str, dry_run: bool) 
             continue
         if dry_run:
             out["skipped"].append({"id": cid, "reason": "dry_run"})
-            _print_status(cid, "skipped", "dry_run")
+            print_status(cid, "skipped", "dry_run")
             continue
-        _progress(f"Deleting RDS cluster {cid}...")
-        _log_timeout("RDS cluster", cid, TIMEOUT_RDS_DELETE_MIN)
+        progress(f"Deleting RDS cluster {cid}...")
+        log_timeout("RDS cluster", cid, TIMEOUT_RDS_DELETE_MIN)
         try:
-            _progress("Deleting instances and cluster...")
+            progress("Deleting instances and cluster...")
             inst_resp = rds.describe_db_instances(
                 Filters=[{"Name": "db-cluster-id", "Values": [cid]}]
             )
@@ -356,16 +292,16 @@ def _delete_rds(data: dict, session: boto3.Session, region: str, dry_run: bool) 
                 except ClientError:
                     pass
             rds.delete_db_cluster(DBClusterIdentifier=cid, SkipFinalSnapshot=True)
-            _wait_with_heartbeat(
+            wait_with_heartbeat(
                 f"RDS cluster {cid} to be deleted",
                 lambda r=rds, i=cid: _check_rds_gone(r, i),
                 timeout_sec,
             )
             out["deleted"].append(cid)
-            _print_status(cid, "success")
+            print_status(cid, "success")
         except ClientError as e:
             kind = _handle_delete_error(e, cid, out)
-            _print_status(cid, kind, "already_deleted" if kind == "skipped" else str(e))
+            print_status(cid, kind, "already_deleted" if kind == "skipped" else str(e))
     return out
 
 
@@ -380,18 +316,18 @@ def _delete_elb(data: dict, session: boto3.Session, region: str, dry_run: bool) 
             continue
         if dry_run:
             out["skipped"].append({"id": name, "reason": "dry_run"})
-            _print_status(name, "skipped", "dry_run")
+            print_status(name, "skipped", "dry_run")
             continue
-        _progress(f"Deleting load balancer {name}...")
+        progress(f"Deleting load balancer {name}...")
         try:
             resp = elbv2.describe_load_balancers(Names=[name])
             for l in resp.get("LoadBalancers") or []:
                 elbv2.delete_load_balancer(LoadBalancerArn=l["LoadBalancerArn"])
             out["deleted"].append(name)
-            _print_status(name, "success")
+            print_status(name, "success")
         except ClientError as e:
             kind = _handle_delete_error(e, name, out)
-            _print_status(name, kind, "already_deleted" if kind == "skipped" else str(e))
+            print_status(name, kind, "already_deleted" if kind == "skipped" else str(e))
     return out
 
 
@@ -406,16 +342,16 @@ def _delete_ec2_instances(data: dict, session: boto3.Session, region: str, dry_r
             continue
         if dry_run:
             out["skipped"].append({"id": iid, "reason": "dry_run"})
-            _print_status(iid, "skipped", "dry_run")
+            print_status(iid, "skipped", "dry_run")
             continue
-        _progress(f"Terminating instance {iid}...")
+        progress(f"Terminating instance {iid}...")
         try:
             ec2.terminate_instances(InstanceIds=[iid])
             out["deleted"].append(iid)
-            _print_status(iid, "success")
+            print_status(iid, "success")
         except ClientError as e:
             kind = _handle_delete_error(e, iid, out)
-            _print_status(iid, kind, "already_deleted" if kind == "skipped" else str(e))
+            print_status(iid, kind, "already_deleted" if kind == "skipped" else str(e))
     return out
 
 
@@ -430,16 +366,16 @@ def _delete_nat(data: dict, session: boto3.Session, region: str, dry_run: bool) 
             continue
         if dry_run:
             out["skipped"].append({"id": nid, "reason": "dry_run"})
-            _print_status(nid, "skipped", "dry_run")
+            print_status(nid, "skipped", "dry_run")
             continue
-        _progress(f"Deleting NAT gateway {nid}...")
+        progress(f"Deleting NAT gateway {nid}...")
         try:
             ec2.delete_nat_gateway(NatGatewayId=nid)
             out["deleted"].append(nid)
-            _print_status(nid, "success")
+            print_status(nid, "success")
         except ClientError as ex:
             kind = _handle_delete_error(ex, nid, out)
-            _print_status(nid, kind, "already_deleted" if kind == "skipped" else str(ex))
+            print_status(nid, kind, "already_deleted" if kind == "skipped" else str(ex))
     if not dry_run and nats:
         time.sleep(30)
     return out
@@ -456,16 +392,16 @@ def _delete_eip(data: dict, session: boto3.Session, region: str, dry_run: bool) 
             continue
         if dry_run:
             out["skipped"].append({"id": alloc, "reason": "dry_run"})
-            _print_status(alloc, "skipped", "dry_run")
+            print_status(alloc, "skipped", "dry_run")
             continue
-        _progress(f"Releasing Elastic IP {alloc}...")
+        progress(f"Releasing Elastic IP {alloc}...")
         try:
             ec2.release_address(AllocationId=alloc)
             out["deleted"].append(alloc)
-            _print_status(alloc, "success")
+            print_status(alloc, "success")
         except ClientError as ex:
             kind = _handle_delete_error(ex, alloc, out)
-            _print_status(alloc, kind, "already_deleted" if kind == "skipped" else str(ex))
+            print_status(alloc, kind, "already_deleted" if kind == "skipped" else str(ex))
     return out
 
 
@@ -480,9 +416,9 @@ def _delete_igw(data: dict, session: boto3.Session, region: str, dry_run: bool) 
             continue
         if dry_run:
             out["skipped"].append({"id": igw_id, "reason": "dry_run"})
-            _print_status(igw_id, "skipped", "dry_run")
+            print_status(igw_id, "skipped", "dry_run")
             continue
-        _progress(f"Deleting internet gateway {igw_id}...")
+        progress(f"Deleting internet gateway {igw_id}...")
         try:
             desc = ec2.describe_internet_gateways(InternetGatewayIds=[igw_id])
             for att in (desc.get("InternetGateways") or [{}])[0].get("Attachments") or []:
@@ -492,10 +428,10 @@ def _delete_igw(data: dict, session: boto3.Session, region: str, dry_run: bool) 
                 )
             ec2.delete_internet_gateway(InternetGatewayId=igw_id)
             out["deleted"].append(igw_id)
-            _print_status(igw_id, "success")
+            print_status(igw_id, "success")
         except ClientError as e:
             kind = _handle_delete_error(e, igw_id, out)
-            _print_status(igw_id, kind, "already_deleted" if kind == "skipped" else str(e))
+            print_status(igw_id, kind, "already_deleted" if kind == "skipped" else str(e))
     return out
 
 
@@ -524,9 +460,9 @@ def _delete_enis(data: dict, session: boto3.Session, region: str, dry_run: bool)
                 continue
             if dry_run:
                 out["skipped"].append({"id": eni_id, "reason": "dry_run"})
-                _print_status(eni_id, "skipped", "dry_run")
+                print_status(eni_id, "skipped", "dry_run")
                 continue
-            _progress(f"Deleting ENI {eni_id} (VPC {vpc_id})...")
+            progress(f"Deleting ENI {eni_id} (VPC {vpc_id})...")
             try:
                 attachment = eni.get("Attachment") or {}
                 attachment_id = attachment.get("AttachmentId", "")
@@ -543,12 +479,12 @@ def _delete_enis(data: dict, session: boto3.Session, region: str, dry_run: bool)
                 
                 if attachment_id and attachment_status in ("attached", "attaching"):
                     if is_elb_attachment:
-                        _progress("ENI has ELB attachment (managed by AWS), attempting direct deletion...")
+                        progress("ENI has ELB attachment (managed by AWS), attempting direct deletion...")
                         # ELB attachments are cleaned up automatically when LB is deleted
                         # Wait a moment for cleanup, then try deletion
                         time.sleep(5)
                     else:
-                        _progress("Detaching ENI...")
+                        progress("Detaching ENI...")
                         try:
                             ec2.detach_network_interface(
                                 AttachmentId=attachment_id,
@@ -558,7 +494,7 @@ def _delete_enis(data: dict, session: boto3.Session, region: str, dry_run: bool)
                         except ClientError as detach_e:
                             # If detach fails with OperationNotPermitted for ELB, try direct delete
                             if "OperationNotPermitted" in str(detach_e) and ("ela" in str(detach_e).lower() or "amazon-aws" in str(detach_e)):
-                                _progress("Cannot detach ELB attachment, trying direct deletion...")
+                                progress("Cannot detach ELB attachment, trying direct deletion...")
                                 time.sleep(5)
                             elif not _is_idempotent_success(detach_e):
                                 raise
@@ -566,7 +502,7 @@ def _delete_enis(data: dict, session: boto3.Session, region: str, dry_run: bool)
                 try:
                     ec2.delete_network_interface(NetworkInterfaceId=eni_id)
                     out["deleted"].append(eni_id)
-                    _print_status(eni_id, "success")
+                    print_status(eni_id, "success")
                 except ClientError as delete_e:
                     # If deletion fails due to ELB attachment still present, wait and retry with backoff
                     error_code = (delete_e.response or {}).get("Error", {}).get("Code", "")
@@ -579,7 +515,7 @@ def _delete_enis(data: dict, session: boto3.Session, region: str, dry_run: bool)
                     
                     if is_elb_blocking and is_elb_attachment:
                         # ELB cleanup can take 5-10 minutes after LB deletion (AWS managed)
-                        _progress("ELB attachment cleanup pending, waiting up to 5 min...")
+                        progress("ELB attachment cleanup pending, waiting up to 5 min...")
                         max_wait = 300  # 5 minutes
                         waited = 0
                         deleted = False
@@ -597,31 +533,31 @@ def _delete_enis(data: dict, session: boto3.Session, region: str, dry_run: bool)
                                 if not attachment.get("AttachmentId") or attachment_status in ("detached", "detaching"):
                                     ec2.delete_network_interface(NetworkInterfaceId=eni_id)
                                     out["deleted"].append(eni_id)
-                                    _print_status(eni_id, "success")
+                                    print_status(eni_id, "success")
                                     deleted = True
                                 elif waited % 30 == 0:  # Print progress every 30s
-                                    _progress(f"Still waiting for ELB cleanup... ({waited}s, attachment: {attachment_status})")
+                                    progress(f"Still waiting for ELB cleanup... ({waited}s, attachment: {attachment_status})")
                             except ClientError as check_e:
                                 if _is_idempotent_success(check_e):
                                     # ENI already gone
                                     out["skipped"].append({"id": eni_id, "reason": "already_deleted"})
-                                    _print_status(eni_id, "skipped", "already_deleted")
+                                    print_status(eni_id, "skipped", "already_deleted")
                                     deleted = True
                                     break
                                 # If still attached, continue waiting
                                 if waited % 30 == 0:
-                                    _progress(f"Still waiting for ELB cleanup... ({waited}s)")
+                                    progress(f"Still waiting for ELB cleanup... ({waited}s)")
                         
                         if not deleted:
                             # ELB ENIs are managed by AWS and will be cleaned up automatically (can take 10-15 min)
                             out["skipped"].append({"id": eni_id, "reason": "pending_aws_elb_cleanup"})
-                            _print_status(eni_id, "skipped", "pending_aws_elb_cleanup (will auto-cleanup in ~10-15 min)")
+                            print_status(eni_id, "skipped", "pending_aws_elb_cleanup (will auto-cleanup in ~10-15 min)")
                     else:
                         kind = _handle_delete_error(delete_e, eni_id, out)
-                        _print_status(eni_id, kind, "already_deleted" if kind == "skipped" else str(delete_e))
+                        print_status(eni_id, kind, "already_deleted" if kind == "skipped" else str(delete_e))
             except ClientError as e:
                 kind = _handle_delete_error(e, eni_id, out)
-                _print_status(eni_id, kind, "already_deleted" if kind == "skipped" else str(e))
+                print_status(eni_id, kind, "already_deleted" if kind == "skipped" else str(e))
     return out
 
 
@@ -636,16 +572,16 @@ def _delete_subnets(data: dict, session: boto3.Session, region: str, dry_run: bo
             continue
         if dry_run:
             out["skipped"].append({"id": sid, "reason": "dry_run"})
-            _print_status(sid, "skipped", "dry_run")
+            print_status(sid, "skipped", "dry_run")
             continue
-        _progress(f"Deleting subnet {sid}...")
+        progress(f"Deleting subnet {sid}...")
         try:
             ec2.delete_subnet(SubnetId=sid)
             out["deleted"].append(sid)
-            _print_status(sid, "success")
+            print_status(sid, "success")
         except ClientError as e:
             kind = _handle_delete_error(e, sid, out)
-            _print_status(sid, kind, "already_deleted" if kind == "skipped" else str(e))
+            print_status(sid, kind, "already_deleted" if kind == "skipped" else str(e))
     return out
 
 
@@ -660,16 +596,16 @@ def _delete_sgs(data: dict, session: boto3.Session, region: str, dry_run: bool) 
             continue
         if dry_run:
             out["skipped"].append({"id": sgid, "reason": "dry_run"})
-            _print_status(sgid, "skipped", "dry_run")
+            print_status(sgid, "skipped", "dry_run")
             continue
-        _progress(f"Deleting security group {sgid}...")
+        progress(f"Deleting security group {sgid}...")
         try:
             ec2.delete_security_group(GroupId=sgid)
             out["deleted"].append(sgid)
-            _print_status(sgid, "success")
+            print_status(sgid, "success")
         except ClientError as e:
             kind = _handle_delete_error(e, sgid, out)
-            _print_status(sgid, kind, "already_deleted" if kind == "skipped" else str(e))
+            print_status(sgid, kind, "already_deleted" if kind == "skipped" else str(e))
     return out
 
 
@@ -685,16 +621,16 @@ def _delete_vpc_endpoints(data: dict, session: boto3.Session, region: str, dry_r
             continue
         if dry_run:
             out["skipped"].append({"id": vpce_id, "reason": "dry_run"})
-            _print_status(vpce_id, "skipped", "dry_run")
+            print_status(vpce_id, "skipped", "dry_run")
             continue
-        _progress(f"Deleting VPC endpoint {vpce_id}...")
+        progress(f"Deleting VPC endpoint {vpce_id}...")
         try:
             ec2.delete_vpc_endpoints(VpcEndpointIds=[vpce_id])
             out["deleted"].append(vpce_id)
-            _print_status(vpce_id, "success")
+            print_status(vpce_id, "success")
         except ClientError as e:
             kind = _handle_delete_error(e, vpce_id, out)
-            _print_status(vpce_id, kind, "already_deleted" if kind == "skipped" else str(e))
+            print_status(vpce_id, kind, "already_deleted" if kind == "skipped" else str(e))
     return out
 
 
@@ -709,16 +645,16 @@ def _delete_vpcs(data: dict, session: boto3.Session, region: str, dry_run: bool)
             continue
         if dry_run:
             out["skipped"].append({"id": vpc_id, "reason": "dry_run"})
-            _print_status(vpc_id, "skipped", "dry_run")
+            print_status(vpc_id, "skipped", "dry_run")
             continue
-        _progress(f"Deleting VPC {vpc_id}...")
+        progress(f"Deleting VPC {vpc_id}...")
         try:
             ec2.delete_vpc(VpcId=vpc_id)
             out["deleted"].append(vpc_id)
-            _print_status(vpc_id, "success")
+            print_status(vpc_id, "success")
         except ClientError as e:
             kind = _handle_delete_error(e, vpc_id, out)
-            _print_status(vpc_id, kind, "already_deleted" if kind == "skipped" else str(e))
+            print_status(vpc_id, kind, "already_deleted" if kind == "skipped" else str(e))
     return out
 
 
@@ -733,16 +669,16 @@ def _delete_ecr(data: dict, session: boto3.Session, region: str, dry_run: bool) 
             continue
         if dry_run:
             out["skipped"].append({"id": name, "reason": "dry_run"})
-            _print_status(name, "skipped", "dry_run")
+            print_status(name, "skipped", "dry_run")
             continue
-        _progress(f"Deleting ECR repository {name}...")
+        progress(f"Deleting ECR repository {name}...")
         try:
             ecr.delete_repository(repositoryName=name, force=True)
             out["deleted"].append(name)
-            _print_status(name, "success")
+            print_status(name, "success")
         except ClientError as e:
             kind = _handle_delete_error(e, name, out)
-            _print_status(name, kind, "already_deleted" if kind == "skipped" else str(e))
+            print_status(name, kind, "already_deleted" if kind == "skipped" else str(e))
     return out
 
 
@@ -759,15 +695,15 @@ def _delete_s3(
             continue
         if keep_state_bucket and "terraform-state" in (name or ""):
             out["skipped"].append({"id": name, "reason": "preserve_state_bucket"})
-            _print_status(name, "skipped", "preserve_state_bucket")
+            print_status(name, "skipped", "preserve_state_bucket")
             continue
         if dry_run:
             out["skipped"].append({"id": name, "reason": "dry_run"})
-            _print_status(name, "skipped", "dry_run")
+            print_status(name, "skipped", "dry_run")
             continue
-        _progress(f"Deleting S3 bucket {name}...")
+        progress(f"Deleting S3 bucket {name}...")
         try:
-            _progress("Emptying bucket...")
+            progress("Emptying bucket...")
             paginator = s3.get_paginator("list_objects_v2")
             for page in paginator.paginate(Bucket=name):
                 objs = [{"Key": o["Key"]} for o in (page.get("Contents") or [])]
@@ -785,10 +721,10 @@ def _delete_s3(
                 pass
             s3.delete_bucket(Bucket=name)
             out["deleted"].append(name)
-            _print_status(name, "success")
+            print_status(name, "success")
         except ClientError as e:
             kind = _handle_delete_error(e, name, out)
-            _print_status(name, kind, "already_deleted" if kind == "skipped" else str(e))
+            print_status(name, kind, "already_deleted" if kind == "skipped" else str(e))
     return out
 
 
@@ -803,11 +739,11 @@ def _delete_iam(data: dict, session: boto3.Session, dry_run: bool) -> Dict:
             continue
         if dry_run:
             out["skipped"].append({"id": arn, "reason": "dry_run"})
-            _print_status(arn, "skipped", "dry_run")
+            print_status(arn, "skipped", "dry_run")
             continue
-        _progress(f"Deleting IAM policy {arn.split('/')[-1]}...")
+        progress(f"Deleting IAM policy {arn.split('/')[-1]}...")
         try:
-            _progress("Detaching from entities...")
+            progress("Detaching from entities...")
             marker = None
             while True:
                 kw = {"PolicyArn": arn}
@@ -832,7 +768,7 @@ def _delete_iam(data: dict, session: boto3.Session, dry_run: bool) -> Dict:
                 if not resp.get("IsTruncated"):
                     break
                 marker = resp.get("Marker")
-            _progress("Deleting policy versions and policy...")
+            progress("Deleting policy versions and policy...")
             for v in (iam.list_policy_versions(PolicyArn=arn).get("Versions") or []):
                 if not v.get("IsDefaultVersion"):
                     try:
@@ -841,10 +777,10 @@ def _delete_iam(data: dict, session: boto3.Session, dry_run: bool) -> Dict:
                         pass
             iam.delete_policy(PolicyArn=arn)
             out["deleted"].append(arn)
-            _print_status(arn, "success")
+            print_status(arn, "success")
         except ClientError as e:
             kind = _handle_delete_error(e, arn, out)
-            _print_status(arn, kind, "already_deleted" if kind == "skipped" else str(e))
+            print_status(arn, kind, "already_deleted" if kind == "skipped" else str(e))
     return out
 
 
