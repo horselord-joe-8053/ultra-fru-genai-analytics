@@ -18,7 +18,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # From helpers/ -> delta-lake/ -> common/ -> spark_delta-lake_scripts/ -> run_scripts/ -> root (5 levels up)
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
-source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/common/logger.sh"
 
 AWS_PROFILE="${AWS_PROFILE:-admin}"
 AWS_REGION="${AWS_REGION:-us-east-1}"

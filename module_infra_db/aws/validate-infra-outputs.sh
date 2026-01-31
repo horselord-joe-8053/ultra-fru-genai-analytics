@@ -6,13 +6,13 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
-source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/common/logger.sh"
 
 ENVIRONMENT="${1:-dev}"
 
 validate_infrastructure_outputs() {
     local env="${1:-$ENVIRONMENT}"
-    local terraform_dir="$REPO_ROOT/module_infra_basic/aws/environments"
+    local terraform_dir="$REPO_ROOT/module_infra_basic/aws/terra/environments"
     local infra_dir="$terraform_dir/$env/infrastructure"
     local required_outputs=(
         "db_password_secret_arn"

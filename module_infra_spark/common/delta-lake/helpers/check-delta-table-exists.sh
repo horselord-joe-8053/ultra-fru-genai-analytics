@@ -29,7 +29,7 @@ fi
 # Use Python helper (single source of truth for verification logic)
 # Fall back to AWS CLI if Python/boto3 is not available
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../../.." && pwd)}"
-source "$REPO_ROOT/orchestration/shared/load-python-env.sh"
+source "$REPO_ROOT/orchestration/common/env/load-python-env.sh"
 
 # Try Python verification first using CLI function with enhanced error handling
 # Exit codes: 0 = exists, 1 = not exists, 2 = error (fallback needed)

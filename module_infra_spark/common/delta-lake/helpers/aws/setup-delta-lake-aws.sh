@@ -6,10 +6,10 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../../.." && pwd)"
-source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/common/logger.sh"
 
 ENVIRONMENT="${ENVIRONMENT:-dev}"
-INFRASTRUCTURE_DIR="$REPO_ROOT/module_infra_basic/aws/environments/$ENVIRONMENT/infrastructure"
+INFRASTRUCTURE_DIR="$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT/infrastructure"
 
 if [ ! -d "$INFRASTRUCTURE_DIR" ]; then
     log_error "Infrastructure Terraform directory not found: $INFRASTRUCTURE_DIR"
@@ -28,7 +28,7 @@ if [ -z "$S3_BUCKET_ID" ]; then
     # Use centralized AWS_ACCOUNT_ID if available
     if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
         REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)}"
-        source "$REPO_ROOT/orchestration/shared/load-image-identifiers.sh" 2>/dev/null || true
+        source "$REPO_ROOT/orchestration/common/env/load-image-identifiers.sh" 2>/dev/null || true
         load_image_identifiers "aws" 2>/dev/null || true
     fi
     # Use AWS_ACCOUNT_ID directly (no need for separate ACCOUNT_ID variable)

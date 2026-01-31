@@ -19,7 +19,7 @@ if [ -z "$INPUT_PATH" ] || [ -z "$OUTPUT_PATH" ] || [ -z "$SPARK_PACKAGES" ]; th
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/common/logger.sh"
 
 log_info "Using Spark in Docker container to create Delta table"
 

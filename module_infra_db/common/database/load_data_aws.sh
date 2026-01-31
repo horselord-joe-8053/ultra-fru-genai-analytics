@@ -14,8 +14,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/orchestration/shared/logger.sh"
-source "$REPO_ROOT/orchestration/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/common/logger.sh"
+source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 
 # Default environment
 ENVIRONMENT="${1:-dev}"
@@ -48,7 +48,7 @@ load_data_aws() {
     log_step "Loading data into Aurora database"
     
     # Navigate to infrastructure directory
-    local infra_dir="$REPO_ROOT/module_infra_basic/aws/environments/$env/infrastructure"
+    local infra_dir="$REPO_ROOT/module_infra_basic/aws/terra/environments/$env/infrastructure"
     if [ ! -d "$infra_dir" ]; then
         log_error "Infrastructure directory not found: $infra_dir"
         exit 1

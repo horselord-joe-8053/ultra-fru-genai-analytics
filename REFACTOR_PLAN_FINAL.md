@@ -7,10 +7,10 @@ Single source of truth for the major refactor. Execute phases in order. Each pha
 ## Decisions (locked)
 
 - **Entrypoint:** Root `run.sh` and `teardown.sh` delegate to `orchestration/run.sh` and `orchestration/teardown.sh`.
-- **Sub-projects:** `orchestration/`, `module_app_core/`, `module_infra_basic/`, `module_infra_db/`, `module_infra_spark/`, `module_infra_kube/`, `module_infra_nonkube/`, `module_test_verification/`.
+- **Sub-projects:** `orchestration/`, `module_app_core/`, `module_infra_basic/`, `module_infra_db/`, `module_infra_spark/`, `module_infra_kubetypes/kube/`, `module_infra_kubetypes/nonkube/`, `module_test_verification/`.
 - **docs/:** Top-level `docs/`; move all top-level `.md` there **except** `README.md` and `README_WAR_STORIES.md`. Update docs when touching related code.
 - **Uncertain items:** Put in an appropriately named subdir of `orchestration/`.
-- **Env:** Single `.env` at repo root; no `env/` or `env-examples/`. `.env.example` has sections: COMMON, AWS, GCP, ORACLE, AZURE. Workflow: update `.env` first, then run `scripts/refresh-env-example.sh` to redact → `.env.example`.
+- **Env:** Single `.env` at repo root; no `env/` or `env-examples/`. `.env.example` has sections: COMMON, AWS, GCP, ORACLE, AZURE. Workflow: update `.env` first, then run `util_sh/refresh-env-example.sh` to redact → `.env.example`.
 - **Local:** Docker Postgres; use current working flows; prefer Docker where no flow exists yet.
 
 ---
@@ -23,7 +23,7 @@ Single source of truth for the major refactor. Execute phases in order. Each pha
 
 ---
 
-## Phase 1: docs/ and scripts/
+## Phase 1: docs/ and util_sh/
 
 1. **Create `docs/`** at repo root.
 2. **Move** into `docs/` (from repo root):
@@ -37,7 +37,7 @@ Single source of truth for the major refactor. Execute phases in order. Each pha
    - `ENVIRONMENT_MANAGEMENT_BEST_PRACTICES.md`
 3. **Leave at root:** `README.md`, `README_WAR_STORIES.md`.
 4. **Update `README.md`:** Fix links to moved docs (e.g. `README_RUN.md` → `docs/README_RUN.md`). Do minimal path fixes only; full doc edits when touching that area.
-5. **Ensure `scripts/` exists** with `scripts/refresh-env-example.sh` (already added). `.env.example` header points to it.
+5. **Ensure `util_sh/` exists** with `util_sh/refresh-env-example.sh` (already added). `.env.example` header points to it.
 6. **Smoke:** Grep for `README_RUN.md` etc.; update any in-repo references to `docs/...`.
 
 ---
@@ -50,8 +50,8 @@ Single source of truth for the major refactor. Execute phases in order. Each pha
    - `module_infra_basic/`
    - `module_infra_db/`
    - `module_infra_spark/`
-   - `module_infra_kube/`
-   - `module_infra_nonkube/`
+   - `module_infra_kubetypes/kube/`
+   - `module_infra_kubetypes/nonkube/`
    - `module_test_verification/`
 2. **Orchestration:**
    - Add `orchestration/shared/` and **move** from `orchestration/shared/`: `logger.sh`, `load-env.sh`, `load-image-identifiers.sh`, `load-python-env.sh`, `performance-tracker.sh`, `progress-indicator.sh`, `git_helpers.sh`.
@@ -92,7 +92,7 @@ Single source of truth for the major refactor. Execute phases in order. Each pha
 1. **Move** Aurora Terraform + DB bootstrap into `module_infra_db/aws/`:
    - Aurora module and Terragrunt configs (environments/dev, prod that reference Aurora) from current infra.
    - Schema/pgvector scripts: move `run_scripts/main_application_scripts/common/database/` into `module_infra_db/common/` and `module_infra_db/aws/` as appropriate; or keep under a single `module_infra_db/` and have orchestration call them. DB init scripts reference `module_app_core/sql/` for schema SQL.
-2. **Local:** Document that local DB = Docker Postgres (Compose in module_infra_nonkube). No separate “install PostgreSQL” for local.
+2. **Local:** Document that local DB = Docker Postgres (Compose in module_infra_kubetypes/nonkube). No separate “install PostgreSQL” for local.
 3. **Smoke:** Full AWS deploy including DB; local run with DB.
 
 ---
@@ -105,25 +105,25 @@ Single source of truth for the major refactor. Execute phases in order. Each pha
 
 ---
 
-## Phase 7: Move Kubernetes route (module_infra_kube)
+## Phase 7: Move Kubernetes route (module_infra_kubetypes/kube)
 
-1. **Move** into `module_infra_kube/`:
-   - **AWS:** From `infra/terraform/providers/aws/`: EKS Terragrunt + EKS module → `module_infra_kube/aws/`. `infra/k8s/` (manifests) → `module_infra_kube/shared/manifests/` or `module_infra_kube/aws/manifests/`.
-   - **Local:** `run_scripts/main_application_scripts/local/kube/` → `module_infra_kube/local/`.
-   - **Scripts:** `run_scripts/main_application_scripts/aws/eks/` → `module_infra_kube/aws/` (deploy, helpers, verification).
-2. **Path updates:** All references to old eks/ and k8s paths point to `module_infra_kube/`.
-3. **Orchestration:** `orchestration/run.sh` and `teardown.sh` dispatch aws+kube to `module_infra_kube/aws/` and local+kube to `module_infra_kube/local/`.
+1. **Move** into `module_infra_kubetypes/kube/`:
+   - **AWS:** From `infra/terraform/providers/aws/`: EKS Terragrunt + EKS module → `module_infra_kubetypes/kube/aws/`. `infra/k8s/` (manifests) → `module_infra_kubetypes/kube/common/manifests/` or `module_infra_kubetypes/kube/aws/manifests/`.
+   - **Local:** `run_scripts/main_application_scripts/local/kube/` → `module_infra_kubetypes/kube/local/`.
+   - **Scripts:** `run_scripts/main_application_scripts/aws/eks/` → `module_infra_kubetypes/kube/aws/` (deploy, helpers, verification).
+2. **Path updates:** All references to old eks/ and k8s paths point to `module_infra_kubetypes/kube/`.
+3. **Orchestration:** `orchestration/run.sh` and `teardown.sh` dispatch aws+kube to `module_infra_kubetypes/kube/aws/` and local+kube to `module_infra_kubetypes/kube/local/`.
 4. **Smoke:** Local kube and AWS EKS full run and teardown.
 
 ---
 
-## Phase 8: Move non-Kubernetes route (module_infra_nonkube)
+## Phase 8: Move non-Kubernetes route (module_infra_kubetypes/nonkube)
 
-1. **Move** into `module_infra_nonkube/`:
-   - **AWS:** From `infra/terraform/providers/aws/`: ECS Terragrunt + ECS, ALB, frontend modules → `module_infra_nonkube/aws/`. `run_scripts/main_application_scripts/aws/ecs/` and shared build/deploy (build-push-ecr, deploy-frontend, container-deploy-common) → `module_infra_nonkube/aws/` (or keep shared bits in orchestration).
-   - **Local:** `infra/docker/` (docker-compose.yml, Dockerfile.api, docker-entrypoint.sh) → `module_infra_nonkube/local/`. `run_scripts/main_application_scripts/local/` (start-services, stop-services, deploy-app, etc.) → `module_infra_nonkube/local/`.
-2. **Path updates:** All references to old ecs/ and docker paths point to `module_infra_nonkube/`.
-3. **Orchestration:** Dispatch local+nonkube and aws+nonkube to `module_infra_nonkube/local/` and `module_infra_nonkube/aws/`.
+1. **Move** into `module_infra_kubetypes/nonkube/`:
+   - **AWS:** From `infra/terraform/providers/aws/`: ECS Terragrunt + ECS, ALB, frontend modules → `module_infra_kubetypes/nonkube/aws/`. `run_scripts/main_application_scripts/aws/ecs/` and shared build/deploy (build-push-ecr, deploy-frontend, container-deploy-common) → `module_infra_kubetypes/nonkube/aws/` (or keep shared bits in orchestration).
+   - **Local:** `infra/docker/` (docker-compose.yml, Dockerfile.api, docker-entrypoint.sh) → `module_infra_kubetypes/nonkube/local/`. `run_scripts/main_application_scripts/local/` (start-services, stop-services, deploy-app, etc.) → `module_infra_kubetypes/nonkube/local/`.
+2. **Path updates:** All references to old ecs/ and docker paths point to `module_infra_kubetypes/nonkube/`.
+3. **Orchestration:** Dispatch local+nonkube and aws+nonkube to `module_infra_kubetypes/nonkube/local/` and `module_infra_kubetypes/nonkube/aws/`.
 4. **Smoke:** Local Compose and AWS ECS full run and teardown.
 
 ---
@@ -146,9 +146,9 @@ Remove or archive paths that are now empty or fully replaced by the new layout. 
    - `run_scripts/main_application_scripts/` (contents moved to orchestration/, module_infra_*, module_test_verification). Remove entire `run_scripts/main_application_scripts/` if every script has been moved or delegated.
    - `run_scripts/spark_delta-lake_scripts/` (moved to module_infra_spark).
    - `orchestration/shared/` (moved to orchestration/shared/).
-   - `infra/terraform/` (contents moved to module_infra_basic, module_infra_db, module_infra_kube, module_infra_nonkube).
-   - `infra/docker/` (moved to module_infra_nonkube/local).
-   - `infra/k8s/` (moved to module_infra_kube).
+   - `infra/terraform/` (contents moved to module_infra_basic, module_infra_db, module_infra_kubetypes/kube, module_infra_kubetypes/nonkube).
+   - `infra/docker/` (moved to module_infra_kubetypes/nonkube/local).
+   - `infra/k8s/` (moved to module_infra_kubetypes/kube).
    - `frontend/`, `backend/`, `data/`, `sql/`, `spark_jobs/`, `test/` at repo root (moved to module_app_core and module_test_verification).
 2. **Remove obsolete files:**
    - Any top-level `.md` that was moved to `docs/` (already moved in Phase 1; no duplicate left at root).
@@ -164,7 +164,7 @@ Remove or archive paths that are now empty or fully replaced by the new layout. 
 
 ## Phase 11: Docs and README
 
-1. **README.md:** One-command run/teardown examples; list sub-projects (orchestration, module_app_core, module_infra_basic, module_infra_db, module_infra_spark, module_infra_kube, module_infra_nonkube, module_test_verification); link to `docs/README_RUN.md`, `docs/README_INFRA.md`, etc.
+1. **README.md:** One-command run/teardown examples; list sub-projects (orchestration, module_app_core, module_infra_basic, module_infra_db, module_infra_spark, module_infra_kubetypes/kube, module_infra_kubetypes/nonkube, module_test_verification); link to `docs/README_RUN.md`, `docs/README_INFRA.md`, etc.
 2. **docs/:** Update moved docs when you touch that area (e.g. when run scripts change, update docs/README_RUN.md). No need to do all at once; do it as you change each area.
 3. **Sub-project READMEs:** Each `module_*/` and `orchestration/` can have a short README describing its role and how it’s invoked.
 
@@ -177,9 +177,9 @@ Remove or archive paths that are now empty or fully replaced by the new layout. 
 | `run_scripts/main_application_scripts/` (local, aws, common) → orchestration + module_* |
 | `orchestration/shared/` → `orchestration/shared/` |
 | `run_scripts/spark_delta-lake_scripts/` → `module_infra_spark/` |
-| `infra/terraform/providers/aws/` (infra, ecs, eks, modules) → module_infra_basic, module_infra_db, module_infra_kube, module_infra_nonkube |
-| `infra/docker/` → `module_infra_nonkube/local/` |
-| `infra/k8s/` → `module_infra_kube/` |
+| `infra/terraform/providers/aws/` (infra, ecs, eks, modules) → module_infra_basic, module_infra_db, module_infra_kubetypes/kube, module_infra_kubetypes/nonkube |
+| `infra/docker/` → `module_infra_kubetypes/nonkube/local/` |
+| `infra/k8s/` → `module_infra_kubetypes/kube/` |
 | Root `frontend/`, `backend/`, `data/`, `sql/`, `spark_jobs/` → `module_app_core/` |
 | Root `test/` → `module_test_verification/` |
 | Top-level README_*.md (except README.md, README_WAR_STORIES.md) → `docs/` (already moved in Phase 1) |
@@ -189,7 +189,7 @@ Remove or archive paths that are now empty or fully replaced by the new layout. 
 ## Env workflow reminder
 
 1. Update **.env** first (same section structure as `.env.example`: COMMON, AWS, GCP, ORACLE, AZURE).
-2. Run **`./scripts/refresh-env-example.sh`** to copy `.env` → `.env.example` with sensitive values redacted.
+2. Run **`./util_sh/refresh-env-example.sh`** to copy `.env` → `.env.example` with sensitive values redacted.
 3. Commit `.env.example` only; never commit `.env`.
 
 ---

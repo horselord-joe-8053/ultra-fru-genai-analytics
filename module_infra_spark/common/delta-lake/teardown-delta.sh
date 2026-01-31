@@ -13,9 +13,9 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
-source "$REPO_ROOT/orchestration/shared/logger.sh"
-source "$REPO_ROOT/orchestration/shared/load-env.sh"
-source "$REPO_ROOT/orchestration/shared/load-image-identifiers.sh"
+source "$REPO_ROOT/orchestration/common/logger.sh"
+source "$REPO_ROOT/orchestration/common/env/load-env.sh"
+source "$REPO_ROOT/orchestration/common/env/load-image-identifiers.sh"
 
 DRY_RUN="false"
 FORCE_DELETE="false"
@@ -128,7 +128,7 @@ fi
 # ============================================================================
 find_delta_tables_aws() {
     # Get S3 bucket from Terraform outputs
-    local infra_dir="$REPO_ROOT/module_infra_basic/aws/environments/$ENVIRONMENT/infrastructure"
+    local infra_dir="$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT/infrastructure"
     local s3_bucket_id=""
     
     if [ -d "$infra_dir" ]; then

@@ -6,14 +6,14 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../.." && pwd)}"
-source "$REPO_ROOT/orchestration/shared/logger.sh"
-source "$REPO_ROOT/orchestration/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/common/logger.sh"
+source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 
 # Get S3 bucket info from Terraform outputs
 if [ -z "$S3_BUCKET_ID" ]; then
-    INFRASTRUCTURE_DIR="$REPO_ROOT/module_infra_basic/aws/environments/$ENVIRONMENT/infrastructure"
+    INFRASTRUCTURE_DIR="$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT/infrastructure"
     if [ -d "$INFRASTRUCTURE_DIR" ]; then
         cd "$INFRASTRUCTURE_DIR"
         S3_BUCKET_ID=$(AWS_PROFILE="${AWS_PROFILE:-admin}" terragrunt output -raw s3_data_bucket_id 2>/dev/null || echo "")

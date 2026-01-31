@@ -6,8 +6,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../../.." && pwd)"
-source "$REPO_ROOT/orchestration/shared/logger.sh"
-source "$REPO_ROOT/orchestration/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/common/logger.sh"
+source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 
 # Resolve Delta table path
 if [ -z "$DELTA_DIR" ] || [ -z "$DELTA_TABLE_PATH" ]; then

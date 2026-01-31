@@ -28,7 +28,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../.." && pwd)}"
-source "$REPO_ROOT/orchestration/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 # Load .env file if available (for AWS credentials)
 [ -f "$REPO_ROOT/.env" ] && load_env_file 2>/dev/null || true
 

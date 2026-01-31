@@ -26,7 +26,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # From helpers/aws/ -> helpers/ -> delta-lake/ -> common/ -> spark_delta-lake_scripts/ -> run_scripts/ -> root (6 levels up)
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../../.." && pwd)}"
-source "$REPO_ROOT/orchestration/shared/logger.sh"
+source "$REPO_ROOT/orchestration/common/logger.sh"
 
 # Get task definition from service
 TASK_DEF_ARN=$(aws ecs describe-services \

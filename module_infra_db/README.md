@@ -14,4 +14,4 @@ Invoked by orchestration and AWS deploy:
 - **Local:** `./run.sh local nonkube` runs schema init and load via `module_infra_db/common/database/init_schema.sh local` and `load_data.sh local`
 - **AWS:** `container-deploy-common.sh` calls `module_infra_db/aws/setup-database.sh` and `validate-infra-outputs.sh`
 
-Local DB = Docker Postgres (Compose in `module_infra_nonkube` when Phase 8 is done).
+Local DB = Docker Postgres (Compose in `module_infra_kubetypes/nonkube` when Phase 8 is done).

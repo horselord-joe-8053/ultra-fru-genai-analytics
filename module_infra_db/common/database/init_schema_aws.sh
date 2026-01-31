@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/orchestration/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 
 ENVIRONMENT="${1:-dev}"
 FORCE_REFRESH_DATA="${FORCE_REFRESH_DATA:-false}"
@@ -40,7 +40,7 @@ init_schema_aws() {
     fi
     
     # Determine Terraform environment directory
-    TERRAFORM_DIR="$REPO_ROOT/module_infra_basic/aws/environments"
+    TERRAFORM_DIR="$REPO_ROOT/module_infra_basic/aws/terra/environments"
     INFRA_DIR="$TERRAFORM_DIR/$env/infrastructure"
     SCHEMA_FILE="$REPO_ROOT/module_app_core/sql/schema_pgvector.sql"
     

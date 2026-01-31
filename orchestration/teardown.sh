@@ -7,8 +7,8 @@ ORCH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$ORCH_SCRIPT_DIR/.." && pwd)}"
 export REPO_ROOT
 
-source "$REPO_ROOT/orchestration/shared/logger.sh"
-source "$REPO_ROOT/orchestration/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/common/logger.sh"
+source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 load_env_file 2>/dev/null || true
 
 PROVIDER="${1:-}"
@@ -35,7 +35,7 @@ case "$PROVIDER" in
             all) ROUTE="nonkube" ;;
             *) log_error "Invalid route for local: $ROUTE"; exit 1 ;;
         esac
-        exec "$REPO_ROOT/run_scripts/main_application_scripts/local/shared/resources_cleanup/teardown-resources-all.sh" --container-type "${ROUTE:-nonkube}" "${REMAINING[@]}"
+        exec "$REPO_ROOT/orchestration/local/teardown-resources-all.sh" --container-type "${ROUTE:-nonkube}" "${REMAINING[@]}"
         ;;
     aws)
         ENV="${REMAINING[0]:-dev}"
@@ -51,7 +51,7 @@ case "$PROVIDER" in
             all)     CT="all" ;;
             *) log_error "Invalid route for aws: $ROUTE (use kube, nonkube, or all)"; exit 1 ;;
         esac
-        exec "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/resources_cleanup/teardown-resources-all.sh" "$ENV" --container-type "$CT" "${REST[@]}"
+        exec "$REPO_ROOT/orchestration/aws/teardown-resources-all.sh" "$ENV" --container-type "$CT" "${REST[@]}"
         ;;
     "")
         log_error "Missing provider. Use: $0 <local|aws> <kube|nonkube|all> [env] [options...]"

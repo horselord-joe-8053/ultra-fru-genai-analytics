@@ -17,12 +17,12 @@ setup_aws_environment() {
     
     # Source the same utilities as auto_verify_and_manual_hint.sh does
     # shellcheck source=/dev/null
-    source "$REPO_ROOT/orchestration/shared/logger.sh" 2>/dev/null || {
+    source "$REPO_ROOT/orchestration/common/logger.sh" 2>/dev/null || {
         echo "ERROR: Could not source logger.sh" >&2
         exit 1
     }
     # shellcheck source=/dev/null
-    source "$REPO_ROOT/orchestration/shared/load-env.sh" 2>/dev/null || {
+    source "$REPO_ROOT/orchestration/common/env/load-env.sh" 2>/dev/null || {
         echo "ERROR: Could not source load-env.sh" >&2
         exit 1
     }
@@ -232,7 +232,7 @@ check_images_exist() {
     
     # Check api image (built locally)
     # Get project name from docker-compose (defaults to directory name)
-    local docker_dir="${REPO_ROOT}/module_infra_nonkube/local"
+    local docker_dir="${REPO_ROOT}/module_infra_kubetypes/nonkube/local"
     if [ ! -d "$docker_dir" ]; then
         return 1
     fi
@@ -275,8 +275,8 @@ setup_local_environment() {
     
     # Source load-env.sh to get LOCAL_SERVER_PORT
     # shellcheck source=/dev/null
-    if [ -f "$REPO_ROOT/orchestration/shared/load-env.sh" ]; then
-        source "$REPO_ROOT/orchestration/shared/load-env.sh" 2>/dev/null || true
+    if [ -f "$REPO_ROOT/orchestration/common/env/load-env.sh" ]; then
+        source "$REPO_ROOT/orchestration/common/env/load-env.sh" 2>/dev/null || true
         # Load .env file if it exists
         if [ -f "$REPO_ROOT/.env" ]; then
             load_env_file 2>/dev/null || true
@@ -314,7 +314,7 @@ setup_local_environment() {
     # Services are down - need to start them
     echo "INFO: Docker services are not running. Ensuring services are up..." >&2
     
-    local docker_dir="${REPO_ROOT}/module_infra_nonkube/local"
+    local docker_dir="${REPO_ROOT}/module_infra_kubetypes/nonkube/local"
     if [ ! -d "$docker_dir" ]; then
         echo "ERROR: Docker directory not found at $docker_dir" >&2
         exit 1

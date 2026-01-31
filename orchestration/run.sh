@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Top-level run dispatcher: ./orchestration/run.sh <local|aws> <kube|nonkube> [env] [options...]
-# Delegates to run_scripts/main_application_scripts/local/run.sh or aws/run.sh.
+# Delegates to orchestration/local/run.sh or orchestration/aws/run.sh.
 
 set -e
 ORCH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$ORCH_SCRIPT_DIR/.." && pwd)}"
 export REPO_ROOT
 
-source "$REPO_ROOT/orchestration/shared/logger.sh"
-source "$REPO_ROOT/orchestration/shared/load-env.sh"
+source "$REPO_ROOT/orchestration/common/logger.sh"
+source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 load_env_file 2>/dev/null || true
 
 PROVIDER="${1:-}"
@@ -33,7 +33,7 @@ case "$PROVIDER" in
             kube|nonkube) ;;
             *) log_error "Invalid route for local: $ROUTE (use kube or nonkube)"; exit 1 ;;
         esac
-        exec "$REPO_ROOT/run_scripts/main_application_scripts/local/run.sh" --container-type "${ROUTE:-nonkube}" "${REMAINING[@]}"
+        exec "$REPO_ROOT/orchestration/local/run.sh" --container-type "${ROUTE:-nonkube}" "${REMAINING[@]}"
         ;;
     aws)
         ENV="${REMAINING[0]:-dev}"
@@ -48,7 +48,7 @@ case "$PROVIDER" in
             kube)    CT="eks" ;;
             *) log_error "Invalid route for aws: $ROUTE (use kube or nonkube)"; exit 1 ;;
         esac
-        exec "$REPO_ROOT/run_scripts/main_application_scripts/aws/run.sh" deploy --container-type "$CT" "$ENV" "${REST[@]}"
+        exec "$REPO_ROOT/orchestration/aws/run.sh" deploy --container-type "$CT" "$ENV" "${REST[@]}"
         ;;
     "")
         log_error "Missing provider. Use: $0 <local|aws> <kube|nonkube> [env] [options...]"

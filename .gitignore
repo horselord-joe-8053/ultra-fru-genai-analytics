@@ -20,6 +20,9 @@ env/
 venv/
 ENV/
 .venv
+# Exception: orchestration common env scripts (load-env.sh etc.) — do track
+!orchestration/common/env/
+!orchestration/common/env/**
 
 # Node/React
 node_modules/
@@ -79,7 +82,7 @@ data/raw/*.backup*
 
 # Kubernetes generated files (may contain secrets; do not commit)
 infra/k8s/generated/
-module_infra_kube/shared/generated/
+module_infra_kubetypes/kube/common/generated/
 
 # Deployment state files (Phase 5: Deployment State Tracking)
 .frontend-version.txt

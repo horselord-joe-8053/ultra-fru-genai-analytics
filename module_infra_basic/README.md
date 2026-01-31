@@ -4,8 +4,8 @@ Shared AWS infrastructure (VPC, IAM, Secrets Manager, S3 state, Aurora, S3 data 
 
 ## Layout
 
-- **aws/environments/** – Terragrunt configs: `root.hcl`, `dev/`, `prod/`, `_component/infrastructure-base.hcl`
-- **aws/modules/** – Terraform modules: `vpc`, `iam`, `secrets-manager`, `s3-data`, `infrastructure`, `aurora`
+- **aws/terra/environments/** – Terragrunt configs: `root.hcl`, `dev/`, `prod/`, `_component/infrastructure-base.hcl`
+- **aws/terra/modules/** – Terraform modules: `vpc`, `iam`, `secrets-manager`, `s3-data`, `infrastructure`, `aurora`
 
 ## Usage
 
@@ -15,4 +15,4 @@ Deploy and teardown are invoked by orchestration:
 - **Infrastructure only:** `./run_scripts/main_application_scripts/aws/run.sh infrastructure dev`
 - **Teardown:** `./teardown.sh aws all dev` (destroys app layers then infrastructure)
 
-Scripts resolve the infrastructure layer from `REPO_ROOT/module_infra_basic/aws/environments/<env>/infrastructure`.
+Scripts resolve the infrastructure layer from `REPO_ROOT/module_infra_basic/aws/terra/environments/<env>/infrastructure`.
