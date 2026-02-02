@@ -49,7 +49,7 @@ check_service_status() {
     local environment="${2:-${ENVIRONMENT:-dev}}"
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local repo_root="${REPO_ROOT:-$(cd "$script_dir/../.." && pwd)}"
+    local repo_root="${REPO_ROOT:-$(cd "$script_dir/../../.." && pwd)}"
     
     # Default to ecs if not specified
     container_type="${container_type:-ecs}"

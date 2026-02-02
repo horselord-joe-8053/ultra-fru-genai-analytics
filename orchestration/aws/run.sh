@@ -167,6 +167,7 @@ DEFAULT_IMAGE_TAG="latest"
 # Initialize variables
 DRY_RUN=false
 SKIP_DATA_LAKE=false
+SKIP_BUILD=false
 PREEMPT=false
 FORCE_REFRESH_DATA=false
 RUN_ALL=false          # When true, run deploy for both ecs and eks sequentially
@@ -185,6 +186,10 @@ while [ $# -gt 0 ]; do
             ;;
         --skip-data-lake)
         SKIP_DATA_LAKE=true
+            shift
+            ;;
+        --skip-build)
+        SKIP_BUILD=true
             shift
             ;;
         --preempt)
@@ -249,7 +254,7 @@ if [ "$DEPLOY_COMMAND" = "deploy" ] && [ "$RUN_ALL" = false ] && [ -z "$CONTAINE
 fi
 
 # Export flags for sub-scripts (CONTAINER_TYPE may be overridden for --all mode)
-export DRY_RUN SKIP_DATA_LAKE PREEMPT FORCE_REFRESH_DATA RUN_ALL
+export DRY_RUN SKIP_DATA_LAKE SKIP_BUILD PREEMPT FORCE_REFRESH_DATA RUN_ALL
 
 # Show usage information
 show_usage() {
@@ -287,6 +292,7 @@ ${BLUE}Environments:${NC}
   ${BLUE}Options:${NC}
   ${GREEN}--container-type <ecs|eks>${NC}  Container orchestration type (required for deploy)
   ${GREEN}--dry-run${NC}          Preview changes without modifying AWS resources
+  ${GREEN}--skip-build${NC}       Skip container image build/push; use existing image (tag from git)
   ${GREEN}--preempt${NC}          Destroy existing infrastructure before deployment (clean slate)
   ${GREEN}--skip-data-lake${NC}   Skip data-lake setup even if analytics scheduler is enabled
   ${GREEN}--force-refresh-data${NC} Force refresh of data resources (database schema, data, Delta tables) without destroying infrastructure
@@ -380,6 +386,19 @@ check_or_build_image() {
         return 0
     fi
     
+    # --skip-build: resolve CONTAINER_IMAGE for later steps but do not build or push (image must exist in ECR or deploy will fail at pull)
+    if [ "${SKIP_BUILD:-false}" = "true" ]; then
+        log_info "Skipping container image check and build (--skip-build)"
+        CONTAINER_IMAGE=$(resolve_container_image_for_aws 2>/dev/null)
+        if [ -z "$CONTAINER_IMAGE" ] || [[ "$CONTAINER_IMAGE" != *":"* ]]; then
+            log_error "CONTAINER_IMAGE could not be resolved. Ensure git_helpers and load-image-identifiers are available."
+            exit 1
+        fi
+        export CONTAINER_IMAGE
+        log_info "Using CONTAINER_IMAGE: $CONTAINER_IMAGE (no build/push)"
+        return 0
+    fi
+    
     # Note: Environment variables (including IMAGE_PREFIX) are already loaded at script startup
     # Use admin profile for infrastructure operations (ECR)
     AWS_PROFILE="${AWS_PROFILE:-admin}"
@@ -389,8 +408,8 @@ check_or_build_image() {
     # For AWS deployments, this resolves IMAGE_PREFIX to actual ECR URI
     log_info "[DEBUG] check_or_build_image: About to call resolve_container_image_for_aws..."
     local resolve_start=$(date +%s)
-    # Capture only stdout (the actual return value), redirect stderr to /dev/null to avoid mixing logs
-    CONTAINER_IMAGE=$(resolve_container_image_for_aws 2>/dev/null)
+    # Capture stdout (the image URI); stderr is shown so resolution errors (e.g. git_helpers, IMAGE_TAG) are visible
+    CONTAINER_IMAGE=$(resolve_container_image_for_aws)
     local resolve_elapsed=$(( $(date +%s) - resolve_start ))
     log_info "[DEBUG] check_or_build_image: resolve_container_image_for_aws completed in ${resolve_elapsed}s"
     log_info "[DEBUG] check_or_build_image: CONTAINER_IMAGE='$CONTAINER_IMAGE'"
@@ -422,6 +441,20 @@ check_or_build_image() {
     IMAGE_TAG=$(echo "$IMAGE_TAG" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     ECR_REPO_URI=$(echo "$ECR_REPO_URI" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     
+    # If IMAGE_TAG is empty (e.g. resolve ran in subshell and tag wasn't set), generate it in this shell
+    if [ -z "$IMAGE_TAG" ]; then
+        log_warning "IMAGE_TAG was empty from CONTAINER_IMAGE; generating tag in current shell"
+        ensure_image_tag >/dev/null 2>&1 || true
+        if [ -n "${IMAGE_TAG:-}" ]; then
+            CONTAINER_IMAGE="${ECR_REPO_URI}:${IMAGE_TAG}"
+            export CONTAINER_IMAGE
+            log_info "Generated CONTAINER_IMAGE=$CONTAINER_IMAGE"
+        else
+            log_error "Could not generate IMAGE_TAG. Ensure git_helpers.sh is on the path (orchestration/common/git_helpers.sh)."
+            exit 1
+        fi
+    fi
+    
     log_info "[DEBUG] check_or_build_image: Extracted from CONTAINER_IMAGE='$CONTAINER_IMAGE':"
     log_info "[DEBUG] check_or_build_image:   ECR_REPO_URI='$ECR_REPO_URI'"
     log_info "[DEBUG] check_or_build_image:   IMAGE_TAG='$IMAGE_TAG'"
@@ -439,8 +472,14 @@ check_or_build_image() {
     log_info "[DEBUG] check_or_build_image: IMAGE_TAG value: '$IMAGE_TAG'"
     log_info "[DEBUG] check_or_build_image: IMAGE_TAG length: ${#IMAGE_TAG}"
     
+    # Fail fast if IMAGE_TAG is still empty (avoids hanging or confusing AWS CLI calls)
+    if [ -z "$IMAGE_TAG" ]; then
+        log_error "IMAGE_TAG is empty; cannot check or push to ECR. Ensure git_helpers.sh is sourced and generate_image_tag works."
+        exit 1
+    fi
+    
     # Check if image already exists in ECR
-    log_info "Checking if container image exists in ECR: $CONTAINER_IMAGE"
+    log_info "Phase 1 — Step 1/3: Checking if container image exists in ECR: $CONTAINER_IMAGE"
     log_info "[DEBUG] check_or_build_image: About to call aws ecr describe-images with imageTag='$IMAGE_TAG'"
     local image_check_output
     if image_check_output=$(aws ecr describe-images \
@@ -469,7 +508,7 @@ check_or_build_image() {
     fi
     
     # Image doesn't exist (or PREEMPT requested), build and push it
-    log_info "Building and pushing container image..."
+    log_info "Phase 1 — Step 2/3: Building and pushing container image (Docker build + ECR push)..."
     log_info "Image will be tagged as: $CONTAINER_IMAGE"
     
     # In PREEMPT mode, ensure FORCE_REBUILD is set so build-push-ecr.sh always rebuilds
@@ -480,6 +519,9 @@ check_or_build_image() {
         export FORCE_REBUILD=true
     fi
     
+    log_info "Phase 1 — Step 3/3: Running Docker build and ECR push (output streams below)..."
+    log_info "  Script: $REPO_ROOT/module_infra_basic/aws/build-push-ecr.sh"
+    log_info "  Image: $CONTAINER_IMAGE | ECR repo: $ECR_REPO_URI | Tag: $IMAGE_TAG"
     if "$REPO_ROOT/module_infra_basic/aws/build-push-ecr.sh"; then
         log_success "Container image built and pushed: $CONTAINER_IMAGE"
         log_info "This image URI will be used by Terraform to update the ECS task definition"
@@ -552,17 +594,27 @@ deploy_ecs_full() {
     # Phase 1: Environment Preparation - Step 1.3: Prepare container image
     # Phase 2: Infrastructure Setup - Steps 2.2, 2.3
     # ============================================================================
-    # Use shared phase functions to reduce duplication
-    # Note: Functions return step_num via echo (stdout), logs go to stderr
-    # Extract only numeric value from output (filter out any log output that leaks to stdout)
-    step_num=$(deploy_phase_check_image "$step_num" "$total_steps" 2>&1 | grep -E '^[0-9]+$' | tail -1)
-    step_num=$(deploy_phase_setup_state_bucket "$step_num" "$total_steps" "$SCRIPT_DIR" 2>&1 | grep -E '^[0-9]+$' | tail -1)
-    step_num=$(deploy_phase_deploy_infrastructure "$step_num" "$total_steps" "$SCRIPT_DIR" "$ENVIRONMENT" 2>&1 | grep -E '^[0-9]+$' | tail -1)
+    # Fail-fast: run each phase, capture exit code; exit immediately on first failure
+    run_phase_and_capture() {
+        local tmpf; tmpf=$(mktemp)
+        "$@" 2>&1 | tee "$tmpf"
+        local rc=${PIPESTATUS[0]}
+        local new_step; new_step=$(grep -E '^[0-9]+$' "$tmpf" | tail -1)
+        rm -f "$tmpf"
+        if [ "$rc" -ne 0 ]; then
+            log_error "Phase failed (fail-fast); stopping. See output above."
+            exit 1
+        fi
+        echo "$new_step"
+    }
+    step_num=$(run_phase_and_capture deploy_phase_check_image "$step_num" "$total_steps")
+    step_num=$(run_phase_and_capture deploy_phase_setup_state_bucket "$step_num" "$total_steps" "$SCRIPT_DIR")
+    step_num=$(run_phase_and_capture deploy_phase_deploy_infrastructure "$step_num" "$total_steps" "$SCRIPT_DIR" "$ENVIRONMENT")
 
     # ============================================================================
     # Phase 3: Database Setup (ECS only - EKS uses Kubernetes manifests)
     # ============================================================================
-    step_num=$(deploy_phase_setup_database "$step_num" "$total_steps" "$SCRIPT_DIR" "$ENVIRONMENT" "${FORCE_REFRESH_DATA:-false}" "${DRY_RUN:-false}" 2>&1 | grep -E '^[0-9]+$' | tail -1)
+    step_num=$(run_phase_and_capture deploy_phase_setup_database "$step_num" "$total_steps" "$SCRIPT_DIR" "$ENVIRONMENT" "${FORCE_REFRESH_DATA:-false}" "${DRY_RUN:-false}")
     
     # ============================================================================
     # Phase 4: Application Infrastructure Deployment
@@ -589,7 +641,7 @@ deploy_ecs_full() {
     # ============================================================================
     # Phase 5: Data Lake Setup (optional, conditional)
     # ============================================================================
-    step_num=$(deploy_phase_setup_data_lake "$step_num" "$total_steps" "$REPO_ROOT" "$ENVIRONMENT" "${PREEMPT:-false}" "${FORCE_REFRESH_DATA:-false}" "${DRY_RUN:-false}" "${ENABLE_ANALYTICS_SCHEDULER:-false}" "${SKIP_DATA_LAKE:-false}" 2>&1 | grep -E '^[0-9]+$' | tail -1)
+    step_num=$(run_phase_and_capture deploy_phase_setup_data_lake "$step_num" "$total_steps" "$REPO_ROOT" "$ENVIRONMENT" "${PREEMPT:-false}" "${FORCE_REFRESH_DATA:-false}" "${DRY_RUN:-false}" "${ENABLE_ANALYTICS_SCHEDULER:-false}" "${SKIP_DATA_LAKE:-false}")
     
     # ============================================================================
     # Phase 6: Frontend Deployment
@@ -628,7 +680,7 @@ deploy_eks_full() {
     
     # Get step information from main() (accounts for Phase 0 steps and preempt if enabled)
     local step_num="${CURRENT_STEP:-5}"  # Default to 5 (after Phase 0.1-0.4, or 0.5 if preempt)
-    local total_steps="${TOTAL_STEPS:-11}"  # Default for eks
+    local total_steps="${TOTAL_STEPS:-12}"  # Default for eks: 4 (Phase 0) + 7 (deploy incl. 5.1b frontend-eks) + 1 (Phase 7)
     log_info "[DEBUG] Starting at step: $step_num/$total_steps"
     
     # ============================================================================
@@ -742,16 +794,35 @@ deploy_eks_full() {
     log_info "[DEBUG] About to start Phase 2.2: Setting up Terraform state bucket..."
     log_info "[DEBUG] Calling deploy_phase_setup_state_bucket with step_num=$step_num, total_steps=$total_steps"
     local phase2_2_start=$(date +%s)
-    step_num=$(deploy_phase_setup_state_bucket "$step_num" "$total_steps" "$SCRIPT_DIR" 2>&1 | grep -E '^[0-9]+$' | tail -1)
+    local _phase2_2_tmp=$(mktemp)
+    deploy_phase_setup_state_bucket "$step_num" "$total_steps" "$SCRIPT_DIR" 2>&1 | tee "$_phase2_2_tmp"
+    local _phase2_2_rc=${PIPESTATUS[0]}
+    step_num=$(grep -E '^[0-9]+$' "$_phase2_2_tmp" | tail -1)
+    rm -f "$_phase2_2_tmp"
     local phase2_2_elapsed=$(( $(date +%s) - phase2_2_start ))
     log_info "[DEBUG] Phase 2.2 completed in $(format_elapsed_time $phase2_2_elapsed), new step_num=$step_num"
-    
+    if [ "$_phase2_2_rc" -ne 0 ]; then
+        log_error "Phase 2.2 (Terraform state bucket) failed; exiting."
+        exit 1
+    fi
+
     log_info "[DEBUG] About to start Phase 2.3: Deploying infrastructure layer..."
     log_info "[DEBUG] Calling deploy_phase_deploy_infrastructure with step_num=$step_num, total_steps=$total_steps, environment=$ENVIRONMENT"
     local phase2_3_start=$(date +%s)
-    step_num=$(deploy_phase_deploy_infrastructure "$step_num" "$total_steps" "$SCRIPT_DIR" "$ENVIRONMENT" 2>&1 | grep -E '^[0-9]+$' | tail -1)
+    local _phase2_3_tmp=$(mktemp)
+    deploy_phase_deploy_infrastructure "$step_num" "$total_steps" "$SCRIPT_DIR" "$ENVIRONMENT" 2>&1 | tee "$_phase2_3_tmp"
+    local _phase2_3_rc=${PIPESTATUS[0]}
+    step_num=$(grep -E '^[0-9]+$' "$_phase2_3_tmp" | tail -1)
+    if [ "$_phase2_3_rc" -ne 0 ] && grep -qi "subnet group" "$_phase2_3_tmp" 2>/dev/null && grep -qi "vpc" "$_phase2_3_tmp" 2>/dev/null; then
+        log_info "Hint: Subnet group/VPC mismatch. Fix: ./run.sh aws kube dev --preempt  (tears down EKS+ECS+shared incl. Aurora/subnet group, then redeploys; see docs/DEPLOYMENT_ERRORS_AND_FIXES.md)"
+    fi
+    rm -f "$_phase2_3_tmp"
     local phase2_3_elapsed=$(( $(date +%s) - phase2_3_start ))
     log_info "[DEBUG] Phase 2.3 completed in $(format_elapsed_time $phase2_3_elapsed), new step_num=$step_num"
+    if [ "$_phase2_3_rc" -ne 0 ]; then
+        log_error "Phase 2.3 (Infrastructure deployment) failed; exiting."
+        exit 1
+    fi
     
     # ============================================================================
     # (Phase 3: Database Setup is handled via Kubernetes manifests for EKS)
@@ -760,8 +831,16 @@ deploy_eks_full() {
     # ============================================================================
     # Phase 4: Data Lake Setup (optional, conditional)
     # ============================================================================
-    step_num=$(deploy_phase_setup_data_lake "$step_num" "$total_steps" "$REPO_ROOT" "$ENVIRONMENT" "${PREEMPT:-false}" "${FORCE_REFRESH_DATA:-false}" "${DRY_RUN:-false}" "${ENABLE_ANALYTICS_SCHEDULER:-false}" "${SKIP_DATA_LAKE:-false}" 2>&1 | grep -E '^[0-9]+$' | tail -1)
-    
+    _phase4_tmp=$(mktemp)
+    deploy_phase_setup_data_lake "$step_num" "$total_steps" "$REPO_ROOT" "$ENVIRONMENT" "${PREEMPT:-false}" "${FORCE_REFRESH_DATA:-false}" "${DRY_RUN:-false}" "${ENABLE_ANALYTICS_SCHEDULER:-false}" "${SKIP_DATA_LAKE:-false}" 2>&1 | tee "$_phase4_tmp"
+    _phase4_rc=${PIPESTATUS[0]}
+    step_num=$(grep -E '^[0-9]+$' "$_phase4_tmp" | tail -1)
+    rm -f "$_phase4_tmp"
+    if [ "$_phase4_rc" -ne 0 ]; then
+        log_error "Phase 4 (Data Lake Setup) failed; exiting."
+        exit 1
+    fi
+
     # ============================================================================
     # Phase 5: Application Deployment
     # ============================================================================
@@ -798,6 +877,22 @@ deploy_eks_full() {
     elapsed=$(( $(date +%s) - step_start_time ))
     perf_step_end 5 "5.1" "SUCCESS" "EKS layer deployed" >&2
     log_success "Phase 5: Step 5.1 - Step ${step_num}/${total_steps} PASSED: EKS layer deployed (took $(format_elapsed_time $elapsed))" >&2
+    step_num=$((step_num + 1))
+
+    # Step 5.1b: Deploy frontend-eks layer (S3 + CloudFront) so deploy-frontend.sh can get s3_bucket_id during Step 5.2
+    perf_step_start 5 "5.1b" "Deploying frontend-eks layer (S3 + CloudFront)"
+    step_start_time=$(date +%s)
+    log_step "Phase 5: Step 5.1b - Step ${step_num}/${total_steps}: Deploying frontend-eks layer (S3 bucket, CloudFront)" >&2
+    if ! "$REPO_ROOT/orchestration/terraform/deploy.sh" "$ENVIRONMENT" frontend-eks; then
+        elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 5 "5.1b" "FAILED" "frontend-eks layer deployment failed" >&2
+        log_error "Phase 5: Step 5.1b - Step ${step_num}/${total_steps} FAILED: frontend-eks layer deployment failed (took $(format_elapsed_time $elapsed))" >&2
+        log_info "Kube deploy needs frontend-eks (S3 bucket) for frontend sync. Deploy it and retry, or run kube deploy with --skip-frontend." >&2
+        exit 1
+    fi
+    elapsed=$(( $(date +%s) - step_start_time ))
+    perf_step_end 5 "5.1b" "SUCCESS" "frontend-eks layer deployed" >&2
+    log_success "Phase 5: Step 5.1b - Step ${step_num}/${total_steps} PASSED: frontend-eks layer deployed (took $(format_elapsed_time $elapsed))" >&2
     step_num=$((step_num + 1))
     
     # ============================================================================
@@ -888,9 +983,11 @@ deploy_eks_full() {
             progress_heartbeat_start "Deploying Kubernetes manifests" 10
         fi
         
-        # Deploy Kubernetes manifests
+        # Deploy Kubernetes manifests (pass --skip-build/--skip-frontend if set so kube deploy skips those substeps)
         local k8s_deploy_result=0
-        if ! "$REPO_ROOT/module_infra_kubetypes/kube/aws/deploy.sh"; then
+        local k8s_deploy_args=()
+        [ "${SKIP_BUILD:-false}" = "true" ] && k8s_deploy_args+=(--skip-build)
+        if ! "$REPO_ROOT/module_infra_kubetypes/kube/aws/deploy.sh" "${k8s_deploy_args[@]}"; then
             k8s_deploy_result=1
         fi
         
@@ -1011,7 +1108,7 @@ main() {
     
     if [ "$DEPLOY_COMMAND" = "deploy" ]; then
         if [ "$container_type_for_steps" = "eks" ]; then
-        total_steps=11  # 4 (Phase 0) + 6 (deploy) + 1 (Phase 7)
+        total_steps=12  # 4 (Phase 0) + 7 (deploy incl. 5.1b frontend-eks) + 1 (Phase 7)
         fi
     elif [ "$DEPLOY_COMMAND" = "infrastructure" ]; then
         total_steps=6  # 4 (Phase 0) + 2 (infrastructure only)
@@ -1132,8 +1229,9 @@ main() {
                 exit 1
             fi
             
-            # Pass CONTAINER_TYPE explicitly to teardown (required parameter)
-            local destroy_cmd="$REPO_ROOT/orchestration/aws/teardown-resources-all.sh $ENVIRONMENT --container-type $CONTAINER_TYPE"
+            # PREEMPT must tear down shared infra (VPC, Aurora, DB subnet group) so Phase 2.3 doesn't hit "subnet group not in same VPC".
+            # Teardown with --container-type all destroys EKS + ECS + shared; then we deploy only the requested CONTAINER_TYPE.
+            local destroy_cmd="$REPO_ROOT/orchestration/aws/teardown-resources-all.sh $ENVIRONMENT --container-type all"
             # --dry-run and --force are NOT mutually exclusive
             # --dry-run: preview what would be destroyed
             # --force: skip confirmation prompts
@@ -1253,8 +1351,8 @@ main() {
         local total_steps="${TOTAL_STEPS:-13}"  # Default for ecs
         if [ "$container_type_for_steps" = "eks" ]; then
             # Defaults for eks if not set
-            step_num="${CURRENT_STEP:-11}"  # Default: after Phase 0 (4) + deploy (6) + 1 = 11
-            total_steps="${TOTAL_STEPS:-11}"  # Default for eks
+            step_num="${CURRENT_STEP:-11}"  # Default: after Phase 0 (4) + deploy (7) + 1 = 11
+            total_steps="${TOTAL_STEPS:-12}"  # Default for eks
         fi
         perf_phase_start 7 "Validation and Verification"
         perf_step_start 7 "7.1" "Verifying deployment and generating test instructions"

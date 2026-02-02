@@ -96,5 +96,3 @@ if [ $python_exit_code -ne 0 ]; then
     echo "[entrypoint] ============================================================" >&2
     exit $python_exit_code
 fi
-
-

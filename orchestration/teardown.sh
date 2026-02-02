@@ -1,6 +1,24 @@
 #!/usr/bin/env bash
+# =============================================================================
 # Top-level teardown dispatcher: ./orchestration/teardown.sh <local|aws> <kube|nonkube|all> [env] [options...]
-# For aws, "all" destroys EKS + ECS + shared infra.
+# =============================================================================
+# Delegates to orchestration/local/teardown-resources-all.sh or
+# orchestration/aws/teardown-resources-all.sh.
+#
+# Modes:
+#   local nonkube / kube → Teardown local Docker Compose or Kubernetes
+#   aws nonkube [env]   → Teardown AWS ECS only (shared infra left standing)
+#   aws kube [env]      → Teardown AWS EKS only (shared infra left standing)
+#   aws all [env]       → Teardown EKS + ECS + shared infra (VPC, Aurora, IAM)
+#
+# For problem-free ./run.sh aws kube dev --preempt: preempt uses --container-type
+# all so shared infra is torn down. Teardown runs import-existing-infrastructure
+# before shared destroy (so state is populated and destroy can remove DB subnet
+# group, etc.). Option B: infrastructure has no Secrets Manager; destroy runs in one pass.
+#
+# Options: --force, --dry-run, etc. forwarded to target script.
+# Usage: ./orchestration/teardown.sh [local|aws] [kube|nonkube|all] [dev|prod] [options...]
+# =============================================================================
 
 set -e
 ORCH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

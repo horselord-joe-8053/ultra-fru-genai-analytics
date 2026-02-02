@@ -13,6 +13,11 @@ variable "aws_region" {
   description = "AWS region"
 }
 
+variable "tf_state_bucket" {
+  type        = string
+  description = "S3 bucket for Terraform state (used to read longterm layer state)"
+}
+
 variable "vpc_cidr" {
   type        = string
   description = "CIDR block for VPC"
@@ -36,17 +41,6 @@ variable "enable_bedrock_vpc_endpoint" {
   default     = true
 }
 
-variable "openai_api_key" {
-  type        = string
-  description = "OpenAI API key (must be provided via .env - empty string will fail validation)"
-  sensitive   = true
-  
-  validation {
-    condition     = length(var.openai_api_key) > 0
-    error_message = "openai_api_key cannot be empty. Please set OPENAI_API_KEY in your .env file."
-  }
-}
-
 variable "db_password" {
   type        = string
   description = "Database password (must be provided via .env - empty string will fail validation)"
@@ -67,12 +61,6 @@ variable "db_username" {
     condition     = length(var.db_username) > 0
     error_message = "db_username cannot be empty. Please set PGUSER in your .env file."
   }
-}
-
-variable "create_db_username_secret" {
-  type        = bool
-  description = "Create secret for database username"
-  default     = false
 }
 
 variable "aurora_database_name" {

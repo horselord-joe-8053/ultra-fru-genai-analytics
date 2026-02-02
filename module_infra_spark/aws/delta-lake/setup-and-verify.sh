@@ -86,6 +86,12 @@ else
         source "$VARS_FILE"
         rm -f "$VARS_FILE"
     fi
+    # Fail-fast: S3_BUCKET_ID must be set before upload/Delta steps (avoids invalid s3:///raw/...)
+    if [ -z "${S3_BUCKET_ID:-}" ]; then
+        log_error "Substep 1/3 did not set S3_BUCKET_ID. Delta-lake infrastructure (S3 bucket) is missing or Terraform outputs are not available."
+        log_error "  Deploy infrastructure first, or set ENABLE_ANALYTICS_SCHEDULER=false / use --skip-data-lake to skip data-lake setup."
+        exit 1
+    fi
 fi
 log_success "Substep 1/3 PASSED: Delta-lake infrastructure ready"
 

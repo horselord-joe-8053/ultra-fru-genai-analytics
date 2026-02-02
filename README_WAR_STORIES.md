@@ -634,3 +634,255 @@ After this, plan and apply for frontend-ecs and frontend-eks succeeded without t
 When you see "does not match configured version constraint ~> X.Y; must use terraform", the lock file has pinned a provider version that does not satisfy the constraint in your Terraform/root config. Resolve it by deleting the offending `.terraform.lock.hcl` (in the layer or module) and re-running `terragrunt init` so Terraform locks a version that satisfies the constraint; or update the constraint to match the lock and re-init everywhere. Keep root constraint and lock files in sync and commit lock files so everyone uses the same provider version.
 
 ---
+
+## 15. Load Balancer Ownership: Terraform vs Kubernetes and Why We Avoid Terraform's kubectl for EKS
+
+**creation:** `<260130>`
+**last_updated:** `<260130>`
+
+**keywords:** Terraform, Kubernetes, EKS, ECS, ALB, NLB, load balancer ownership, Terraform Kubernetes provider, infrastructure best practice
+**difficulty:** 6
+**significance:** 8
+
+### 15.1 Context
+
+This project supports two container runtimes on AWS: **ECS (non-kube)** and **EKS (kube)**. Both need a load balancer in front of the API: ECS uses an Application Load Balancer (ALB); EKS uses a Network Load Balancer (NLB) created when the NGINX Ingress controller is deployed. The question arose: should load balancer creation live in Terraform for both, or only for ECS? And if we use Kubernetes to own the EKS LB, is that just a quirk or does it align with best practice?
+
+### 15.2 Root Cause / Design Choice
+
+We deliberately split ownership:
+
+- **ECS (non-kube):** The ALB is created and managed by **Terraform** (module `module_infra_kubetypes/nonkube/aws/terra/modules/alb/`). Terraform also creates the target group, listeners, and security groups and wires the ECS service to the ALB. There is no Kubernetes here—nothing else in the stack "owns" the LB, so Terraform is the natural owner and keeps VPC, subnets, ALB, and ECS service in one lifecycle.
+
+- **EKS (kube):** The external LB (NLB) is created by **Kubernetes**, not Terraform. Terraform only provisions the EKS cluster (and node groups, OIDC, security groups). The NGINX Ingress controller is deployed via Helm/manifests; its Service is type `LoadBalancer`, so the cloud provider (AWS) creates the NLB when that Service is applied. Terraform does not create or manage this LB.
+
+We use K8s as the owner for the EKS LB because **using Terraform to create and manage it would require Terraform's Kubernetes provider** (e.g. `kubernetes_service`, `kubernetes_ingress`). That approach is slow (Terraform would drive `kubectl`-equivalent API calls, often with more plan/apply cycles and state bloat) and cumbersome (you duplicate what the platform already does: apply a Service/Ingress and the cloud controller creates the LB). It is also unnecessary—Kubernetes and the AWS cloud controller already create and manage the NLB as a first-class outcome of deploying the Ingress. So we let the platform own the LB and only feed the resulting LB DNS (e.g. from `kubectl get svc`) into Terraform where needed (e.g. CloudFront origin for frontend-eks).
+
+### 15.3 Key Insight
+
+> Put load balancer ownership where the runtime that uses it lives. For ECS there is no Ingress abstraction—Terraform owns the ALB and wires the ECS service to it. For EKS, the Ingress/Service is the natural owner; using Terraform's Kubernetes provider to create the LB would be slow, cumbersome, and redundant. Let the platform (K8s + cloud controller) own the LB; use Terraform only for the cluster and for downstream consumers (e.g. CloudFront) that need the LB DNS.
+
+### 15.4 Resolution
+
+- **ECS:** Kept ALB (and target group, listeners, SGs) in Terraform. No change—this is the standard pattern for ECS.
+- **EKS:** Kept LB creation out of Terraform. Terraform creates the EKS cluster only. The deploy pipeline (Helm/kubectl) deploys the Ingress controller and its Service; AWS creates the NLB. Scripts (e.g. `update-cloudfront-loadbalancer-simple.sh`) wait for the K8s Service's LoadBalancer hostname and then that DNS is used by the frontend-eks Terraform (e.g. `alb_dns_name`) for CloudFront origin. No Terraform Kubernetes provider for the LB.
+- **Documentation:** Captured the split and the rationale so future changes don't accidentally push EKS LB into Terraform (Kubernetes provider) or ECS ALB into a non-Terraform path.
+
+### 15.5 Takeaway
+
+Asymmetric ownership is intentional and matches industry practice: Terraform owns long-lived infra that has no other owner (e.g. ECS ALB); the container platform owns resources it natively creates (e.g. EKS NLB via Ingress/Service). Avoid using Terraform's Kubernetes provider to create LBs when the platform can do it natively—it is slow, cumbersome, and unnecessary. Document the split so the design stays consistent and "who owns the LB" is clear for both ECS and EKS.
+
+---
+
+## 16. Phase 2 Infrastructure: RDS Subnet Group VPC Mismatch
+
+**creation:** `<260131>`
+**last_updated:** `<260131>`
+
+**keywords:** Terraform, Terragrunt, infrastructure layer, RDS, DB subnet group, VPC, state vs reality, orphan resources
+**difficulty:** 6
+**significance:** 7
+
+### 16.1 Context
+
+During `./run.sh aws kube dev`, Phase 2 (Deploy infrastructure layer) failed with a Terraform error involving the RDS DB subnet group and VPC—e.g. the subnet group must contain only subnets in the same VPC, or an update to `aws_db_subnet_group.aurora` failed because the new subnets belong to a different VPC. The infrastructure code itself wires VPC → subnets → subnet group → Aurora in one module; a single apply should never produce a mismatch. So the failure pointed to state vs reality: something in AWS or Terraform state was out of sync.
+
+### 16.2 Root Cause
+
+The infrastructure layer creates one VPC, its subnets, the RDS subnet group (using those subnets), and Aurora. In code, everything is tied to `module.vpc`; no mismatch is possible in a fresh apply.
+
+The mismatch appears when:
+
+1. **Two VPCs exist in the account** (e.g. a previous run created VPC A and the RDS subnet group with subnets in VPC A; later, state was lost or a different state was used, and Terraform created a new VPC B and new subnets).
+2. The **existing** RDS subnet group in AWS (name e.g. `fru-dev-aurora-subnet-group`) still references subnets from **VPC A**.
+3. Terraform (with current state pointing at VPC B) then tries to **update** the subnet group to use subnets from VPC B, or to **create** a new subnet group with the same name (which fails: name already exists).
+4. AWS does not allow a DB subnet group to mix subnets from different VPCs or to "move" to another VPC by replacing subnets.
+
+So the error is a **state/reality** issue: Terraform believes it owns a VPC and subnets (e.g. the new one), while the live RDS subnet group is still tied to the old VPC’s subnets.
+
+### 16.3 Key Insight
+
+> When Terraform fails with "subnet group / VPC mismatch" for RDS, the code is usually correct—the same module creates VPC, subnets, and subnet group. The failure means the **live** DB subnet group in AWS was created with subnets from a different VPC than the one Terraform is now managing (e.g. after state loss or multiple VPCs). Fix by aligning state and reality: full teardown and redeploy, or import/cleanup so one VPC and one subnet group are in sync.
+
+### 16.4 Resolution
+
+- **Clean slate (recommended for dev):** Run `./run.sh aws kube dev --preempt` to destroy and redeploy; that ensures one VPC and one subnet group.
+- **Import existing infra:** Run `./orchestration/terraform/import_preexist/import-existing-infrastructure.sh dev fru` so Terraform state matches existing resources; only helps if the current config (VPC/subnets) matches what you want to keep.
+- **Manual cleanup:** Delete the Aurora cluster and then the DB subnet group (and optionally the old VPC) in AWS; re-run deploy so Terraform creates a fresh subnet group and Aurora.
+
+A dedicated doc **docs/DEPLOYMENT_ERRORS_AND_FIXES.md** summarizes this and other deployment errors (S3 bucket empty, frontend invalid bucket, Docker not running, Terraform plugin checksum) with causes and fixes.
+
+### 16.5 Takeaway
+
+RDS DB subnet group errors that mention VPC or "same VPC" are almost always state/reality drift: the resource in AWS was created with one VPC’s subnets, while Terraform is now managing another VPC. Resolve by making state and AWS consistent (teardown + redeploy, or import/cleanup), not by changing the infrastructure module’s VPC/subnet wiring.
+
+---
+
+## 17. Preempt Teardown: State Lock Failure and Teardown Reporting Success on Failure
+
+**creation:** `<260201>`
+**last_updated:** `<260201>`
+
+**keywords:** Terraform, Terragrunt, state lock, teardown, preempt, fail-fast, idempotent, force-unlock
+**difficulty:** 6
+**significance:** 7
+
+### 17.1 Context
+
+During `./run.sh aws kube dev --preempt`, the EKS layer Terraform destroy failed with **"Error acquiring the state lock"** (Lock ID in S3, from a previous interrupted apply). Despite the failure, the teardown script logged **"[SUCCESS] EKS layer destroyed!"** and continued to the next step (ECS destroy). The run did not fail fast: the user only discovered the error by reading logs, and the pipeline proceeded as if teardown had succeeded.
+
+### 17.2 Root Cause
+
+Two separate issues:
+
+1. **State lock:** A prior Terraform/Terragrunt run (apply or destroy) had been interrupted or crashed, leaving a lock on the remote state (e.g. `fru-terraform-state-744139897900/dev/eks/terraform.tfstate`). New destroy runs could not acquire the lock and failed with `PreconditionFailed: At least one of the pre-conditions you specified did not hold`.
+
+2. **Teardown not fail-fast:** In `orchestration/terraform/teardown.sh`, EKS (and ECS) destroy was implemented as:
+   - `terragrunt destroy -- -auto-approve || { log_warning "Destroy failed or no resources to destroy (idempotent)" }`
+   - followed unconditionally by `log_success "EKS layer destroyed!"`
+   So any destroy failure (state lock, API error, etc.) was only warned; the script never exited with a non-zero status and always reported success. The intent had been to treat "no resources to destroy" as idempotent, but the same branch swallowed **all** failures.
+
+### 17.3 Key Insight
+
+> When a destructive step can fail for multiple reasons (state lock vs. "already destroyed"), don’t treat every non-zero exit as idempotent. Fail fast on real errors so the orchestrator stops and the user sees the failure; document recovery (e.g. force-unlock) for the lock case.
+
+### 17.4 Resolution
+
+- **Fail-fast:** In `teardown.sh`, EKS and ECS (and frontend-eks / frontend-ecs) destroy now check the exit code of `terragrunt destroy`. On failure, the script logs an error (including a force-unlock hint), exits with status 1, and does **not** run `log_success`. Teardown stops immediately and the orchestrator reports failure.
+- **State lock recovery:** Documented in **docs/DEPLOYMENT_ERRORS_AND_FIXES.md**: run `terragrunt force-unlock <LOCK_ID>` in the layer directory (EKS, ECS, or infrastructure). For non-interactive use: `echo yes | terragrunt force-unlock <LOCK_ID>`.
+- **Preempt and shared infra:** Separately, preempt was fixed to use `--container-type all` so shared infrastructure (VPC, Aurora, DB subnet group) is torn down too, avoiding the "subnet group not in same VPC" error after preempt (see war story 16).
+- **Import before shared destroy:** If infrastructure Terraform state was empty (e.g. after state loss), `terragrunt destroy` for the shared layer had nothing to destroy; orphaned resources (DB subnet group, etc.) remained in AWS. Deploy then re-imported them and hit the same VPC mismatch. **orchestration/aws/teardown-resources-all.sh** now runs `import-existing-infrastructure.sh` for the shared layer *before* calling shared Terraform destroy when `--container-type all`, so state is populated and destroy can remove those resources.
+
+### 17.5 Takeaway
+
+Orchestration scripts must not report success when a critical step fails. Using `cmd || { log_warning "..." }` and then always running `log_success` hides real errors (state lock, API failures) and breaks fail-fast. Check exit codes and exit 1 on failure; reserve "idempotent" handling for cases you can detect explicitly (e.g. "no state" or "already destroyed"). For Terraform state lock, document force-unlock and non-interactive usage (`echo yes |`) so users can recover and retry.
+
+---
+
+## 18. Import Preexisting Scripts: Before Apply and Before Destroy
+
+**creation:** `<260130>`
+**last_updated:** `<260130>`
+
+**keywords:** Terraform, Terragrunt, import, state vs reality, RDS DB subnet group, VPC, InvalidParameterValue, teardown, deploy
+**difficulty:** 6
+**significance:** 8
+
+### 18.1 Context
+
+We have import-preexisting scripts (e.g. `import-existing-infrastructure.sh`) that run `terraform import` to pull existing AWS resources into Terraform state. Two questions arose: why run them **before** `terragrunt apply`, and why also run them **before** `terragrunt destroy`? The second became critical when, after a full teardown, deploy still failed with: **`api error InvalidParameterValue: The new Subnets are not in the same Vpc as the existing subnet group`**.
+
+### 18.2 Why Import Before Apply
+
+When reality was changed **outside** Terraform (e.g. brutal teardown that deletes resources via AWS API but does not update state, or state was lost and resources were recreated manually), resources exist in AWS but **not** in Terraform state. A normal `terragrunt apply` then tries to **create** those resources again. AWS responds with "already exists"–style errors (e.g. `EntityAlreadyExists`, `ResourceAlreadyExistsException`). Running the import script **before** apply pulls current AWS reality into state so Terraform treats those resources as managed; apply can then refresh/update instead of trying to create, and the flow stays consistent.
+
+### 18.3 Why Import Before Destroy
+
+If Terraform state was **empty** (e.g. state bucket recreated or state lost) but AWS still has resources (e.g. the RDS DB subnet group `fru-dev-aurora-subnet-group` left in an old VPC), `terragrunt destroy` has **nothing in state** to destroy—it no-ops. The orphan (subnet group, etc.) remains in AWS. The next deploy runs import **before** apply (as above) and pulls that subnet group into state; our config, however, wants the subnet group to use subnets from the **new** VPC. Terraform therefore plans to **update** the group to the new subnets. AWS RDS rejects that with:
+
+`api error InvalidParameterValue: The new Subnets are not in the same Vpc as the existing subnet group`
+
+So the error recurs not because import is wrong, but because we never **destroyed** the orphan—destroy had no state to act on. Running the import script **before** destroy (for the same layer) populates state with existing AWS resources so `terragrunt destroy` can actually **remove** them. After that, the next apply creates one VPC, subnets, and subnet group in one consistent run; no "update to different VPC" step, so no InvalidParameterValue.
+
+### 18.4 Is This a Common Scenario?
+
+Yes. State/reality drift is very common with Terraform:
+
+- **State lost** (wrong backend, bucket recreated, local-only state).
+- **Resources changed outside Terraform** (console, CLI, other automation, emergency deletes).
+- **"Adopting" existing infra** into Terraform.
+
+That's why Terraform has first-class **import** and **refresh**: adoption and drift are expected. Needing to fix state before **destroy** (so destroy actually has something to destroy) is the same idea—less often written down, but the same "state must match reality before you act" principle.
+
+### 18.5 Resolution
+
+- **Before apply:** Deploy already runs each layer’s import script (e.g. `import-existing-infrastructure.sh`) before that layer’s plan/apply so state matches reality and apply does not hit "already exists."
+- **Before destroy:** **orchestration/aws/teardown-resources-all.sh** now runs the relevant import script(s) **before** each layer’s `terragrunt destroy`: infrastructure before shared destroy; EKS + frontend-eks before EKS destroy; ECS + frontend-ecs before ECS destroy. State is populated so destroy can remove orphaned resources instead of no-op’ing; the next deploy then creates a clean stack without the VPC/subnet group mismatch.
+
+### 18.6 Takeaway
+
+Import scripts reconcile **state with reality**: they don’t apply external state files—they pull current AWS reality into Terraform state. You need them **before apply** when resources exist in AWS but not in state (so apply doesn’t try to create and hit "already exists"). You also need them **before destroy** when state is empty but AWS still has resources (so destroy can remove orphans instead of no-op’ing and causing the next deploy to re-import and hit errors like `The new Subnets are not in the same Vpc as the existing subnet group`). Same tool, two moments: before apply and before destroy, to keep the whole Terraform flow consistent.
+
+---
+
+## 19. Fixing "The new Subnets are not in the same Vpc as the existing subnet group" — What We Did and Option A vs Option B
+
+**creation:** `<260130>`
+**last_updated:** `<260130>`
+
+**keywords:** Terraform, RDS DB subnet group, VPC mismatch, InvalidParameterValue, prevent_destroy, state rm, Option A, Option B, long-term layer, Secrets Manager
+**difficulty:** 6
+**significance:** 8
+
+### 19.1 Context and Goal
+
+The goal is to run **`./run.sh <local|aws> <kube|nonkube> dev --preempt`** problem-free. Preempt tears down all AWS layers (EKS + ECS + shared infrastructure) then redeploys. The recurring failure was:
+
+**`api error InvalidParameterValue: The new Subnets are not in the same Vpc as the existing subnet group`**
+
+This appears during Phase 2 (Deploy infrastructure layer) after a preempt or teardown. War stories 16, 17, and 18 describe the root causes and partial fixes; this story summarizes **what we did already** and the **choice between Option A (fail-back) and Option B (separate long-term layer)**.
+
+### 19.2 Root Cause (Recap)
+
+1. **State vs reality:** The infrastructure layer creates one VPC, subnets, RDS DB subnet group, and Aurora in code. A single apply cannot produce a mismatch. The error occurs when:
+   - Terraform state was empty or pointed at a **new** VPC (e.g. after state loss or a new apply that created VPC B).
+   - The **existing** DB subnet group in AWS (e.g. `fru-dev-aurora-subnet-group`) still references subnets from an **old** VPC (VPC A).
+   - Terraform then tries to **update** the subnet group to use subnets from VPC B; AWS rejects this because a DB subnet group cannot move to another VPC by replacing subnets.
+
+2. **Why teardown didn't remove the subnet group:**
+   - **Empty state:** If infrastructure state was empty, `terragrunt destroy` had nothing to destroy (no-op). Orphaned subnet group (and VPC A) remained; next deploy re-imported the subnet group and tried to point it at VPC B → error (War Story 18).
+   - **prevent_destroy:** Secrets Manager resources in the same layer have `lifecycle { prevent_destroy = true }`. Terraform **aborts the entire destroy** when any resource has prevent_destroy. So VPC, Aurora, and the DB subnet group were **never** destroyed; they stayed in AWS. Next deploy re-imported and hit the same VPC mismatch.
+
+### 19.3 What We Did Already (Current Fixes)
+
+#### 19.3.1 Import before destroy (all layers)
+
+- **orchestration/aws/teardown-resources-all.sh** runs the relevant import script(s) **before** each layer's `terragrunt destroy`: infrastructure before shared destroy; EKS + frontend-eks before EKS destroy; ECS + frontend-ecs before ECS destroy.
+- **Effect:** State is populated with existing AWS resources so destroy can **remove** them instead of no-op'ing. After teardown, the next apply creates one VPC, one subnet group, one Aurora — no "update to different VPC" step.
+
+#### 19.3.2 Preempt uses --container-type all
+
+- **orchestration/aws/run.sh** (preempt step) calls teardown with `--container-type all` so EKS + ECS + **shared infrastructure** (VPC, Aurora, DB subnet group) are torn down, not just the app layer (War Story 17).
+
+#### 19.3.3 prevent_destroy workaround when PREEMPT=true
+
+- In **orchestration/terraform/teardown.sh**, when destroying the infrastructure layer:
+  - If `terragrunt destroy` fails and the output indicates **prevent_destroy** (e.g. "cannot be destroyed", "must be removed from state"), and **PREEMPT=true**:
+    1. Remove the protected Secrets Manager resources from Terraform state via `terragrunt state rm <address>` (secrets and secret versions).
+    2. Re-run `terragrunt destroy -- -auto-approve`.
+  - The second destroy then removes VPC, Aurora, DB subnet group, IAM, S3 (everything left in the layer). Secrets remain in AWS (only removed from state) and are re-imported on the next deploy.
+- **Effect:** Preempt can complete a full teardown of shared infra without getting stuck on prevent_destroy. Teardown logic is more complex and tied to a fixed list of state addresses.
+
+### 19.4 Option A (Current): Fail-Back with state-rm
+
+| Aspect | Description |
+|--------|-------------|
+| **Idea** | Keep Secrets Manager in the **same** infrastructure layer. Use `prevent_destroy` so normal destroy doesn't delete secrets. When PREEMPT=true, **state rm** the protected resources and re-run destroy so the rest (VPC, Aurora, subnet group) are removed. |
+| **Pros** | No Terraform refactor. One layer, one place to maintain. |
+| **Cons** | Teardown script has extra logic (state rm + second destroy). List of state addresses must be kept in sync if secrets change. prevent_destroy blocks the **entire** destroy until we work around it. |
+| **Goal achievable?** | Yes. `./run.sh aws kube dev --preempt` works with the current code (import before destroy + state-rm workaround). |
+
+### 19.5 Option B: Separate Long-Term Layer (Recommended for Clean Design)
+
+| Aspect | Description |
+|--------|-------------|
+| **Idea** | Put long-term components (Secrets Manager) in a **separate** Terragrunt layer (e.g. `infrastructure-longterm`). That layer has its **own** state and directory. **Deploy:** apply longterm first, then infrastructure. **Teardown:** only destroy the infrastructure layer; **never** destroy the longterm layer in the main flow. Optional: dedicated `teardown-longterm.sh` for explicit destruction when needed. |
+| **Pros** | Teardown stays simple: "destroy infrastructure" never touches Secrets Manager. No prevent_destroy or state-rm in the main path. Clear split: ephemeral infra (VPC, Aurora, IAM) vs long-term (Secrets). |
+| **Cons** | Requires refactor: new layer directory, move secrets out of infrastructure module, wire deploy order and (e.g.) `terraform_remote_state` for secret ARNs. |
+| **Goal achievable?** | Yes. After refactor, `./run.sh aws kube dev --preempt` runs without any state-rm workaround; infrastructure destroy removes VPC, Aurora, subnet group in one pass. |
+
+See **docs/learned/TERRA_LEARNED.md** §3 (Option B) and **docs/learned/REFACTOR_PLAN_OPTION_B_SEPARATE_LONGTERM_LAYER.md** for a full refactor plan.
+
+### 19.6 VPC/Subnet "Option B" (Different Concept)
+
+In **docs/learned/VPC_LEARNED.md** §3.2, **Option B — Import** refers to **importing** the existing VPC and subnet group into Terraform state so Terraform "owns" them and doesn't try to create a second VPC or change the subnet group. That is a **state alignment** fix (keep one VPC, align state to it). It is **not** the same as "Option B: separate long-term layer" (which is about **layer split** for Secrets Manager). Both are valid; the names are reused in different docs for different options.
+
+### 19.7 Takeaway
+
+To fix "The new Subnets are not in the same Vpc as the existing subnet group":
+
+1. **Align state and reality:** Import before destroy so teardown can remove orphaned resources; use preempt with `--container-type all` so shared infra is torn down.
+2. **Handle prevent_destroy:** Either **Option A** — state rm + re-destroy when PREEMPT=true (current), or **Option B** — move Secrets Manager to a separate layer that is never destroyed in the main flow (refactor).
+3. After either approach, **`./run.sh aws kube dev --preempt`** can run problem-free. Option B simplifies teardown and avoids maintaining a state-rm list; see the refactor plan for implementation steps.
+
+---

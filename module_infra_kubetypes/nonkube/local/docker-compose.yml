@@ -21,7 +21,7 @@ services:
   api:
     build:
       context: ../../
-      dockerfile: ./module_infra_kubetypes/nonkube/local/Dockerfile.api
+      dockerfile: ./module_app_core/pack_with_docker/Dockerfile.api
       args:
         # Pass Spark and Hadoop versions from .env (source of truth)
         # Defaults ensure builds work even if .env variables are missing

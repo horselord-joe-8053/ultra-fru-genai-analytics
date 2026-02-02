@@ -1,3 +1,5 @@
+# Deployment-agnostic API image: same definition for local Docker, ECS, and EKS.
+# Build context must be repo root; used by docker-compose, build-push-ecr.sh, and local deploy.
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -37,7 +39,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY module_app_core/backend /app/backend
 COPY module_app_core/spark_jobs /app/spark_jobs
-COPY infra/docker/docker-entrypoint.sh /app/docker-entrypoint.sh
+COPY module_app_core/pack_with_docker/docker-entrypoint.sh /app/docker-entrypoint.sh
 
 RUN chmod +x /app/docker-entrypoint.sh
 
@@ -45,6 +47,5 @@ ENV FLASK_APP=backend.api.app:app
 EXPOSE 5000
 
 # Use entrypoint script to run both Flask and scheduler (if enabled).
-# Note: this script lives under infra/docker in the source tree and is
-# copied into the image as /app/docker-entrypoint.sh.
+# This script lives in module_app_core/pack_with_docker/ and is copied into the image as /app/docker-entrypoint.sh.
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

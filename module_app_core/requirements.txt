@@ -1,3 +1,4 @@
+PyYAML>=6.0  # Used by orchestration (e.g. kube deploy kubeconfig edit); install in same env as python3 used by deploy scripts
 flask>=2.3.0,<3.0.0
 pyspark>=3.4.0
 delta-spark>=3.0.0

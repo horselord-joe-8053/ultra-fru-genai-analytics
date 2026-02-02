@@ -26,13 +26,13 @@ log_info "Step 3: Building application image..."
 if [ "$K8S_TYPE" = "minikube" ]; then
   log_info "Using minikube's Docker daemon..."
   eval $(minikube docker-env)
-  docker build -t fru-api:local -f "$REPO_ROOT/module_infra_kubetypes/nonkube/local/Dockerfile.api" "$REPO_ROOT" || {
+  docker build -t fru-api:local -f "$REPO_ROOT/module_app_core/pack_with_docker/Dockerfile.api" "$REPO_ROOT" || {
     log_error "Failed to build Docker image"
     exit 1
   }
 elif [ "$K8S_TYPE" = "kind" ]; then
   log_info "Building image for kind..."
-  docker build -t fru-api:local -f "$REPO_ROOT/module_infra_kubetypes/nonkube/local/Dockerfile.api" "$REPO_ROOT" || {
+  docker build -t fru-api:local -f "$REPO_ROOT/module_app_core/pack_with_docker/Dockerfile.api" "$REPO_ROOT" || {
     log_error "Failed to build Docker image"
     exit 1
   }
@@ -42,7 +42,7 @@ elif [ "$K8S_TYPE" = "kind" ]; then
   }
 else
   log_info "Building image for Docker Desktop..."
-  docker build -t fru-api:local -f "$REPO_ROOT/module_infra_kubetypes/nonkube/local/Dockerfile.api" "$REPO_ROOT" || {
+  docker build -t fru-api:local -f "$REPO_ROOT/module_app_core/pack_with_docker/Dockerfile.api" "$REPO_ROOT" || {
     log_error "Failed to build Docker image"
     exit 1
   }

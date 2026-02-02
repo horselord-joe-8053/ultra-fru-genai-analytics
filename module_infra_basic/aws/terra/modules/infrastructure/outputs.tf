@@ -51,30 +51,30 @@ output "ecs_task_runtime_role_arn" {
   value       = module.iam.ecs_task_runtime_role_arn
 }
 
-# Secrets Manager Outputs
+# Secrets Manager Outputs (from longterm layer remote_state)
 output "openai_secret_arn" {
   description = "OpenAI secret ARN (JSON format - for backward compatibility)"
-  value       = module.secrets_manager.openai_secret_arn
+  value       = data.terraform_remote_state.longterm.outputs.openai_secret_arn
 }
 
 output "openai_secret_plain_arn" {
   description = "OpenAI secret ARN (plain string for ECS)"
-  value       = module.secrets_manager.openai_secret_plain_arn
+  value       = data.terraform_remote_state.longterm.outputs.openai_secret_plain_arn
 }
 
 output "db_password_secret_arn" {
   description = "Database password secret ARN"
-  value       = module.secrets_manager.db_password_secret_arn
+  value       = data.terraform_remote_state.longterm.outputs.db_password_secret_arn
 }
 
 output "db_username_secret_arn" {
   description = "Database username secret ARN"
-  value       = module.secrets_manager.db_username_secret_arn
+  value       = data.terraform_remote_state.longterm.outputs.db_username_secret_arn
 }
 
 output "db_password_plain_secret_arn" {
   description = "Database password secret ARN (plain string for ECS)"
-  value       = module.secrets_manager.db_password_plain_secret_arn
+  value       = data.terraform_remote_state.longterm.outputs.db_password_plain_secret_arn
 }
 
 # S3 Data Bucket Outputs

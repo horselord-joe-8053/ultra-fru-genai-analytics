@@ -1,5 +1,17 @@
-# Infrastructure Layer
-# Combines: VPC, Aurora, IAM, Secrets Manager
+# Infrastructure Layer (ephemeral: VPC, Aurora, IAM, S3).
+# Secrets Manager lives in the infrastructure-longterm layer; we read secret ARNs via remote_state.
+# Main teardown destroys this layer only; longterm is never destroyed (Option B).
+
+# Long-term layer state: secret ARNs. Do not destroy that layer in main teardown (docs/learned/TERRA_LEARNED.md Option B).
+data "terraform_remote_state" "longterm" {
+  backend = "s3"
+  config = {
+    bucket  = var.tf_state_bucket
+    key     = "${var.environment}/infrastructure-longterm/terraform.tfstate"
+    region  = var.aws_region
+    encrypt = true
+  }
+}
 
 # VPC Module
 module "vpc" {
@@ -17,34 +29,20 @@ module "vpc" {
   tags = var.tags
 }
 
-# Secrets Manager Module (must be created before IAM and Aurora)
-module "secrets_manager" {
-  source = "../secrets-manager"
-
-  project_name     = var.project_name
-  environment      = var.environment
-  openai_api_key   = var.openai_api_key
-  db_password      = var.db_password
-  db_username      = var.db_username
-  create_db_username_secret = var.create_db_username_secret
-
-  tags = var.tags
-}
-
-# IAM Module (depends on Secrets Manager for ARNs)
+# IAM Module (secret ARNs from longterm layer)
 module "iam" {
   source = "../iam"
 
   project_name                 = var.project_name
   environment                  = var.environment
-  openai_secret_arn            = module.secrets_manager.openai_secret_arn            # JSON format (for backward compatibility)
-  openai_secret_plain_arn      = module.secrets_manager.openai_secret_plain_arn     # Plain string (for ECS)
-  db_password_secret_arn       = module.secrets_manager.db_password_secret_arn        # JSON format (for RDS Data API)
-  db_password_plain_secret_arn = module.secrets_manager.db_password_plain_secret_arn    # Plain string (for ECS)
-  db_username_secret_arn       = try(module.secrets_manager.db_username_secret_arn, "")
+  openai_secret_arn            = data.terraform_remote_state.longterm.outputs.openai_secret_arn
+  openai_secret_plain_arn      = data.terraform_remote_state.longterm.outputs.openai_secret_plain_arn
+  db_password_secret_arn       = data.terraform_remote_state.longterm.outputs.db_password_secret_arn
+  db_password_plain_secret_arn = data.terraform_remote_state.longterm.outputs.db_password_plain_secret_arn
+  db_username_secret_arn       = try(data.terraform_remote_state.longterm.outputs.db_username_secret_arn, "")
   enable_rds_iam_auth          = var.enable_iam_auth
   rds_db_resource_arn          = var.enable_iam_auth ? "arn:aws:rds-db:${var.aws_region}:${data.aws_caller_identity.current.account_id}:dbuser:${var.project_name}-${var.environment}-aurora-cluster/${var.db_username}" : ""
-  
+
   # Bedrock permissions: allow inference profiles if configured
   bedrock_inference_profile_arns = var.bedrock_inference_profile_id != "" ? [
     "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/${var.bedrock_inference_profile_id}"

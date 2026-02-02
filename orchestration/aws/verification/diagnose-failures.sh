@@ -19,7 +19,7 @@ diagnose_api_failure() {
     local container_type="${CONTAINER_TYPE:-ecs}"
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local repo_root="${REPO_ROOT:-$(cd "$script_dir/../.." && pwd)}"
+    local repo_root="${REPO_ROOT:-$(cd "$script_dir/../../.." && pwd)}"
     
     if [ "$container_type" = "ecs" ]; then
         # Source ECS-specific diagnostic function

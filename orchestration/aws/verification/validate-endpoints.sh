@@ -864,7 +864,7 @@ validate_urls() {
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     # Determine script directory (always set it, even if log_info exists)
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"  # verification -> aws -> orchestration -> repo
+    REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"  # verification -> aws -> orchestration -> repo
     
     # Source logger if not already sourced
     if [ -z "${log_info:-}" ]; then

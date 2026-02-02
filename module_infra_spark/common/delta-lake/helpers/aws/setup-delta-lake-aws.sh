@@ -5,7 +5,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../../.." && pwd)"
+# helpers/aws -> delta-lake -> common -> module_infra_spark -> repo (5 levels)
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
 source "$REPO_ROOT/orchestration/common/logger.sh"
 
 ENVIRONMENT="${ENVIRONMENT:-dev}"
@@ -27,7 +28,7 @@ S3_DELTA_PATH=$(AWS_PROFILE="${AWS_PROFILE:-admin}" terragrunt output -raw s3_de
 if [ -z "$S3_BUCKET_ID" ]; then
     # Use centralized AWS_ACCOUNT_ID if available
     if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
-        REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)}"
+        REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
         source "$REPO_ROOT/orchestration/common/env/load-image-identifiers.sh" 2>/dev/null || true
         load_image_identifiers "aws" 2>/dev/null || true
     fi
@@ -40,6 +41,14 @@ if [ -z "$S3_BUCKET_ID" ]; then
             S3_DELTA_PATH="s3://${BUCKET_NAME}/delta"
         fi
     fi
+fi
+
+# Fail-fast: do not proceed with empty S3_BUCKET_ID (would produce invalid s3:///raw/...)
+if [ -z "$S3_BUCKET_ID" ]; then
+    log_error "S3 bucket for data-lake could not be determined."
+    log_error "  Run infrastructure Terraform first (e.g. ./run.sh aws kube dev without --skip-build, or apply module_infra_basic/aws/terra/environments/$ENVIRONMENT/infrastructure)."
+    log_error "  Infrastructure must output s3_data_bucket_id, or bucket fru-${ENVIRONMENT}-analytics-data-<account-id> must exist."
+    exit 1
 fi
 
 # Output variables to temp file (caller will source this)

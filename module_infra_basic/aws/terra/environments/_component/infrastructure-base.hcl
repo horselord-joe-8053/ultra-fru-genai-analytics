@@ -19,17 +19,15 @@ inputs = {
   project_name      = local.env_config.inputs.project_name
   environment       = local.env_config.inputs.environment
   aws_region        = local.env_config.inputs.aws_region
+  tf_state_bucket   = get_env("TF_STATE_BUCKET", "fru-terraform-state-${get_aws_account_id()}")
   vpc_cidr          = local.env_config.inputs.vpc_cidr
   availability_zones = local.env_config.inputs.availability_zones
   
   enable_nat_gateway         = local.env_config.inputs.enable_nat_gateway
   enable_bedrock_vpc_endpoint = local.env_config.inputs.enable_bedrock_vpc_endpoint
   
-  openai_api_key = local.env_config.inputs.openai_api_key
-  db_password    = local.env_config.inputs.db_password
-  db_username     = local.env_config.inputs.db_username
-  
-  create_db_username_secret = true
+  db_password = local.env_config.inputs.db_password
+  db_username = local.env_config.inputs.db_username
   
   aurora_database_name = local.env_config.inputs.aurora_database_name
   aurora_min_capacity  = local.env_config.inputs.aurora_min_capacity

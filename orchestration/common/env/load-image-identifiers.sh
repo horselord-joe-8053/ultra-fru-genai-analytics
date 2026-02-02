@@ -170,14 +170,21 @@ ensure_image_tag() {
     if [ -z "${IMAGE_TAG:-}" ]; then
         log_info "[DEBUG] ensure_image_tag: IMAGE_TAG not set, will generate it" >&2
         # Source git_helpers if not already available
+        # git_helpers.sh lives in orchestration/common/, we are in orchestration/common/env/
         if ! command -v generate_image_tag >/dev/null 2>&1; then
             local env_script_dir="${ENV_SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-            log_info "[DEBUG] ensure_image_tag: Sourcing git_helpers.sh..." >&2
-            source "$env_script_dir/git_helpers.sh" 2>/dev/null || {
-                log_warning "Could not source git_helpers.sh"
+            local git_helpers_path="$env_script_dir/../git_helpers.sh"
+            log_info "[DEBUG] ensure_image_tag: Sourcing git_helpers.sh from $git_helpers_path" >&2
+            if [ -f "$git_helpers_path" ]; then
+                source "$git_helpers_path" 2>/dev/null || {
+                    log_warning "Could not source git_helpers.sh"
+                    return 1
+                }
+                log_info "[DEBUG] ensure_image_tag: git_helpers.sh sourced" >&2
+            else
+                log_warning "git_helpers.sh not found at $git_helpers_path"
                 return 1
-            }
-            log_info "[DEBUG] ensure_image_tag: git_helpers.sh sourced" >&2
+            fi
         fi
         log_info "[DEBUG] ensure_image_tag: About to call generate_image_tag..." >&2
         local gen_start=$(date +%s)

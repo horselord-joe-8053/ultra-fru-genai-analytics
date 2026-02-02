@@ -235,9 +235,16 @@ def filter_images_for_deletion(
         is_old = False
         if pushed_at:
             try:
-                dt = datetime.fromisoformat(pushed_at.replace("Z", "+00:00"))
-                is_old = dt < cutoff
-            except (ValueError, AttributeError):
+                # boto3 returns imagePushedAt as datetime; CLI/raw API can return string
+                if isinstance(pushed_at, datetime):
+                    dt = pushed_at if pushed_at.tzinfo else pushed_at.replace(tzinfo=timezone.utc)
+                elif isinstance(pushed_at, str):
+                    dt = datetime.fromisoformat(pushed_at.replace("Z", "+00:00"))
+                else:
+                    dt = None
+                if dt is not None:
+                    is_old = dt < cutoff
+            except (ValueError, AttributeError, TypeError):
                 pass
         if not (is_untagged or is_old):
             continue

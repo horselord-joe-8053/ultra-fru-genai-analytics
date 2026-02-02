@@ -8,6 +8,12 @@ variable "environment" {
   description = "Environment (dev, staging, prod)"
 }
 
+variable "aws_region" {
+  type        = string
+  description = "AWS region (used by generated provider)"
+  default     = "us-east-1"
+}
+
 variable "openai_api_key" {
   type        = string
   description = "OpenAI API key (will be stored in Secrets Manager)"

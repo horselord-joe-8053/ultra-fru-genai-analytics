@@ -54,6 +54,7 @@ deploy_phase_check_image() {
     perf_step_start 1 "1.3" "Checking container image availability" >&2
     local step_start_time=$(date +%s)
     log_step "Phase 1: Step 1.3 - Step ${step_num}/${total_steps}: Checking container image availability" >&2
+    log_info "Phase 1: Resolving image tag → checking ECR for existing image → if missing, building and pushing (Docker + ECR). Output below." >&2
     
     log_info "[DEBUG] deploy_phase_check_image: About to start progress indicator..." >&2
     # Start progress indicator for image check/build

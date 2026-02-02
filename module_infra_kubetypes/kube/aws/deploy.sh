@@ -12,17 +12,24 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Resolve repo root. Prefer existing REPO_ROOT if set (from parent orchestrator),
-# otherwise go up to the monorepo root from this script's directory.
-REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+# Resolve repo root. Prefer existing REPO_ROOT if set (from parent orchestrator).
+# This script lives at module_infra_kubetypes/kube/aws/ so ../../.. = repo root.
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 source "$REPO_ROOT/orchestration/common/logger.sh"
 source "$REPO_ROOT/orchestration/common/env/load-env.sh"
+
+# Use app venv when present so Python/pip and scripts (e.g. kubeconfig edit) use consistent deps
+if [ -f "$REPO_ROOT/venv/bin/activate" ]; then
+    set +u
+    source "$REPO_ROOT/venv/bin/activate"
+    set -u
+fi
 
 # Source helper scripts (module_infra_kubetypes/kube/aws/helpers and shared prepare-frontend)
 source "$SCRIPT_DIR/helpers/check-kubectl.sh"
 source "$SCRIPT_DIR/helpers/kubernetes-manifests.sh"
-source "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/prepare-frontend.sh"
-
+# source "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/prepare-frontend.sh"
+source "$REPO_ROOT/orchestration/common/deploy/prepare-frontend.sh"
 # Load environment variables early
 load_env_file 2>/dev/null || true
 
@@ -66,7 +73,7 @@ main() {
     
     # Step 1: Check AWS credentials
     log_step "Substep 1/5: Checking AWS credentials"
-    "$REPO_ROOT/run_scripts/main_application_scripts/aws/check-aws-credentials.sh" || exit 1
+    "$REPO_ROOT/orchestration/aws/check-aws-credentials.sh" || exit 1
     
     # Step 2: Check kubectl and cluster access
     log_step "Substep 2/5: Checking kubectl and EKS cluster access"
@@ -78,7 +85,7 @@ main() {
     # Step 3: Build and push to ECR
     if [ "$SKIP_BUILD" = false ]; then
         log_step "Substep 3/5: Building and pushing Docker image to ECR"
-        "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/build-push-ecr.sh" || exit 1
+        "$REPO_ROOT/module_infra_basic/aws/build-push-ecr.sh" || exit 1
     else
         log_info "Substep 3/5: Skipping ECR build/push (--skip-build flag set)"
     fi
@@ -91,7 +98,11 @@ main() {
             log_error "Frontend preparation failed"
             exit 1
         fi
-        "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/deploy-frontend.sh" || exit 1
+        # Export so deploy-frontend.sh gets correct REPO_ROOT, ENVIRONMENT, CONTAINER_TYPE (for frontend-eks vs frontend-ecs and terragrunt output)
+        export REPO_ROOT
+        export ENVIRONMENT="${ENVIRONMENT:-dev}"
+        export CONTAINER_TYPE="${CONTAINER_TYPE:-eks}"
+        "$REPO_ROOT/module_infra_basic/aws/deploy-frontend.sh" || exit 1
     else
         log_info "Substep 4/5: Skipping frontend deployment (--skip-frontend flag set)"
     fi
@@ -213,7 +224,7 @@ main() {
     # Phase 5: Save deployment state
     if [ "$DRY_RUN" != "true" ]; then
         log_step "Saving deployment state"
-        source "$REPO_ROOT/run_scripts/main_application_scripts/aws/shared/helpers/save-deployment-state.sh"
+        source "$REPO_ROOT/orchestration/common/deploy/save-deployment-state.sh"
         
         # Get versions
         local backend_version=""

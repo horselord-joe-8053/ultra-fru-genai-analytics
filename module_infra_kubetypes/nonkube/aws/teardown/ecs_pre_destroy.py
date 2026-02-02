@@ -21,7 +21,8 @@ except ImportError:
 
 PROJECT_NAME = "fru"
 SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent.parent.parent  # teardown -> aws -> module_infra_kubetypes/nonkube -> repo
+# teardown -> aws -> nonkube -> module_infra_kubetypes -> repo (4 levels)
+REPO_ROOT = SCRIPT_DIR.parent.parent.parent.parent
 
 
 def get_account_id(session):

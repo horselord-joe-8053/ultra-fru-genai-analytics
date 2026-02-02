@@ -40,14 +40,26 @@ if [ -z "${ECR_REPO_URI:-}" ]; then
     export ECR_REPO_URI
 fi
 
-# Ensure IMAGE_TAG matches what's in CONTAINER_IMAGE (if set)
+# Ensure IMAGE_TAG matches what's in CONTAINER_IMAGE (if set and tag part is non-empty)
+# Do not overwrite a valid IMAGE_TAG with an empty tag from CONTAINER_IMAGE (e.g. "ecr_uri:")
 if [ -n "${CONTAINER_IMAGE:-}" ]; then
-    IMAGE_TAG="${CONTAINER_IMAGE##*:}"
-    export IMAGE_TAG
+    _tag_from_image="${CONTAINER_IMAGE##*:}"
+    _tag_from_image=$(echo "$_tag_from_image" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [ -n "$_tag_from_image" ]; then
+        IMAGE_TAG="$_tag_from_image"
+        export IMAGE_TAG
+    fi
+    unset _tag_from_image
 fi
 
 build_and_push_ecr() {
     log_step "Building and pushing Docker image to ECR"
+    
+    # Fail fast if IMAGE_TAG is empty
+    if [ -z "${IMAGE_TAG:-}" ]; then
+        log_error "IMAGE_TAG is empty; cannot build or push. Check that ensure_image_tag ran and git_helpers.sh is on the path."
+        exit 1
+    fi
     
     # AWS credentials are already checked in Phase 0.4 of run.sh
     # Skip redundant check here
@@ -75,8 +87,8 @@ build_and_push_ecr() {
     log_info "Image Tag: $IMAGE_TAG"
     log_info "Full Image URI: $ECR_REPO_URI:$IMAGE_TAG"
     
-    # Check if ECR repository exists
-    log_info "Checking if ECR repository exists: $ECR_REPO_NAME"
+    # --- Step 1/4: Check ECR repository ---
+    log_info "[Phase 1 build-push] Step 1/4: Checking if ECR repository exists: $ECR_REPO_NAME"
     local repo_exists=false
     local repo_check_output
     if repo_check_output=$(aws ecr describe-repositories --profile "$AWS_PROFILE" --repository-names "$ECR_REPO_NAME" --region "$AWS_REGION" 2>&1); then
@@ -93,12 +105,12 @@ build_and_push_ecr() {
         fi
     fi
     
-    # Check if image exists (by tag)
+    # --- Step 2/4: Check if image exists (by tag) ---
     # Note: We check by tag, not by content, so code changes with same tag won't be detected
     # This is why we use git SHA tags - each commit gets a unique tag
     local image_exists=false
     if [ "$repo_exists" = true ]; then
-        log_info "Checking if container image exists: $ECR_REPO_URI:$IMAGE_TAG"
+        log_info "[Phase 1 build-push] Step 2/4: Checking if container image exists: $ECR_REPO_URI:$IMAGE_TAG"
         local image_check_output
         if image_check_output=$(aws ecr describe-images --profile "$AWS_PROFILE" --repository-name "$ECR_REPO_NAME" --image-ids imageTag="$IMAGE_TAG" --region "$AWS_REGION" 2>&1); then
             image_exists=true
@@ -186,30 +198,39 @@ build_and_push_ecr() {
         exit 1
     fi
     
-    # Login to ECR
-    log_info "Logging in to ECR..."
-    aws ecr get-login-password --profile "$AWS_PROFILE" --region "$AWS_REGION" | \
-        docker login --username AWS --password-stdin "$ECR_URL"
+    # --- Step 3/4: ECR login ---
+    log_info "[Phase 1 build-push] Step 3/4: Logging in to ECR..."
+    if ! aws ecr get-login-password --profile "$AWS_PROFILE" --region "$AWS_REGION" | \
+        docker login --username AWS --password-stdin "$ECR_URL"; then
+        log_error "ECR login failed. Check AWS credentials and ECR permissions."
+        exit 1
+    fi
+    log_success "ECR login succeeded"
     
-    # Build Docker image
-    # Pass Spark and Hadoop versions from .env (source of truth)
-    # load_env_file was called earlier, so SPARK_VERSION and HADOOP_VERSION are available
-    log_info "Building Docker image for linux/amd64 platform (required for ECS Fargate)..."
-    log_info "Using SPARK_VERSION=${SPARK_VERSION:-4.0.1}, HADOOP_VERSION=${HADOOP_VERSION:-3}"
+    # --- Step 4/4: Docker build (this is the slow step; output streams so you see progress) ---
+    log_info "[Phase 1 build-push] Step 4/4: Building Docker image for linux/amd64 (required for ECS Fargate)..."
+    log_info "  Build args: SPARK_VERSION=${SPARK_VERSION:-4.0.1}, HADOOP_VERSION=${HADOOP_VERSION:-3}"
+    log_info "  Dockerfile: $REPO_ROOT/module_app_core/pack_with_docker/Dockerfile.api"
+    log_info "  Docker build output (streaming) — next lines are from 'docker build':"
     cd "$REPO_ROOT"
-    docker build --platform linux/amd64 \
+    docker build --platform linux/amd64 --progress=plain \
         --build-arg SPARK_VERSION=${SPARK_VERSION:-4.0.1} \
         --build-arg HADOOP_VERSION=${HADOOP_VERSION:-3} \
         -t "$ECR_REPO_NAME:$IMAGE_TAG" \
-        -f $REPO_ROOT/module_infra_kubetypes/nonkube/local/Dockerfile.api .
+        -f $REPO_ROOT/module_app_core/pack_with_docker/Dockerfile.api .
     
     # Tag image
-    log_info "Tagging image..."
+    log_info "Tagging image for ECR..."
     docker tag "$ECR_REPO_NAME:$IMAGE_TAG" "$ECR_REPO_URI:$IMAGE_TAG"
     
-    # Push image
-    log_info "Pushing image to ECR..."
-    docker push "$ECR_REPO_URI:$IMAGE_TAG"
+    # Push image (streams progress)
+    log_info "Pushing image to ECR (this may take a few minutes)..."
+    log_info "  Full image: $ECR_REPO_URI:$IMAGE_TAG"
+    log_info "  Note: 'Waiting' per layer is normal; Docker does not stream upload progress. 'Layer already exists' = skip (already in ECR)."
+    if ! docker push "$ECR_REPO_URI:$IMAGE_TAG"; then
+        log_error "Docker push failed. Check ECR permissions and network."
+        exit 1
+    fi
     
     # Also tag as 'latest' for convenience (Terraform will use the git SHA tag)
     # This allows manual operations to use 'latest' while Terraform uses specific version

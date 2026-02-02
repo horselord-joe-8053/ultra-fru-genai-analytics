@@ -96,7 +96,11 @@ teardown_terragrunt() {
                     read -p "Destroy frontend-ecs (S3, CloudFront)? (yes/no): " confirm
                 fi
                 if [ "$confirm" = "yes" ]; then
-                    [ "${PREEMPT:-false}" = "true" ] && terragrunt destroy --terragrunt-non-interactive || terragrunt destroy || true
+                    if [ "${PREEMPT:-false}" = "true" ]; then
+                        terragrunt destroy -- -auto-approve || { log_error "Frontend-ecs destroy failed"; exit 1; }
+                    else
+                        terragrunt destroy || { log_error "Frontend-ecs destroy failed"; exit 1; }
+                    fi
                     log_success "Frontend-ecs layer destroyed!"
                 fi
             else
@@ -119,7 +123,11 @@ teardown_terragrunt() {
                     read -p "Destroy frontend-eks (S3, CloudFront)? (yes/no): " confirm
                 fi
                 if [ "$confirm" = "yes" ]; then
-                    [ "${PREEMPT:-false}" = "true" ] && terragrunt destroy --terragrunt-non-interactive || terragrunt destroy || true
+                    if [ "${PREEMPT:-false}" = "true" ]; then
+                        terragrunt destroy -- -auto-approve || { log_error "Frontend-eks destroy failed"; exit 1; }
+                    else
+                        terragrunt destroy || { log_error "Frontend-eks destroy failed"; exit 1; }
+                    fi
                     log_success "Frontend-eks layer destroyed!"
                 fi
             else
@@ -157,13 +165,15 @@ teardown_terragrunt() {
             if [ "$confirm" = "yes" ]; then
                 log_info "Destroying application layer..."
                 if [ "${PREEMPT:-false}" = "true" ]; then
-                    terragrunt destroy --terragrunt-non-interactive || {
-                        log_warning "Destroy failed or no resources to destroy (idempotent)"
-                    }
+                    if ! terragrunt destroy -- -auto-approve; then
+                        log_error "ECS layer destroy failed. If state lock: cd $ECS_ENV_DIR/ecs && terragrunt force-unlock <LOCK_ID>"
+                        exit 1
+                    fi
                 else
-                    terragrunt destroy || {
-                        log_warning "Destroy failed or no resources to destroy (idempotent)"
-                    }
+                    if ! terragrunt destroy; then
+                        log_error "ECS layer destroy failed. If state lock: cd $ECS_ENV_DIR/ecs && terragrunt force-unlock <LOCK_ID>"
+                        exit 1
+                    fi
                 fi
                 log_success "ECS layer destroyed!"
             else
@@ -213,13 +223,15 @@ teardown_terragrunt() {
             if [ "$confirm" = "yes" ]; then
                 log_info "Destroying eks layer..."
                 if [ "${PREEMPT:-false}" = "true" ]; then
-                    terragrunt destroy --terragrunt-non-interactive || {
-                        log_warning "Destroy failed or no resources to destroy (idempotent)"
-                    }
+                    if ! terragrunt destroy -- -auto-approve; then
+                        log_error "EKS layer destroy failed. If state lock: cd $EKS_ENV_DIR/eks && terragrunt force-unlock <LOCK_ID>"
+                        exit 1
+                    fi
                 else
-                    terragrunt destroy || {
-                        log_warning "Destroy failed or no resources to destroy (idempotent)"
-                    }
+                    if ! terragrunt destroy; then
+                        log_error "EKS layer destroy failed. If state lock: cd $EKS_ENV_DIR/eks && terragrunt force-unlock <LOCK_ID>"
+                        exit 1
+                    fi
                 fi
                 log_success "EKS layer destroyed!"
             else
@@ -244,40 +256,28 @@ teardown_terragrunt() {
         sleep "${TEARDOWN_WAIT_BETWEEN_LAYERS}"
     fi
     
-    # Destroy infrastructure layer (lives in module_infra_basic/aws)
+    # Destroy infrastructure layer (VPC, Aurora, IAM, S3). Secrets Manager is in infrastructure-longterm; main teardown never destroys that layer (Option B).
     if [ "$LAYER" = "infrastructure" ] || [ "$LAYER" = "all" ]; then
-        log_step "Destroying infrastructure layer (VPC, Aurora, IAM, Secrets Manager)"
+        log_step "Destroying infrastructure layer (VPC, Aurora, IAM)"
         
         cd "$INFRA_ENV_DIR/infrastructure"
         
-        # Ensure backend is configured so we can read state from S3 (idempotent).
         log_info "Initializing Terragrunt for infrastructure layer (configures remote state)..."
         terragrunt init -reconfigure >/dev/null 2>&1 || true
         
-        # Check if terragrunt state exists (resources may have been destroyed already)
         if terragrunt state list >/dev/null 2>&1; then
             log_info "Running terragrunt destroy plan for infrastructure layer..."
-            # Capture plan output so we can summarize expected errors (like prevent_destroy on secrets)
-            # instead of streaming the full Terraform error block to the main log.
-            # Do not use bare assignment + set -e: a failing plan would exit the script before we can handle it.
             local tg_plan_output
             local tg_plan_status=0
             tg_plan_output="$(terragrunt plan -destroy 2>&1)" || tg_plan_status=$?
             if [ "$tg_plan_status" -ne 0 ]; then
-                # Common and expected case: Secrets Manager resources have lifecycle.prevent_destroy
-                # and Terraform will refuse to plan their destruction. This is a safety guard, not
-                # a failure of our teardown flow.
-                log_warning "Terraform plan -destroy for infrastructure layer reported protected resources or no resources to destroy."
-                log_info "Secrets Manager secrets with lifecycle.prevent_destroy are intentionally preserved and will NOT be deleted."
+                log_warning "Terraform plan -destroy for infrastructure layer reported issues (may already be destroyed)"
                 if [ -n "$tg_plan_output" ]; then
                     log_info "Terraform plan output (trimmed): ${tg_plan_output:0:400}"
                 fi
-                log_info "Proceeding with infrastructure destroy for resources that are allowed to be removed."
             fi
             
-            log_warning "Terragrunt will DESTROY AWS resources in infrastructure layer"
-            log_warning "This includes: VPC, Aurora database, IAM roles, and other shared infrastructure"
-            log_warning "Secrets Manager secrets with lifecycle.prevent_destroy are preserved."
+            log_warning "Terragrunt will DESTROY AWS resources in infrastructure layer (VPC, Aurora, IAM, S3)"
             log_warning "This action cannot be undone!"
             if [ "${PREEMPT:-false}" = "true" ]; then
                 confirm="yes"
@@ -288,34 +288,19 @@ teardown_terragrunt() {
             
             if [ "$confirm" = "yes" ]; then
                 log_info "Destroying infrastructure layer..."
-                local destroy_output
-                local destroy_exit=0
-                # Capture destroy output; do not let set -e exit when destroy fails (we handle exit below).
                 if [ "${PREEMPT:-false}" = "true" ]; then
-                    destroy_output="$(terragrunt destroy --terragrunt-non-interactive 2>&1)" || destroy_exit=$?
+                    if ! terragrunt destroy -- -auto-approve; then
+                        log_error "Infrastructure layer destroy failed. Check Terraform output above."
+                        if terragrunt state list 2>/dev/null | head -5 | while IFS= read -r line; do log_info "  $line"; done; then true; fi
+                        exit 1
+                    fi
                 else
-                    destroy_output="$(terragrunt destroy 2>&1)" || destroy_exit=$?
-                fi
-                destroy_exit=${destroy_exit:-0}
-                if [ "$destroy_exit" -eq 0 ]; then
-                    log_success "Infrastructure layer destroyed (Secrets Manager secrets preserved)."
-                else
-                    # Expected: lifecycle.prevent_destroy or "cannot be destroyed" on secrets/resources we intentionally keep.
-                    # Treat as soft failure (warning, exit 0) so orchestrators do not report ERROR.
-                    if echo "$destroy_output" | grep -qE 'prevent_destroy|cannot be destroyed|Instance cannot be destroyed|must be removed from state'; then
-                        log_warning "Destroy reported protected resources (e.g. lifecycle.prevent_destroy); treating as expected."
-                        log_info "Secrets Manager secrets with lifecycle.prevent_destroy are intentionally preserved and will NOT be deleted."
-                        log_info "Terraform destroy output (trimmed): ${destroy_output:0:500}"
-                        # Exit 0 so shared teardown wrapper does not report ERROR.
-                    else
-                        log_error "Infrastructure layer destroy failed (unexpected error)."
-                        log_info "Terraform destroy output (trimmed): ${destroy_output:0:800}"
-                        if echo "$destroy_output" | grep -qE 'get_aws_account_id|GetCallerIdentity|credentials|failed to refresh'; then
-                            log_info "Hint: Ensure AWS_PROFILE is set and valid for Terragrunt (e.g. export AWS_PROFILE=admin)."
-                        fi
+                    if ! terragrunt destroy; then
+                        log_error "Infrastructure layer destroy failed."
                         exit 1
                     fi
                 fi
+                log_success "Infrastructure layer destroyed."
             else
                 log_info "Infrastructure layer teardown cancelled"
             fi

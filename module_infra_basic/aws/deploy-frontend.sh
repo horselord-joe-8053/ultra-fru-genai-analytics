@@ -100,15 +100,13 @@ deploy_frontend() {
         cd "$FRONTEND_TERRA_DIR" 2>/dev/null || {
             log_error "Could not access Terraform frontend directory: $FRONTEND_TERRA_DIR"
             log_error "Frontend layer (frontend-ecs or frontend-eks) must be deployed first"
-            log_info "Deploy with: ./orchestration/run.sh aws $CONTAINER_TYPE $ENVIRONMENT"
+            log_info "Deploy with: ./run.sh aws kube $ENVIRONMENT  (EKS) or ./run.sh aws nonkube $ENVIRONMENT  (ECS)"
             exit 1
         }
-        s3_bucket_name=$(terragrunt output -raw s3_bucket_id 2>/dev/null || echo "")
+        # Capture stdout and stderr; some terragrunt versions write to stderr. Accept only a line that is a valid S3 bucket name; take last match in case of leading warnings.
+        s3_bucket_name=$(terragrunt output -raw s3_bucket_id 2>&1 | grep -oE '^[a-zA-Z0-9.\-_]{1,255}$' | tail -1 || echo "")
         cd "$ORIG_DIR" 2>/dev/null || true
-        # If terragrunt returned a warning (e.g. "No outputs found") instead of a bucket name, treat as empty
-        if [ -n "$s3_bucket_name" ] && ! echo "$s3_bucket_name" | grep -qE '^[a-zA-Z0-9.\-_]{1,255}$'; then
-            s3_bucket_name=""
-        fi
+        # If terragrunt returned a warning (e.g. "No outputs found") instead of a bucket name, we already filtered to valid pattern above
     else
         if [ ! -d "$FRONTEND_TERRA_DIR" ]; then
             log_error "Terraform frontend directory not found: $FRONTEND_TERRA_DIR"
@@ -118,7 +116,7 @@ deploy_frontend() {
         fi
         log_error "Cannot get S3 bucket name from Terraform"
         log_info "Frontend layer (frontend-ecs or frontend-eks) must be deployed first"
-        log_info "Deploy with: ./orchestration/run.sh aws $CONTAINER_TYPE $ENVIRONMENT"
+        log_info "Deploy with: ./run.sh aws kube $ENVIRONMENT  (EKS) or ./run.sh aws nonkube $ENVIRONMENT  (ECS)"
         exit 1
     fi
     
@@ -130,7 +128,7 @@ deploy_frontend() {
         else
             log_error "Failed to get S3 bucket name from Terraform output"
             log_error "Frontend layer may not be deployed, or s3_bucket_id output is missing"
-            log_info "Deploy with: ./orchestration/run.sh aws $CONTAINER_TYPE $ENVIRONMENT"
+            log_info "Deploy with: ./run.sh aws kube $ENVIRONMENT  (EKS) or ./run.sh aws nonkube $ENVIRONMENT  (ECS)"
             exit 1
         fi
     fi

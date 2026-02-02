@@ -173,6 +173,45 @@ run_pre_destroy() {
 }
 
 # --- Step 2: Terraform destroy (single app layer: eks or ecs) via module teardown ---
+# Run import scripts for this layer before destroy so state is populated and destroy can remove orphaned resources (same idea as shared/infrastructure).
+run_import_before_layer_destroy() {
+    local ct="$1"
+    [ "$DRY_RUN" = "true" ] && return 0
+    export AWS_PROFILE AWS_REGION
+    case "$ct" in
+        eks)
+            local import_eks="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-eks.sh"
+            local import_fe="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-frontend-eks.sh"
+            local eks_dir="$REPO_ROOT/module_infra_kubetypes/kube/aws/terra/environments/$ENVIRONMENT/eks"
+            if [ -d "$eks_dir" ] && [ -x "$import_eks" ]; then
+                log_info "Reconciling EKS state (import before destroy)..."
+                "$import_eks" "$ENVIRONMENT" "$PROJECT_NAME" || log_warning "EKS import had issues; continuing."
+            fi
+            local fe_dir="$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT/frontend-eks"
+            if [ -d "$fe_dir" ] && [ -x "$import_fe" ]; then
+                log_info "Reconciling frontend-eks state (import before destroy)..."
+                "$import_fe" "$ENVIRONMENT" "$PROJECT_NAME" || log_warning "Frontend-eks import had issues; continuing."
+            fi
+            ;;
+        ecs)
+            local import_ecs="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-ecs.sh"
+            local import_fe="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-frontend-ecs.sh"
+            local ecs_dir="$REPO_ROOT/module_infra_kubetypes/nonkube/aws/terra/environments/$ENVIRONMENT/ecs"
+            if [ -d "$ecs_dir" ] && [ -x "$import_ecs" ]; then
+                log_info "Reconciling ECS state (import before destroy)..."
+                "$import_ecs" "$ENVIRONMENT" "$PROJECT_NAME" || log_warning "ECS import had issues; continuing."
+            fi
+            local fe_dir="$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT/frontend-ecs"
+            if [ -d "$fe_dir" ] && [ -x "$import_fe" ]; then
+                log_info "Reconciling frontend-ecs state (import before destroy)..."
+                "$import_fe" "$ENVIRONMENT" "$PROJECT_NAME" || log_warning "Frontend-ecs import had issues; continuing."
+            fi
+            ;;
+        *) ;;
+    esac
+    echo ""
+}
+
 run_terraform_teardown_layer() {
     local ct="$1"
     log_step "Terraform destroy ($(echo "$ct" | tr '[:lower:]' '[:upper:]') layer only)"
@@ -188,6 +227,7 @@ run_terraform_teardown_layer() {
         echo ""
         return 0
     fi
+    run_import_before_layer_destroy "$ct"
     export AWS_PROFILE AWS_REGION
     [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && export PREEMPT=true
     local r=0
@@ -321,6 +361,19 @@ main() {
                     sleep_with_heartbeat "${TEARDOWN_WAIT_BETWEEN_LAYERS}" 30 "Waiting before shared destroy"
                 else
                     sleep "${TEARDOWN_WAIT_BETWEEN_LAYERS}"
+                fi
+            fi
+            # Import existing infrastructure into state before destroy so terragrunt destroy can remove orphaned resources (e.g. DB subnet group in old VPC). Otherwise state is empty and destroy no-ops; deploy then re-imports and hits VPC mismatch.
+            if [ "$DRY_RUN" = "false" ]; then
+                IMPORT_INFRA="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-infrastructure.sh"
+                INFRA_DIR="$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT/infrastructure"
+                if [ -d "$INFRA_DIR" ] && [ -x "$IMPORT_INFRA" ]; then
+                    log_step "Reconciling infrastructure state (import before destroy)"
+                    export AWS_PROFILE AWS_REGION
+                    if ! "$IMPORT_INFRA" "$ENVIRONMENT" "$PROJECT_NAME"; then
+                        log_warning "Infrastructure import had issues; continuing with destroy."
+                    fi
+                    echo ""
                 fi
             fi
             run_pre_destroy "shared" || failed=true

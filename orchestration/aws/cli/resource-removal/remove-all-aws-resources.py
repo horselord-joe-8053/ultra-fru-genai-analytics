@@ -19,14 +19,16 @@ except ImportError:
     print("Error: boto3 is required. pip install boto3", file=sys.stderr)
     sys.exit(1)
 
-# Shared feedback helpers (progress, status, wait-with-heartbeat)
-_helpers_dir = Path(__file__).resolve().parent.parent.parent / "helpers"
-if _helpers_dir.is_dir():
-    sys.path.insert(0, str(_helpers_dir))
+# Shared feedback helpers (progress, status, wait-with-heartbeat) from orchestration/common/feedback
+_script_dir = Path(__file__).resolve().parent
+_orchestration_root = _script_dir.parent.parent.parent  # resource-removal -> cli -> aws -> orchestration
+_feedback_dir = _orchestration_root / "common" / "feedback"
+if _feedback_dir.is_dir():
+    sys.path.insert(0, str(_feedback_dir))
 try:
     from long_running_feedback import progress, print_status, log_timeout, wait_with_heartbeat  # pyright: ignore[reportMissingImports]
 except ImportError as e:
-    print(f"Error: could not import long_running_feedback from {_helpers_dir}: {e}", file=sys.stderr)
+    print(f"Error: could not import long_running_feedback from {_feedback_dir}: {e}", file=sys.stderr)
     sys.exit(1)
 
 # Timeouts (minutes) for long-running deletions; shown at start of each component

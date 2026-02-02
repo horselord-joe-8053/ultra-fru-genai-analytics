@@ -29,9 +29,9 @@ if [[ ! "$ENVIRONMENT" =~ ^(dev|prod)$ ]]; then
     exit 1
 fi
 
-if [[ ! "$LAYER" =~ ^(infrastructure|ecs|eks|all)$ ]]; then
+if [[ ! "$LAYER" =~ ^(infrastructure|ecs|eks|frontend-ecs|frontend-eks|all)$ ]]; then
     log_error "Invalid layer: $LAYER"
-    log_info "Usage: $0 [dev|prod] [infrastructure|ecs|eks|all]"
+    log_info "Usage: $0 [dev|prod] [infrastructure|ecs|eks|frontend-ecs|frontend-eks|all]"
     exit 1
 fi
 
@@ -169,19 +169,21 @@ deploy_terragrunt() {
 
     # Helper to run terragrunt with improved lock error handling
     # Streams output in real-time while still capturing for lock error detection
+    # Uses CURRENT_LAYER for lock path when set (e.g. frontend-eks, frontend-ecs); else LAYER (eks, ecs, infrastructure).
     run_with_lock_retry() {
         local description="$1"; shift
         local cmd=( "$@" )
         local tmp_out
         tmp_out="$(mktemp)"
         local exit_code=0
+        local LOCK_LAYER="${CURRENT_LAYER:-$LAYER}"
 
         # Pre-check: Check if a lock already exists before running the command
         # This prevents waiting for the full lock timeout if a stale lock exists
-        if lock_still_exists "$ENVIRONMENT" "$LAYER"; then
+        if lock_still_exists "$ENVIRONMENT" "$LOCK_LAYER"; then
             log_warning "Lock file detected in S3 before running command. Attempting to handle it..."
             local lock_file
-            if lock_file=$(get_lock_file_info "$ENVIRONMENT" "$LAYER" 2>/dev/null); then
+            if lock_file=$(get_lock_file_info "$ENVIRONMENT" "$LOCK_LAYER" 2>/dev/null); then
                 local lock_id=""
                 local lock_who=""
                 local lock_created=""
@@ -241,7 +243,7 @@ deploy_terragrunt() {
                         log_error "Please ensure no other Terraform operations are active for this state."
                         log_error ""
                         log_error "To manually unlock (if safe):"
-                        log_error "  cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LAYER && terragrunt force-unlock $lock_id -force"
+                        log_error "  cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LOCK_LAYER && terragrunt force-unlock $lock_id -force"
                         rm -f "$tmp_out"
                         return 1  # Fail fast
                     elif [ "$processes_running" = true ] && [ $lock_age -ge $stale_threshold ]; then
@@ -266,13 +268,13 @@ deploy_terragrunt() {
                     if [ $unlock_exit_code -eq 0 ]; then
                         log_success "Unlock command succeeded. Waiting for S3 propagation..."
                         sleep 2  # Wait for S3 propagation
-                        if lock_still_exists "$ENVIRONMENT" "$LAYER"; then
+                        if lock_still_exists "$ENVIRONMENT" "$LOCK_LAYER"; then
                             log_error "Lock still exists after force-unlock attempt!"
                             log_error "  Lock ID: $lock_id"
                             log_error "  This may indicate S3 propagation delay or unlock failed silently."
                             log_error ""
                             log_error "Manual intervention required:"
-                            log_error "  cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LAYER"
+                            log_error "  cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LOCK_LAYER"
                             log_error "  terragrunt force-unlock $lock_id -force"
                             rm -f "$tmp_out"
                             return 1
@@ -287,7 +289,7 @@ deploy_terragrunt() {
                         done
                         log_error ""
                         log_error "Manual intervention required:"
-                        log_error "  cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LAYER"
+                        log_error "  cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LOCK_LAYER"
                         log_error "  terragrunt force-unlock $lock_id -force"
                         rm -f "$tmp_out"
                         return 1
@@ -318,8 +320,13 @@ deploy_terragrunt() {
         fi
         
         # Command failed - check for lock error
-        # Use case-insensitive grep and check for multiple lock error patterns
-        if grep -qiE "(Error acquiring the state lock|state lock|PreconditionFailed)" "$tmp_out"; then
+        # Only treat as lock error when Terraform actually failed to acquire the lock (not "Releasing state lock" after our own failure).
+        # "Error acquiring the state lock" = real lock error; "Releasing state lock" = normal teardown after apply failed (e.g. OAC already exists).
+        local is_real_lock_error=false
+        if grep -qi "Error acquiring the state lock" "$tmp_out"; then
+            is_real_lock_error=true
+        fi
+        if [ "$is_real_lock_error" = true ]; then
             log_warning "Lock error detected in output. Parsing lock information..."
             
             # Strip ANSI to ease parsing
@@ -327,19 +334,15 @@ deploy_terragrunt() {
             clean_out="$(mktemp)"
             sed -E 's/\x1B\[[0-9;]*[mK]//g' "$tmp_out" > "$clean_out"
 
-            # Try to extract the lock ID from common patterns (check both clean and original)
+            # Extract lock ID only from Terraform's Lock Info block (line "ID:        <uuid>"), not from arbitrary UUIDs (e.g. AWS RequestID in errors).
             local lock_id
-            lock_id="$(grep -Eo '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$clean_out" | head -1)"
-            
-            # If not found in clean output, try original (in case ANSI stripping removed it)
+            lock_id="$(grep -iE '^[[:space:]]*ID:[[:space:]]+[0-9a-fA-F]{8}-' "$clean_out" | head -1 | grep -Eo '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | head -1)"
             if [ -z "$lock_id" ]; then
-                lock_id="$(grep -Eo '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$tmp_out" | head -1)"
+                lock_id="$(grep -iE '^[[:space:]]*ID:[[:space:]]+[0-9a-fA-F]{8}-' "$tmp_out" | head -1 | grep -Eo '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | head -1)"
             fi
-            
-            # Basic sanity: ensure it looks like a UUID
-            if ! [[ "$lock_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+            if [ -z "$lock_id" ]; then
                 lock_id=""
-                log_warning "Could not extract lock ID from error output"
+                log_warning "Could not extract lock ID from Lock Info block (ignoring arbitrary UUIDs from API errors)"
             else
                 log_info "Extracted lock ID: $lock_id"
             fi
@@ -361,7 +364,7 @@ deploy_terragrunt() {
                 # If not found in error output, try to get from S3 lock file
                 if [ -z "$lock_who" ] || [ -z "$lock_created" ]; then
                     local lock_file
-                    if lock_file=$(get_lock_file_info "$ENVIRONMENT" "$LAYER" 2>/dev/null); then
+                    if lock_file=$(get_lock_file_info "$ENVIRONMENT" "$LOCK_LAYER" 2>/dev/null); then
                         # Parse lock file JSON
                         if command_exists jq; then
                             [ -z "$lock_who" ] && lock_who=$(jq -r '.Who // ""' "$lock_file" 2>/dev/null || echo "")
@@ -384,7 +387,7 @@ deploy_terragrunt() {
                 if [ -n "$lock_who" ]; then
                     log_info "  Locked by: $lock_who"
                 fi
-                log_info "  Lock path: fru-terraform-state-${TF_STATE_BUCKET##*-}/$ENVIRONMENT/$LAYER/terraform.tfstate"
+                log_info "  Lock path: fru-terraform-state-${TF_STATE_BUCKET##*-}/$ENVIRONMENT/$LOCK_LAYER/terraform.tfstate"
                 
                 # Fail-fast: Check if lock owner process is still running
                 if [ -n "$lock_who" ] && is_process_running "$lock_who"; then
@@ -402,7 +405,7 @@ deploy_terragrunt() {
                     log_error "  ps aux | grep -E 'terraform|terragrunt'"
                     log_error ""
                     log_error "To manually unlock (if safe):"
-                    log_error "  cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LAYER"
+                    log_error "  cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LOCK_LAYER"
                     log_error "  terragrunt force-unlock $lock_id -force"
                     rm -f "$tmp_out" "$clean_out"
                     return 1  # Fail fast
@@ -421,15 +424,15 @@ deploy_terragrunt() {
                     sleep 2
                     
                     # Verify lock is actually released
-                    if lock_still_exists "$ENVIRONMENT" "$LAYER"; then
+                    if lock_still_exists "$ENVIRONMENT" "$LOCK_LAYER"; then
                         log_error "Lock still exists after force-unlock attempt!"
                         log_error "  Lock ID: $lock_id"
                         log_error "S3 propagation may be delayed, or unlock failed silently."
                         log_error ""
                         log_error "Manual intervention required:"
                         log_error "  1. Wait a few more seconds and retry"
-                        log_error "  2. Check lock file in S3: s3://${TF_STATE_BUCKET:-fru-terraform-state-*}/$ENVIRONMENT/$LAYER/terraform.tfstate.tflock"
-                        log_error "  3. Manually unlock: cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LAYER && terragrunt force-unlock $lock_id -force"
+                        log_error "  2. Check lock file in S3: s3://${TF_STATE_BUCKET:-fru-terraform-state-*}/$ENVIRONMENT/$LOCK_LAYER/terraform.tfstate.tflock"
+                        log_error "  3. Manually unlock: cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LOCK_LAYER && terragrunt force-unlock $lock_id -force"
                         rm -f "$tmp_out" "$clean_out"
                         return 1  # Fail fast
                     fi
@@ -473,8 +476,8 @@ deploy_terragrunt() {
                     log_error ""
                     log_error "Manual intervention required:"
                     log_error "  1. Verify no Terraform processes are running: ps aux | grep -E 'terraform|terragrunt'"
-                    log_error "  2. Check lock file in S3: s3://${TF_STATE_BUCKET:-fru-terraform-state-*}/$ENVIRONMENT/$LAYER/terraform.tfstate.tflock"
-                    log_error "  3. Manually unlock: cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LAYER && terragrunt force-unlock $lock_id -force"
+                    log_error "  2. Check lock file in S3: s3://${TF_STATE_BUCKET:-fru-terraform-state-*}/$ENVIRONMENT/$LOCK_LAYER/terraform.tfstate.tflock"
+                    log_error "  3. Manually unlock: cd $LAYER_TERRAFORM_BASE/$ENVIRONMENT/$LOCK_LAYER && terragrunt force-unlock $lock_id -force"
                     rm -f "$tmp_out" "$clean_out"
                     return 1  # Fail fast
                 fi
@@ -487,7 +490,7 @@ deploy_terragrunt() {
                 log_error ""
                 log_error "Manual intervention required:"
                 log_error "  1. Check for running Terraform processes: ps aux | grep -E 'terraform|terragrunt'"
-                log_error "  2. Check lock file in S3: s3://${TF_STATE_BUCKET:-fru-terraform-state-*}/$ENVIRONMENT/$LAYER/terraform.tfstate.tflock"
+                log_error "  2. Check lock file in S3: s3://${TF_STATE_BUCKET:-fru-terraform-state-*}/$ENVIRONMENT/$LOCK_LAYER/terraform.tfstate.tflock"
                 log_error "  3. Manually inspect and unlock if safe"
                 rm -f "$tmp_out" "$clean_out"
                 return 1  # Fail fast even if lock ID can't be parsed
@@ -552,13 +555,53 @@ deploy_terragrunt() {
         exit 1
     fi
     
-    # Deploy infrastructure layer (lives in module_infra_basic/aws)
+    # Deploy longterm layer first (Secrets Manager); then ephemeral infrastructure (VPC, Aurora, IAM). Longterm is never destroyed by main teardown (Option B).
     if [ "$LAYER" = "infrastructure" ] || [ "$LAYER" = "all" ]; then
-        log_step "Deploying infrastructure layer (VPC, Aurora, IAM, Secrets Manager)"
+        LONGTERM_DIR="$INFRA_TERRAFORM_DIR/$ENVIRONMENT/infrastructure-longterm"
+        if [ -d "$LONGTERM_DIR" ]; then
+            IMPORT_LONGTERM="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-longterm.sh"
+            if [ -x "$IMPORT_LONGTERM" ]; then
+                log_info "Reconciling longterm state (import existing Secrets Manager if any)..."
+                if ! "$IMPORT_LONGTERM" "$ENVIRONMENT" "fru"; then
+                    log_warning "Longterm import reported issues; continuing with plan/apply."
+                fi
+            fi
+            log_step "Deploying infrastructure-longterm layer (Secrets Manager)"
+            LAYER_TERRAFORM_BASE="$INFRA_TERRAFORM_DIR"
+            CURRENT_LAYER="infrastructure-longterm"
+            cd "$LONGTERM_DIR"
+            log_info "Refreshing Terraform state (longterm)..."
+            if ! run_with_lock_retry "refresh (infrastructure-longterm)" terragrunt refresh -lock-timeout=30s; then
+                log_warning "Longterm state refresh failed, continuing with plan"
+            fi
+            log_info "Running terragrunt plan (infrastructure-longterm)..."
+            if ! run_with_lock_retry "plan (infrastructure-longterm)" terragrunt plan -lock-timeout=30s -refresh=true; then
+                log_error "Terraform plan failed for infrastructure-longterm layer"
+                exit 1
+            fi
+            if [ "$DRY_RUN" != "true" ]; then
+                log_info "Applying Terragrunt configuration for infrastructure-longterm layer..."
+                if ! run_with_lock_retry "apply (infrastructure-longterm)" terragrunt apply -auto-approve -lock-timeout=30s; then
+                    log_error "Terraform apply failed for infrastructure-longterm layer"
+                    exit 1
+                fi
+                log_success "Infrastructure-longterm layer deployed successfully!"
+            fi
+        fi
+        # Reconcile state: import any leftover infrastructure resources (e.g. after brutal teardown). No Secrets Manager (moved to longterm).
+        IMPORT_INFRA="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-infrastructure.sh"
+        if [ -x "$IMPORT_INFRA" ]; then
+            log_info "Reconciling infrastructure state (import existing resources if any)..."
+            if ! "$IMPORT_INFRA" "$ENVIRONMENT" "fru"; then
+                log_warning "Infrastructure import reported issues; continuing with plan/apply."
+            fi
+        fi
+        log_step "Deploying infrastructure layer (VPC, Aurora, IAM)"
         LAYER_TERRAFORM_BASE="$INFRA_TERRAFORM_DIR"
+        CURRENT_LAYER="infrastructure"
         cd "$INFRA_TERRAFORM_DIR/$ENVIRONMENT/infrastructure"
-        
-        # Refresh state before planning to ensure we have latest state (especially after imports)
+
+        # Refresh state before planning to ensure we have latest state
         log_info "Refreshing Terraform state to ensure latest state..."
         if ! run_with_lock_retry "refresh (infrastructure)" terragrunt refresh -lock-timeout=30s; then
             log_warning "State refresh failed, continuing with plan (this may use stale state)"
@@ -587,6 +630,14 @@ deploy_terragrunt() {
     
     # Deploy application layer (ECS; lives in module_infra_kubetypes/nonkube)
     if [ "$LAYER" = "ecs" ] || ([ "$LAYER" = "all" ] && [ "$CONTAINER_TYPE" = "ecs" ]); then
+        # Reconcile state: import any leftover ECS resources (e.g. after brutal teardown).
+        IMPORT_ECS="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-ecs.sh"
+        if [ -x "$IMPORT_ECS" ]; then
+            log_info "Reconciling ECS state (import existing resources if any)..."
+            if ! "$IMPORT_ECS" "$ENVIRONMENT" "fru"; then
+                log_warning "ECS import reported issues; continuing with plan/apply."
+            fi
+        fi
         LAYER_TERRAFORM_BASE="$ECS_TERRAFORM_DIR"
         log_step "Deploying application layer (ECS, ALB, Frontend)"
         
@@ -642,6 +693,18 @@ deploy_terragrunt() {
         log_step "Deploying frontend-ecs layer (S3, CloudFront)"
         LAYER_TERRAFORM_BASE="$INFRA_TERRAFORM_DIR"
         cd "$INFRA_TERRAFORM_DIR/$ENVIRONMENT/frontend-ecs"
+        CURRENT_LAYER="frontend-ecs"
+        # Reconcile state: import any leftover frontend-ecs resources (e.g. OAC, S3, CloudFront after brutal teardown).
+        IMPORT_FRONTEND_ECS="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-frontend-ecs.sh"
+        if [ -x "$IMPORT_FRONTEND_ECS" ]; then
+            log_info "Reconciling frontend-ecs state (import existing resources if any)..."
+            if ! "$IMPORT_FRONTEND_ECS" "$ENVIRONMENT" "fru"; then
+                log_error "Frontend-ecs import failed or reported OAC still to be created. Fix state (run import script manually) and retry."
+                exit 1
+            fi
+        else
+            log_warning "Import script not executable; apply may fail if OAC/S3/CloudFront already exist in AWS."
+        fi
         log_info "Refreshing Terraform state for frontend-ecs..."
         if ! run_with_lock_retry "refresh (frontend-ecs)" terragrunt refresh -lock-timeout=30s; then
             log_warning "State refresh failed for frontend-ecs, continuing with plan"
@@ -673,6 +736,16 @@ deploy_terragrunt() {
         export AWS_PROFILE="${AWS_PROFILE:-admin}"
         log_info "Using AWS profile: $AWS_PROFILE for Terragrunt operations"
         
+        # Reconcile state with AWS: import any leftover EKS resources (e.g. after brutal teardown).
+        # Idempotent: existing resources → import; already in state or torn down via Terraform → skip.
+        IMPORT_SCRIPT="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-eks.sh"
+        if [ -x "$IMPORT_SCRIPT" ]; then
+            log_info "Reconciling EKS state (import existing resources if any)..."
+            if ! "$IMPORT_SCRIPT" "$ENVIRONMENT" "fru"; then
+                log_warning "EKS import reported issues; continuing with plan/apply."
+            fi
+        fi
+        
         log_info "Running terragrunt plan for eks layer..."
         log_info "Note: If infrastructure dependency is not initialized, mock outputs will be used"
         if ! run_with_lock_retry "plan (eks)" terragrunt plan -lock-timeout=30s -refresh=true; then
@@ -698,6 +771,19 @@ deploy_terragrunt() {
         log_step "Deploying frontend-eks layer (S3, CloudFront)"
         LAYER_TERRAFORM_BASE="$INFRA_TERRAFORM_DIR"
         cd "$INFRA_TERRAFORM_DIR/$ENVIRONMENT/frontend-eks"
+        CURRENT_LAYER="frontend-eks"
+        # Reconcile state: import any leftover frontend-eks resources (e.g. OAC, S3, CloudFront after brutal teardown).
+        # Import is mandatory: if OAC/S3/CF already exist (e.g. after brutal teardown), apply would fail with AlreadyExists without import.
+        IMPORT_FRONTEND_EKS="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-frontend-eks.sh"
+        if [ -x "$IMPORT_FRONTEND_EKS" ]; then
+            log_info "Reconciling frontend-eks state (import existing resources if any)..."
+            if ! "$IMPORT_FRONTEND_EKS" "$ENVIRONMENT" "fru"; then
+                log_error "Frontend-eks import failed or reported OAC still to be created. Fix state (run import script manually) and retry."
+                exit 1
+            fi
+        else
+            log_warning "Import script not executable; apply may fail if OAC/S3/CloudFront already exist in AWS."
+        fi
         log_info "Refreshing Terraform state for frontend-eks..."
         if ! run_with_lock_retry "refresh (frontend-eks)" terragrunt refresh -lock-timeout=30s; then
             log_warning "State refresh failed for frontend-eks, continuing with plan"
@@ -710,6 +796,67 @@ deploy_terragrunt() {
         if [ "$DRY_RUN" = "true" ]; then
             log_info "[DRY-RUN] Would run: terragrunt apply (frontend-eks)"
         else
+            log_info "Applying Terragrunt configuration for frontend-eks..."
+            if ! run_with_lock_retry "apply (frontend-eks)" terragrunt apply -auto-approve -lock-timeout=30s; then
+                log_error "Terraform apply failed for frontend-eks layer"
+                exit 1
+            fi
+            log_success "Frontend-eks layer deployed successfully!"
+        fi
+    fi
+    
+    # Deploy only frontend-ecs layer (standalone; use when ECS + frontend-ecs Terraform already exist and you only want to re-apply frontend).
+    if [ "$LAYER" = "frontend-ecs" ]; then
+        LAYER_TERRAFORM_BASE="$INFRA_TERRAFORM_DIR"
+        cd "$INFRA_TERRAFORM_DIR/$ENVIRONMENT/frontend-ecs"
+        CURRENT_LAYER="frontend-ecs"
+        IMPORT_FRONTEND_ECS="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-frontend-ecs.sh"
+        if [ -x "$IMPORT_FRONTEND_ECS" ]; then
+            log_info "Reconciling frontend-ecs state (import existing resources if any)..."
+            if ! "$IMPORT_FRONTEND_ECS" "$ENVIRONMENT" "fru"; then
+                log_error "Frontend-ecs import failed. Fix state and retry."
+                exit 1
+            fi
+        fi
+        log_info "Refreshing Terraform state for frontend-ecs..."
+        run_with_lock_retry "refresh (frontend-ecs)" terragrunt refresh -lock-timeout=30s || true
+        log_info "Running terragrunt plan for frontend-ecs..."
+        if ! run_with_lock_retry "plan (frontend-ecs)" terragrunt plan -lock-timeout=30s -refresh=true; then
+            log_error "Terraform plan failed for frontend-ecs layer"
+            exit 1
+        fi
+        if [ "$DRY_RUN" != "true" ]; then
+            log_info "Applying Terragrunt configuration for frontend-ecs..."
+            if ! run_with_lock_retry "apply (frontend-ecs)" terragrunt apply -auto-approve -lock-timeout=30s; then
+                log_error "Terraform apply failed for frontend-ecs layer"
+                exit 1
+            fi
+            log_success "Frontend-ecs layer deployed successfully!"
+        fi
+    fi
+    
+    # Deploy only frontend-eks layer (standalone; use when EKS + frontend-eks Terraform already exist and you only want to re-apply frontend).
+    if [ "$LAYER" = "frontend-eks" ]; then
+        LAYER_TERRAFORM_BASE="$INFRA_TERRAFORM_DIR"
+        cd "$INFRA_TERRAFORM_DIR/$ENVIRONMENT/frontend-eks"
+        CURRENT_LAYER="frontend-eks"
+        export AWS_PROFILE="${AWS_PROFILE:-admin}"
+        IMPORT_FRONTEND_EKS="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-frontend-eks.sh"
+        if [ -x "$IMPORT_FRONTEND_EKS" ]; then
+            log_info "Reconciling frontend-eks state (import existing resources if any)..."
+            if ! "$IMPORT_FRONTEND_EKS" "$ENVIRONMENT" "fru"; then
+                log_error "Frontend-eks import failed. Fix state and retry."
+                exit 1
+            fi
+        fi
+        log_info "Refreshing Terraform state for frontend-eks..."
+        run_with_lock_retry "refresh (frontend-eks)" terragrunt refresh -lock-timeout=30s || true
+        log_info "Running terragrunt plan for frontend-eks..."
+        if ! run_with_lock_retry "plan (frontend-eks)" terragrunt plan -lock-timeout=30s -refresh=true; then
+            log_error "Terraform plan failed for frontend-eks layer"
+            exit 1
+        fi
+        if [ "$DRY_RUN" != "true" ]; then
             log_info "Applying Terragrunt configuration for frontend-eks..."
             if ! run_with_lock_retry "apply (frontend-eks)" terragrunt apply -auto-approve -lock-timeout=30s; then
                 log_error "Terraform apply failed for frontend-eks layer"

@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
+# =============================================================================
 # Top-level run dispatcher: ./orchestration/run.sh <local|aws> <kube|nonkube> [env] [options...]
+# =============================================================================
 # Delegates to orchestration/local/run.sh or orchestration/aws/run.sh.
+#
+# Modes:
+#   local nonkube   → Local Docker Compose (default)
+#   local kube      → Local Kubernetes (minikube/kind)
+#   aws nonkube [env] → AWS ECS (env: dev|prod, default dev)
+#   aws kube [env]    → AWS EKS (env: dev|prod, default dev)
+#
+# Goal: ./run.sh aws kube dev --preempt runs problem-free. Preempt = teardown
+# (EKS + ECS + shared infra) then deploy. Option B implemented: Secrets Manager
+# is in infrastructure-longterm (never destroyed); infrastructure destroy runs in one pass.
+#
+# Pass-through: --preempt, --skip-build, --skip-data-lake, etc.
+# Usage: ./orchestration/run.sh [local|aws] [kube|nonkube] [dev|prod] [options...]
+# =============================================================================
 
 set -e
 ORCH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

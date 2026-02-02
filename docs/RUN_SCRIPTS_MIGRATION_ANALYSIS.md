@@ -137,7 +137,7 @@ Then update **orchestration/run.sh** and **orchestration/teardown.sh** to exec `
 
 - **resources_cleanup/sub_proc/cleanup_orphaned.py** → **module_infra_basic/aws/teardown/** (or **orchestration/aws/** if it only coordinates other modules). Orphan cleanup is project-level AWS.
 
-- **Terraform layer runner** (optional) – `run_scripts/.../aws/terraform/deploy.sh`, `teardown.sh`, `setup-s3-bucket.sh`, `terra_validation.sh`, `temp-import-secrets.sh`, `migrate-eks-state.sh`. These run Terragrunt for infra + EKS + ECS by delegating to module_infra_basic, module_infra_kubetypes/kube, module_infra_kubetypes/nonkube. Can live under **module_infra_basic/aws/terraform/** (single “terraform runner” that knows all three module paths) or **orchestration/terraform/** if you prefer Terraform to be an orchestration concern. Recommendation: **orchestration/terraform/** so the runner stays with orchestration; it only needs to know paths to the three modules.
+- **Terraform layer runner** (optional) – `run_scripts/.../aws/terraform/deploy.sh`, `teardown.sh`, `setup-s3-bucket.sh`, `terra_validation.sh`, `migrate-eks-state.sh`. These run Terragrunt for infra + EKS + ECS by delegating to module_infra_basic, module_infra_kubetypes/kube, module_infra_kubetypes/nonkube. Can live under **module_infra_basic/aws/terraform/** (single “terraform runner” that knows all three module paths) or **orchestration/terraform/** if you prefer Terraform to be an orchestration concern. Recommendation: **orchestration/terraform/** so the runner stays with orchestration; it only needs to know paths to the three modules.
 
 ### 2.3 module_infra_kubetypes/kube (EKS)
 

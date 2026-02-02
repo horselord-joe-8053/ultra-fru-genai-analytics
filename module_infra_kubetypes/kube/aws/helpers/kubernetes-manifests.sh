@@ -1180,24 +1180,26 @@ except Exception as e:
     sys.exit(1)
 PYTHON_SCRIPT
                 
-                if [ $? -eq 0 ]; then
+                py_exit=$?
+                if [ $py_exit -eq 0 ]; then
                     log_info "✅ Kubeconfig edited successfully: --profile now in exec.args"
                 else
-                    log_warning "⚠️ Kubeconfig edit failed (Python), but continuing anyway"
+                    # Python failed (e.g. ModuleNotFoundError: No module named 'yaml'). Use sed fallback.
+                    log_warning "Kubeconfig edit via Python failed (install PyYAML for better support: pip install pyyaml). Using sed fallback..."
+                    # Remove exec.env AWS_PROFILE block
+                    sed -i '' '/- name: AWS_PROFILE$/,/value: '"$aws_profile"'$/d' "$dedicated_kubeconfig" 2>/dev/null || \
+                    sed -i '/- name: AWS_PROFILE$/,/value: '"$aws_profile"'$/d' "$dedicated_kubeconfig" 2>/dev/null || true
+                    # Remove empty env: [] line if it exists
+                    sed -i '' '/^[[:space:]]*env:[[:space:]]*$/d' "$dedicated_kubeconfig" 2>/dev/null || \
+                    sed -i '/^[[:space:]]*env:[[:space:]]*$/d' "$dedicated_kubeconfig" 2>/dev/null || true
                 fi
             else
-                # Fallback: Use sed to edit YAML (less robust but works if structure is predictable)
-                log_warning "Python3 not available, attempting sed-based kubeconfig edit (may be fragile)..."
-                # This is a simple sed-based approach - may break if YAML structure changes
-                # Remove exec.env AWS_PROFILE line
+                # Python3 not available: Use sed to edit YAML (less robust but works if structure is predictable)
+                log_warning "Python3 not available, attempting sed-based kubeconfig edit..."
                 sed -i '' '/- name: AWS_PROFILE$/,/value: '"$aws_profile"'$/d' "$dedicated_kubeconfig" 2>/dev/null || \
                 sed -i '/- name: AWS_PROFILE$/,/value: '"$aws_profile"'$/d' "$dedicated_kubeconfig" 2>/dev/null || true
-                # Remove empty env: [] line if it exists
                 sed -i '' '/^[[:space:]]*env:[[:space:]]*$/d' "$dedicated_kubeconfig" 2>/dev/null || \
                 sed -i '/^[[:space:]]*env:[[:space:]]*$/d' "$dedicated_kubeconfig" 2>/dev/null || true
-                # Add --profile to beginning of args (very fragile - assumes specific format)
-                # This is a best-effort fallback - Python approach is preferred
-                log_warning "Sed-based edit may not work reliably - Python3 recommended"
             fi
             
             # Verify dedicated kubeconfig is still valid after editing
