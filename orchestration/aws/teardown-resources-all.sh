@@ -19,6 +19,18 @@
 #   Example: TEARDOWN_STEP_TIMEOUT_SEC=1800 ./teardown-resources-all.sh ... (30 min per step; step is killed and script exits non-zero).
 #   If unset or 0, steps run until completion. (External timeouts, e.g. CI/IDE, may still kill the process.)
 #
+# WAIT BEFORE SHARED DESTROY (container-type all): Set TEARDOWN_WAIT_BETWEEN_LAYERS (seconds) as max wait / retry window after EKS/ECS destroy.
+#   Shared destroy is tried immediately, then every 30s on DependencyViolation (ENI/subnet), until success or timeout. run.sh --preempt sets 900 by default. Use 0 to skip wait/retry.
+#
+# FAIL-FAST: Set TEARDOWN_FAIL_FAST=true to exit on first step failure (default: continue and try all steps, then exit 1).
+#   run.sh --preempt sets TEARDOWN_FAIL_FAST=true so preempt stops immediately on error (e.g. state lock).
+#
+# STDERR/ERROR in output: Terragrunt (when it runs terraform destroy) uses a default log format that prefixes each
+#   line with a timestamp and a level: STDOUT (terraform stdout), STDERR (terraform stderr), ERROR (terragrunt's own
+#   errors). So "STDERR" and "ERROR" in the log are added by Terragrunt, not by our scripts. When teardown fails,
+#   look for the actual message (e.g. "Error acquiring the state lock", "DependencyViolation"). State lock fix:
+#   cd <layer-dir> && terragrunt force-unlock <LOCK_ID> (use the Lock ID from the error), then re-run.
+#
 # REQUIRED: --container-type (eks | ecs | all)
 #
 # OPTIONS: --force, --skip-confirmation, --dry-run, --clean-local-only, --help
@@ -55,6 +67,7 @@ DRY_RUN="false"
 FORCE_DELETE="false"
 SKIP_CONFIRMATION="false"
 CLEAN_LOCAL_ONLY="false"
+TEARDOWN_FAIL_FAST="${TEARDOWN_FAIL_FAST:-false}"
 CONTAINER_TYPE=""
 AWS_PROFILE="${AWS_PROFILE:-admin}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
@@ -341,28 +354,20 @@ main() {
 
     case "$CONTAINER_TYPE" in
         eks)
-            run_pre_destroy "eks" || failed=true
-            run_terraform_teardown_layer "eks" || failed=true
+            run_pre_destroy "eks" || { failed=true; [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1; }
+            run_terraform_teardown_layer "eks" || { failed=true; [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1; }
             cleanup_orphaned "eks" || true
             ;;
         ecs)
-            run_pre_destroy "ecs" || failed=true
-            run_terraform_teardown_layer "ecs" || failed=true
+            run_pre_destroy "ecs" || { failed=true; [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1; }
+            run_terraform_teardown_layer "ecs" || { failed=true; [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1; }
             cleanup_orphaned "ecs" || true
             ;;
         all)
-            run_pre_destroy "eks" || failed=true
-            run_pre_destroy "ecs" || failed=true
-            run_terraform_teardown_layer "eks" || failed=true
-            run_terraform_teardown_layer "ecs" || failed=true
-            if [ "$DRY_RUN" = "false" ] && [ "${TEARDOWN_WAIT_BETWEEN_LAYERS:-0}" -gt 0 ]; then
-                log_step "Waiting ${TEARDOWN_WAIT_BETWEEN_LAYERS}s before shared destroy"
-                if type sleep_with_heartbeat >/dev/null 2>&1; then
-                    sleep_with_heartbeat "${TEARDOWN_WAIT_BETWEEN_LAYERS}" 30 "Waiting before shared destroy"
-                else
-                    sleep "${TEARDOWN_WAIT_BETWEEN_LAYERS}"
-                fi
-            fi
+            run_pre_destroy "eks" || { failed=true; [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1; }
+            run_pre_destroy "ecs" || { failed=true; [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1; }
+            run_terraform_teardown_layer "eks" || { failed=true; [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1; }
+            run_terraform_teardown_layer "ecs" || { failed=true; [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1; }
             # Import existing infrastructure into state before destroy so terragrunt destroy can remove orphaned resources (e.g. DB subnet group in old VPC). Otherwise state is empty and destroy no-ops; deploy then re-imports and hits VPC mismatch.
             if [ "$DRY_RUN" = "false" ]; then
                 IMPORT_INFRA="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-infrastructure.sh"
@@ -376,8 +381,52 @@ main() {
                     echo ""
                 fi
             fi
-            run_pre_destroy "shared" || failed=true
-            run_terraform_teardown_shared || failed=true
+            run_pre_destroy "shared" || { failed=true; [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1; }
+            # Shared destroy: when TEARDOWN_WAIT_BETWEEN_LAYERS > 0, retry every 30s on DependencyViolation until success or timeout; otherwise run once.
+            if [ "$DRY_RUN" = "false" ] && [ "${TEARDOWN_WAIT_BETWEEN_LAYERS:-0}" -gt 0 ]; then
+                wait_timeout="${TEARDOWN_WAIT_BETWEEN_LAYERS}"
+                interval=30
+                start_time=$(date +%s)
+                log_step "Terraform destroy (shared infrastructure); will retry every ${interval}s on ENI/subnet dependency until success or ${wait_timeout}s timeout"
+                while true; do
+                    _tmp_out=$(mktemp)
+                    set +e
+                    export AWS_PROFILE AWS_REGION
+                    [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && export PREEMPT=true
+                    [ ! -f "$SHARED_TF_TEARDOWN" ] && { log_error "Shared teardown wrapper not found: $SHARED_TF_TEARDOWN"; set -e; failed=true; rm -f "$_tmp_out"; break; }
+                    "$SHARED_TF_TEARDOWN" "$ENVIRONMENT" 2>&1 | tee "$_tmp_out"
+                    r=${PIPESTATUS[0]}
+                    set -e
+                    if [ "$r" -eq 0 ]; then
+                        log_success "Terraform teardown (shared) complete"
+                        rm -f "$_tmp_out"
+                        break
+                    fi
+                    if ! grep -qEi "DependencyViolation|has dependencies and cannot be deleted" "$_tmp_out" 2>/dev/null; then
+                        log_error "Shared destroy failed with non-retryable error"
+                        rm -f "$_tmp_out"
+                        failed=true
+                        [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1
+                        break
+                    fi
+                    now=$(date +%s)
+                    elapsed=$((now - start_time))
+                    if [ "$elapsed" -ge "$wait_timeout" ]; then
+                        log_warning "Shared destroy still failing after ${wait_timeout}s; giving up"
+                        rm -f "$_tmp_out"
+                        failed=true
+                        [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1
+                        break
+                    fi
+                    remaining=$((wait_timeout - elapsed))
+                    log_info "Shared destroy failed (ENI/subnet dependencies); retrying in ${interval}s (timeout in ${remaining}s)..."
+                    rm -f "$_tmp_out"
+                    sleep "$interval"
+                done
+                echo ""
+            else
+                run_terraform_teardown_shared || { failed=true; [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1; }
+            fi
             cleanup_orphaned "ecs" || true
             cleanup_orphaned "eks" || true
             ;;
@@ -391,6 +440,7 @@ main() {
         log_info "DRY-RUN: no resources destroyed"
     elif [ "$failed" = "true" ]; then
         log_warning "Teardown completed with issues; retry or use remove-all-aws-resources as fallback"
+        log_info "Check the output above for STDERR/ERROR. State lock: cd <layer-dir> && terragrunt force-unlock <LOCK_ID>; then re-run."
     else
         log_success "Teardown completed for $ENVIRONMENT (container-type: $CONTAINER_TYPE)"
     fi

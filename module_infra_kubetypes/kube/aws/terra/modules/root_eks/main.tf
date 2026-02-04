@@ -1,5 +1,10 @@
-# EKS Cluster Module
-# Creates: EKS cluster, node groups (or Fargate profiles), OIDC provider, security groups
+# root_eks — Root module for the "eks" Terragrunt layer
+#
+# This directory is the Terraform root for the EKS layer (one terragrunt apply/destroy).
+# It is a composition module: cluster, node groups/Fargate, OIDC, security groups.
+# The root_ prefix marks it as the layer entry point, not a single-service leaf module.
+#
+# Creates: EKS cluster, node groups (or Fargate profiles), OIDC provider, security groups.
 
 # Data source for current AWS account
 data "aws_caller_identity" "current" {}

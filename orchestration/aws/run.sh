@@ -1319,6 +1319,12 @@ main() {
                 # PREEMPT mode: skip confirmation and force destruction
                 destroy_cmd="$destroy_cmd --force"
             fi
+            # Max wait/retry window (s) for shared destroy: teardown retries every 30s on ENI/subnet DependencyViolation until success or this timeout. Override with TEARDOWN_WAIT_BETWEEN_LAYERS=0 to skip.
+            if [ "$DRY_RUN" != "true" ]; then
+                export TEARDOWN_WAIT_BETWEEN_LAYERS="${TEARDOWN_WAIT_BETWEEN_LAYERS:-900}"
+            fi
+            # Preempt: fail on first teardown error (e.g. state lock) instead of continuing; override with TEARDOWN_FAIL_FAST=false to try all steps.
+            export TEARDOWN_FAIL_FAST="${TEARDOWN_FAIL_FAST:-true}"
             
             if $destroy_cmd; then
                 elapsed=$(( $(date +%s) - step_start_time ))

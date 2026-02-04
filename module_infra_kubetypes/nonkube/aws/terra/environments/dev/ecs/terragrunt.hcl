@@ -41,7 +41,7 @@ dependency "infrastructure" {
     s3_delta_table_path          = "s3://fru-dev-analytics-data-999999999999/delta"
   }
   
-  mock_outputs_allowed_terraform_commands = ["validate", "plan", "init", "refresh", "state"]
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "init", "refresh", "state", "destroy"]
 }
 
 # All inputs (dependency-dependent and non-dependent)

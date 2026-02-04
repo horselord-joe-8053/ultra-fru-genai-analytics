@@ -1,5 +1,11 @@
-# ECS Module - Consolidated
-# Combines: ECS Cluster/Service + ALB + Frontend (for ECS deployments)
+# root_ecs — Root module for the "ecs" Terragrunt layer
+#
+# This directory is the Terraform root for the ECS layer (one terragrunt apply/destroy).
+# It is a composition module: ECS cluster/service + ALB (../alb). Frontend (S3/CloudFront)
+# is a separate layer in module_infra_basic (frontend-ecs). The root_ prefix marks this
+# as the layer entry point, not a single-service leaf module.
+#
+# Combines: ECS Cluster/Service + ALB.
 
 # ============================================================================
 # ALB Module

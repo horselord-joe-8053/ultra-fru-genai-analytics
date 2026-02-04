@@ -2,6 +2,12 @@
 # Teardown infrastructure using Terragrunt
 # Idempotent: terragrunt destroy is safe to run multiple times
 # Usage: ./teardown.sh [dev|prod] [infrastructure|ecs|eks|all]
+#
+# State lock: on "Error acquiring the state lock", we parse the lock ID from Terraform
+# output, run terragrunt force-unlock -force <LOCK_ID>, then retry destroy once. Side-effect:
+# force-unlock can corrupt state if another Terraform process is still writing; we use it only
+# after a failed acquire (stale lock from a crashed run), so risk is accepted as a non-interactive
+# fallback. For interactive runs, you can still manually unlock and re-run.
 
 set -e
 
@@ -79,6 +85,69 @@ teardown_terragrunt() {
         exit 1
     fi
     
+    # Run terragrunt destroy; on "Error acquiring the state lock", parse LOCK_ID, force-unlock, then retry
+    # with 30s wait between attempts, up to 2 min total (handles S3 propagation / timing).
+    # Call only when already in the layer directory (e.g. cd "$INFRA_ENV_DIR/frontend-eks" then destroy_with_unlock_fallback "frontend-eks").
+    destroy_with_unlock_fallback() {
+        local layer_name="${1:-unknown}"
+        local tmp_out
+        tmp_out="$(mktemp)"
+        trap "rm -f '$tmp_out'" RETURN
+        local cmd
+        if [ "${PREEMPT:-false}" = "true" ]; then
+            cmd=(terragrunt destroy -- -auto-approve)
+        else
+            cmd=(terragrunt destroy)
+        fi
+        "${cmd[@]}" 2>&1 | tee "$tmp_out"
+        local exit_code=${PIPESTATUS[0]}
+        if [ $exit_code -eq 0 ]; then
+            return 0
+        fi
+        if ! grep -qi "Error acquiring the state lock" "$tmp_out"; then
+            return $exit_code
+        fi
+        log_warning "State lock detected for $layer_name. Attempting force-unlock and retry (30s between retries, 2 min timeout)..."
+        local clean_out
+        clean_out="$(mktemp)"
+        sed -E 's/\x1B\[[0-9;]*[mK]//g' "$tmp_out" > "$clean_out"
+        local lock_id
+        lock_id="$(grep -iE '^[[:space:]]*ID:[[:space:]]+[0-9a-fA-F]{8}-' "$clean_out" | head -1 | grep -Eo '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | head -1)"
+        rm -f "$clean_out"
+        if [ -z "$lock_id" ]; then
+            log_error "Could not parse lock ID from output. Manual unlock: cd $(pwd) && terragrunt force-unlock <LOCK_ID> -force"
+            return $exit_code
+        fi
+        log_info "Parsed lock ID: $lock_id; running terragrunt force-unlock -force $lock_id"
+        if ! terragrunt force-unlock -force "$lock_id" 2>&1; then
+            log_error "force-unlock failed. Manual: cd $(pwd) && terragrunt force-unlock $lock_id -force"
+            return 1
+        fi
+        local retry_start
+        retry_start=$(date +%s)
+        local retry_timeout=120
+        local wait_between=30
+        while true; do
+            sleep 2
+            log_info "Retrying destroy for $layer_name..."
+            "${cmd[@]}" 2>&1 | tee "$tmp_out"
+            exit_code=${PIPESTATUS[0]}
+            if [ $exit_code -eq 0 ]; then
+                return 0
+            fi
+            if ! grep -qi "Error acquiring the state lock" "$tmp_out"; then
+                return $exit_code
+            fi
+            local elapsed=$(($(date +%s) - retry_start))
+            if [ $elapsed -ge $retry_timeout ]; then
+                log_error "Still seeing state lock after ${retry_timeout}s. Manual: cd $(pwd) && terragrunt force-unlock $lock_id -force"
+                return 1
+            fi
+            log_warning "State lock still present (elapsed ${elapsed}s). Waiting ${wait_between}s before next retry..."
+            sleep "$wait_between"
+        done
+    }
+    
     # Destroy in reverse order: frontend first, then application, then infrastructure
     # Frontend (S3 + CloudFront) depends on app layer; app depends on infrastructure
     
@@ -96,10 +165,9 @@ teardown_terragrunt() {
                     read -p "Destroy frontend-ecs (S3, CloudFront)? (yes/no): " confirm
                 fi
                 if [ "$confirm" = "yes" ]; then
-                    if [ "${PREEMPT:-false}" = "true" ]; then
-                        terragrunt destroy -- -auto-approve || { log_error "Frontend-ecs destroy failed"; exit 1; }
-                    else
-                        terragrunt destroy || { log_error "Frontend-ecs destroy failed"; exit 1; }
+                    if ! destroy_with_unlock_fallback "frontend-ecs"; then
+                        log_error "Frontend-ecs destroy failed"
+                        exit 1
                     fi
                     log_success "Frontend-ecs layer destroyed!"
                 fi
@@ -123,10 +191,9 @@ teardown_terragrunt() {
                     read -p "Destroy frontend-eks (S3, CloudFront)? (yes/no): " confirm
                 fi
                 if [ "$confirm" = "yes" ]; then
-                    if [ "${PREEMPT:-false}" = "true" ]; then
-                        terragrunt destroy -- -auto-approve || { log_error "Frontend-eks destroy failed"; exit 1; }
-                    else
-                        terragrunt destroy || { log_error "Frontend-eks destroy failed"; exit 1; }
+                    if ! destroy_with_unlock_fallback "frontend-eks"; then
+                        log_error "Frontend-eks destroy failed"
+                        exit 1
                     fi
                     log_success "Frontend-eks layer destroyed!"
                 fi
@@ -164,16 +231,9 @@ teardown_terragrunt() {
             
             if [ "$confirm" = "yes" ]; then
                 log_info "Destroying application layer..."
-                if [ "${PREEMPT:-false}" = "true" ]; then
-                    if ! terragrunt destroy -- -auto-approve; then
-                        log_error "ECS layer destroy failed. If state lock: cd $ECS_ENV_DIR/ecs && terragrunt force-unlock <LOCK_ID>"
-                        exit 1
-                    fi
-                else
-                    if ! terragrunt destroy; then
-                        log_error "ECS layer destroy failed. If state lock: cd $ECS_ENV_DIR/ecs && terragrunt force-unlock <LOCK_ID>"
-                        exit 1
-                    fi
+                if ! destroy_with_unlock_fallback "ecs"; then
+                    log_error "ECS layer destroy failed. If state lock: cd $ECS_ENV_DIR/ecs && terragrunt force-unlock <LOCK_ID>"
+                    exit 1
                 fi
                 log_success "ECS layer destroyed!"
             else
@@ -222,16 +282,9 @@ teardown_terragrunt() {
             
             if [ "$confirm" = "yes" ]; then
                 log_info "Destroying eks layer..."
-                if [ "${PREEMPT:-false}" = "true" ]; then
-                    if ! terragrunt destroy -- -auto-approve; then
-                        log_error "EKS layer destroy failed. If state lock: cd $EKS_ENV_DIR/eks && terragrunt force-unlock <LOCK_ID>"
-                        exit 1
-                    fi
-                else
-                    if ! terragrunt destroy; then
-                        log_error "EKS layer destroy failed. If state lock: cd $EKS_ENV_DIR/eks && terragrunt force-unlock <LOCK_ID>"
-                        exit 1
-                    fi
+                if ! destroy_with_unlock_fallback "eks"; then
+                    log_error "EKS layer destroy failed. If state lock: cd $EKS_ENV_DIR/eks && terragrunt force-unlock <LOCK_ID>"
+                    exit 1
                 fi
                 log_success "EKS layer destroyed!"
             else
@@ -288,17 +341,10 @@ teardown_terragrunt() {
             
             if [ "$confirm" = "yes" ]; then
                 log_info "Destroying infrastructure layer..."
-                if [ "${PREEMPT:-false}" = "true" ]; then
-                    if ! terragrunt destroy -- -auto-approve; then
-                        log_error "Infrastructure layer destroy failed. Check Terraform output above."
-                        if terragrunt state list 2>/dev/null | head -5 | while IFS= read -r line; do log_info "  $line"; done; then true; fi
-                        exit 1
-                    fi
-                else
-                    if ! terragrunt destroy; then
-                        log_error "Infrastructure layer destroy failed."
-                        exit 1
-                    fi
+                if ! destroy_with_unlock_fallback "infrastructure"; then
+                    log_error "Infrastructure layer destroy failed. Check Terraform output above."
+                    if terragrunt state list 2>/dev/null | head -5 | while IFS= read -r line; do log_info "  $line"; done; then true; fi
+                    exit 1
                 fi
                 log_success "Infrastructure layer destroyed."
             else

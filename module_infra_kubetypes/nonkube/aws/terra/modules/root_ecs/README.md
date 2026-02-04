@@ -1,4 +1,12 @@
-# ECS Module
+# root_ecs
+
+**Root/composition module** for the **ecs** Terragrunt layer. One `terragrunt apply` or `terragrunt destroy` for the ecs layer runs Terraform with this directory as the root.
+
+## Why "root_"?
+
+Unlike leaf modules (e.g. `alb/`), this module is the **entry point** for the whole ECS layer: cluster, service, task definition, and ALB (via `../alb`). Frontend (S3/CloudFront) lives in a separate layer (`frontend-ecs` in module_infra_basic). The `root_` prefix marks this as the layer root.
+
+## What it creates
 
 Creates an ECS Fargate service with proper security practices: secrets from Secrets Manager, separate execution/runtime roles.
 
@@ -11,9 +19,11 @@ Creates an ECS Fargate service with proper security practices: secrets from Secr
 
 ## Usage
 
+Used by Terragrunt as the root for the ecs layer (`source = ".../modules//root_ecs"`). If calling as a module:
+
 ```hcl
 module "ecs" {
-  source = "../../modules/ecs"
+  source = "../../modules/root_ecs"
 
   project_name                = "fru"
   environment                 = "prod"

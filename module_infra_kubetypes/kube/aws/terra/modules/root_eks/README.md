@@ -1,4 +1,12 @@
-# EKS Module
+# root_eks
+
+**Root/composition module** for the **eks** Terragrunt layer. One `terragrunt apply` or `terragrunt destroy` for the eks layer runs Terraform with this directory as the root.
+
+## Why "root_"?
+
+Unlike leaf modules that map to one AWS service, this module is the **entry point** for the whole EKS layer: cluster, node groups or Fargate, OIDC, security groups. The `root_` prefix marks it as the layer root so it's not confused with a single-resource module.
+
+## What it creates
 
 This module creates an Amazon EKS (Elastic Kubernetes Service) cluster with either Fargate profiles or managed node groups.
 
@@ -31,9 +39,11 @@ This module creates an Amazon EKS (Elastic Kubernetes Service) cluster with eith
 
 ## Usage
 
+Used by Terragrunt as the root for the eks layer (`source = ".../modules//root_eks"`). If calling as a module (e.g. from another root), use:
+
 ```hcl
 module "eks" {
-  source = "../eks"
+  source = "../root_eks"
 
   project_name      = "fru"
   environment       = "dev"

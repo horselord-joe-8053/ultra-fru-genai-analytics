@@ -35,7 +35,7 @@ dependency "infrastructure" {
     s3_delta_table_path       = "s3://fru-prod-analytics-data-999999999999/delta"
   }
   
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "init", "refresh", "state", "destroy"]
 }
 
 # Merge base template inputs with dependency-dependent inputs

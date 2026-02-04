@@ -199,4 +199,67 @@ So **“layers”** are the knobs we turn to decide **what is applied together**
 
 ---
 
+## 6. Terra directory layout and cache
+
+### 6.1 All `terra` directories in this project
+
+| Path | Purpose |
+|------|--------|
+| `module_infra_basic/aws/terra/` | Infra + frontend + longterm: environments (dev/prod), `_component` bases, and **modules/** (root_infrastructure, frontend, secrets-manager, vpc, aurora, iam, s3-data). |
+| `module_infra_kubetypes/kube/aws/terra/` | EKS app layer: environments (dev/prod) and **modules/root_eks** only. |
+| `module_infra_kubetypes/nonkube/aws/terra/` | ECS app layer: environments (dev/prod) and **modules/root_ecs**, **modules/alb** only. |
+
+Layer config lives under each `terra/environments/` (e.g. `dev/infrastructure/terragrunt.hcl`). The actual Terraform `.tf` source lives under each `terra/modules/<name>/`.
+
+### 6.2 Why there is no `frontend` under kube/nonkube `modules/`
+
+The **frontend** Terraform module (S3 + CloudFront) lives only in **`module_infra_basic/aws/terra/modules/frontend`**. The frontend **layers** (e.g. `frontend-eks`, `frontend-ecs`) are defined in **`module_infra_basic/aws/terra/environments/dev|prod/frontend-eks|frontend-ecs/`** and use `_component/frontend-base.hcl`, which sets `source = ".../modules//frontend"` relative to that repo path. So:
+
+- **Kube** `terra` has only **modules/root_eks** (EKS cluster, node group, etc.).
+- **Nonkube** `terra` has only **modules/root_ecs** and **modules/alb**.
+
+There is no `modules/frontend` under kube or nonkube in this repo. If you see a `frontend`-like directory under `module_infra_kubetypes/.../terra/modules/`, it is likely from a **Terragrunt cache** (e.g. a run that used a different `download_dir`) or from another project; it is not part of the committed layout.
+
+### 6.3 Why the infrastructure layer can use `../vpc`, `../aurora`, etc.
+
+`infrastructure-base.hcl` sets `source = ".../modules//root_infrastructure"`. The **double slash `//`** is what makes this work:
+
+- Terragrunt copies **everything in the path before `//`** into the cache — i.e. the **entire** `modules/` directory (root_infrastructure, vpc, aurora, iam, s3-data, secrets-manager, frontend, …), not just the `root_infrastructure` subdir.
+- The part **after** `//` (`root_infrastructure`) is the **subdirectory used as the Terraform root** in that copy.
+
+So the cache for the infrastructure layer gets the full `modules/` tree. Terraform runs with working root = that copy’s `root_infrastructure/` subdir. From `modules/root_infrastructure/main.tf`, paths like `source = "../vpc"` and `source = "../aurora"` resolve to sibling dirs in that same copied tree. Without the `//`, Terragrunt would copy only `root_infrastructure/`, and those relative paths would break. (See [Terragrunt double-slash](https://awstip.com/terragrunt-double-slash-411dbd9a93c4).)
+
+### 6.4 Option B and the cache: how the division appears
+
+We use a shared **download_dir** so all layers cache under one tree:
+
+- `download_dir = "${get_path_to_repo_root()}/temp_terra_gen/.terragrunt-cache/${local.env_name}/${local.layer_name}"`
+
+So you get **sibling** cache dirs, for example:
+
+- `temp_terra_gen/.terragrunt-cache/dev/infrastructure`
+- `temp_terra_gen/.terragrunt-cache/dev/infrastructure-longterm`
+
+The **division** is not by parent path (both are under `dev/`) but by **layer name** and **source**:
+
+- **infrastructure** layer: `source = ".../modules//root_infrastructure"` → Terragrunt copies the whole `modules/` dir; Terraform root is `root_infrastructure/` (which references ../vpc, ../aurora, etc.). No Secrets Manager in this layer. State key: `dev/infrastructure/terraform.tfstate`.
+- **infrastructure-longterm** layer: `source = ".../modules//secrets-manager"` → same idea; Terraform root is `secrets-manager/`. State key: `dev/infrastructure-longterm/terraform.tfstate`.
+
+So Option B is implemented: two layers, two state files, two different roots into the same repo `modules/` tree. Main teardown only runs destroy for the **infrastructure** layer and never for **infrastructure-longterm**.
+
+### 6.5 Leaf vs composition modules (root_infrastructure, root_eks, root_ecs)
+
+Some modules map to **one concrete AWS surface** (VPC, IAM, S3, ALB); others are **composition** modules that group many resources (and sometimes call leaf modules) for one **layer**:
+
+| Module | Type | What it is |
+|--------|------|------------|
+| **vpc**, **iam**, **aurora**, **s3-data**, **alb**, **frontend**, **secrets-manager** | Leaf | One concern: one main AWS “thing” (VPC, IAM roles, Aurora cluster, S3 bucket, ALB, S3+CloudFront, Secrets Manager). |
+| **root_infrastructure** | Composition | The “ephemeral infra” layer: wires VPC + Aurora + IAM + S3 (via `../vpc`, `../aurora`, etc.) and reads longterm state. One Terragrunt layer = one apply/destroy. |
+| **root_eks** | Composition | The “EKS app” layer: cluster + node groups + OIDC + security groups + Fargate, etc. One layer for the whole EKS footprint. |
+| **root_ecs** | Composition | The “ECS app” layer: cluster + service + task def + ALB (via `../alb`) + security groups. One layer for the whole ECS footprint. |
+
+The root_* modules are “abstract” by design: they are the **root module for that layer** (composition entry point), not a single AWS product. This split (leaf modules for one concern, one root composition per layer) is a common and valid pattern.
+
+---
+
 *This doc: `docs/learned/TERRA_LEARNED.md`. Related: [VPC_LEARNED.md](VPC_LEARNED.md), [DEPLOYMENT_ERRORS_AND_FIXES.md](../DEPLOYMENT_ERRORS_AND_FIXES.md), [README_WAR_STORIES.md](../../README_WAR_STORIES.md).*

@@ -1,6 +1,11 @@
-# Infrastructure Layer (ephemeral: VPC, Aurora, IAM, S3).
-# Secrets Manager lives in the infrastructure-longterm layer; we read secret ARNs via remote_state.
-# Main teardown destroys this layer only; longterm is never destroyed (Option B).
+# root_infrastructure — Root module for the "infrastructure" Terragrunt layer
+#
+# This directory is the Terraform root for the infrastructure layer (one terragrunt apply/destroy).
+# It is a composition module: it wires leaf modules (vpc, aurora, iam, s3_data) and reads
+# infrastructure-longterm state. Do not confuse with leaf modules (vpc, iam, etc.).
+#
+# Ephemeral: VPC, Aurora, IAM, S3. Secrets Manager lives in infrastructure-longterm;
+# we read secret ARNs via remote_state. Main teardown destroys this layer only (Option B).
 
 # Long-term layer state: secret ARNs. Do not destroy that layer in main teardown (docs/learned/TERRA_LEARNED.md Option B).
 data "terraform_remote_state" "longterm" {

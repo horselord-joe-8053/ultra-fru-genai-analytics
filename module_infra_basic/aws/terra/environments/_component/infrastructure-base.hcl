@@ -10,7 +10,7 @@ locals {
 }
 
 terraform {
-  source = "${get_terragrunt_dir()}/../../../modules//infrastructure"
+  source = "${get_terragrunt_dir()}/../../../modules//root_infrastructure"
 }
 
 download_dir = "${get_path_to_repo_root()}/temp_terra_gen/.terragrunt-cache/${local.env_name}/${local.layer_name}"
