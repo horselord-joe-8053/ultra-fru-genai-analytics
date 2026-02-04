@@ -82,40 +82,57 @@ deploy_frontend() {
     # Load environment variables
     load_env_file
     
-    # Use admin profile for infrastructure operations (S3)
+    # Use admin profile for infrastructure operations (S3 and Terragrunt state)
     AWS_PROFILE="${AWS_PROFILE:-admin}"
+    AWS_REGION="${AWS_REGION:-us-east-1}"
+    export AWS_PROFILE AWS_REGION
     log_info "Using AWS profile: $AWS_PROFILE (for infrastructure operations)"
     
     # Get S3 bucket name from Terraform outputs (frontend-ecs / frontend-eks layer in module_infra_basic)
-    CONTAINER_TYPE="${CONTAINER_TYPE:-ecs}"
+    # When CONTAINER_TYPE is set (from run.sh), use that layer; when run standalone, try frontend-eks then frontend-ecs.
+    CONTAINER_TYPE="${CONTAINER_TYPE:-}"
+    # CONTAINER_TYPE must be set (eks or ecs) so we know which frontend layer to use.
+    if [ -z "${CONTAINER_TYPE:-}" ]; then
+        log_error "CONTAINER_TYPE is not set. Set CONTAINER_TYPE=eks or CONTAINER_TYPE=ecs before running deploy-frontend."
+        return 1
+    fi
     if [ "$CONTAINER_TYPE" = "eks" ]; then
-        FRONTEND_TERRA_DIR="$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT/frontend-eks"
+        FRONTEND_TERRA_DIRS=("$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT/frontend-eks")
+    elif [ "$CONTAINER_TYPE" = "ecs" ]; then
+        FRONTEND_TERRA_DIRS=("$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT/frontend-ecs")
     else
-        FRONTEND_TERRA_DIR="$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT/frontend-ecs"
+        log_error "CONTAINER_TYPE must be 'eks' or 'ecs', got: $CONTAINER_TYPE"
+        return 1
     fi
     
     local s3_bucket_name=""
-    if [ -d "$FRONTEND_TERRA_DIR" ] && command_exists terragrunt; then
+    if command_exists terragrunt; then
         ORIG_DIR=$(pwd)
-        cd "$FRONTEND_TERRA_DIR" 2>/dev/null || {
-            log_error "Could not access Terraform frontend directory: $FRONTEND_TERRA_DIR"
-            log_error "Frontend layer (frontend-ecs or frontend-eks) must be deployed first"
+        for FRONTEND_TERRA_DIR in "${FRONTEND_TERRA_DIRS[@]}"; do
+            if [ ! -d "$FRONTEND_TERRA_DIR" ]; then
+                continue
+            fi
+            if ! cd "$FRONTEND_TERRA_DIR" 2>/dev/null; then
+                continue
+            fi
+            # terragrunt output -raw prints value with NO trailing newline; grep '^...$' fails. Capture raw and trim.
+            s3_bucket_name=$(terragrunt output -raw s3_bucket_id 2>/dev/null) || true
+            cd "$ORIG_DIR" 2>/dev/null || true
+            s3_bucket_name=$(printf '%s' "$s3_bucket_name" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            if [[ -n "$s3_bucket_name" && "$s3_bucket_name" =~ ^[a-zA-Z0-9._-]{1,255}$ ]]; then
+                break
+            fi
+            s3_bucket_name=""
+        done
+        if [ -z "$s3_bucket_name" ]; then
+            log_error "Terraform frontend directory not found or s3_bucket_id output missing in: ${FRONTEND_TERRA_DIRS[*]}"
+            log_info "Frontend layer (frontend-ecs or frontend-eks) must be deployed first"
             log_info "Deploy with: ./run.sh aws kube $ENVIRONMENT  (EKS) or ./run.sh aws nonkube $ENVIRONMENT  (ECS)"
+            log_info "Standalone: CONTAINER_TYPE=eks $REPO_ROOT/module_infra_basic/aws/deploy-frontend.sh  (or CONTAINER_TYPE=ecs for ECS)"
             exit 1
-        }
-        # Capture stdout and stderr; some terragrunt versions write to stderr. Accept only a line that is a valid S3 bucket name; take last match in case of leading warnings.
-        s3_bucket_name=$(terragrunt output -raw s3_bucket_id 2>&1 | grep -oE '^[a-zA-Z0-9.\-_]{1,255}$' | tail -1 || echo "")
-        cd "$ORIG_DIR" 2>/dev/null || true
-        # If terragrunt returned a warning (e.g. "No outputs found") instead of a bucket name, we already filtered to valid pattern above
+        fi
     else
-        if [ ! -d "$FRONTEND_TERRA_DIR" ]; then
-            log_error "Terraform frontend directory not found: $FRONTEND_TERRA_DIR"
-        fi
-        if ! command_exists terragrunt; then
-            log_error "Terragrunt is not installed or not in PATH"
-        fi
-        log_error "Cannot get S3 bucket name from Terraform"
-        log_info "Frontend layer (frontend-ecs or frontend-eks) must be deployed first"
+        log_error "Terragrunt is not installed or not in PATH"
         log_info "Deploy with: ./run.sh aws kube $ENVIRONMENT  (EKS) or ./run.sh aws nonkube $ENVIRONMENT  (ECS)"
         exit 1
     fi

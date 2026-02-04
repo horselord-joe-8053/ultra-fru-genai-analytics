@@ -28,12 +28,13 @@ fi
 
 # Use Python helper (single source of truth for verification logic)
 # Fall back to AWS CLI if Python/boto3 is not available
-REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../../.." && pwd)}"
+# From helpers/ we need 4 levels up to repo root (helpers -> delta-lake -> common -> module_infra_spark -> repo_root)
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)}"
 source "$REPO_ROOT/orchestration/common/env/load-python-env.sh"
 
-# Try Python verification first using CLI function with enhanced error handling
+# Try Python verification first; PYTHONPATH so spark_jobs (under module_app_core) is found
 # Exit codes: 0 = exists, 1 = not exists, 2 = error (fallback needed)
-PYTHON_OUTPUT=$("$PYTHON_CMD" -m spark_jobs.utils.verify_delta_table \
+PYTHON_OUTPUT=$(PYTHONPATH="${REPO_ROOT}/module_app_core" "$PYTHON_CMD" -m spark_jobs.utils.verify_delta_table \
     "$PATH_TO_CHECK" \
     "$REPO_ROOT" \
     "$IS_ECS" \

@@ -53,7 +53,7 @@ graph TB
 
 3. **Ingress Resource** (`fru-api-ingress-dev`)
    - Kubernetes Ingress resource that defines routing rules
-   - Uses `ingressClassName: nginx` to route through NGINX Ingress Controller
+   - Uses `ingressClassName: fru-nginx-cls` to route through NGINX Ingress Controller
    - Routes paths (`/query`, `/analytics`, `/health`, `/version`) to the `fru-api` Service
    - **Location**: `infra/k8s/templates/ingress.template.yaml`
 

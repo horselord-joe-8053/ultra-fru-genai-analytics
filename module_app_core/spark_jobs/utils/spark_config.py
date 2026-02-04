@@ -10,10 +10,14 @@ def get_s3a_spark_config() -> List[str]:
     """
     Returns S3A configuration flags for Spark.
     These are required for Spark to access S3 via S3A filesystem.
+
+    All time/interval values must be numeric (e.g. milliseconds or seconds). Hadoop/S3A
+    rejects duration strings like "30s" or "60s" and throws NumberFormatException.
     """
     return [
         "--conf", "spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem",
-        "--conf", "spark.hadoop.fs.s3a.aws.credentials.provider=org.apache.hadoop.fs.s3a.auth.IAMInstanceCredentialsProvider",
+        # Chain: try env vars first (EKS with static creds), then instance metadata (ECS task role)
+        "--conf", "spark.hadoop.fs.s3a.aws.credentials.provider=com.amazonaws.auth.EnvironmentVariableCredentialsProvider,org.apache.hadoop.fs.s3a.auth.IAMInstanceCredentialsProvider",
         "--conf", "spark.hadoop.fs.s3a.connection.timeout=60000",
         "--conf", "spark.hadoop.fs.s3a.connection.establish.timeout=5000",
         "--conf", "spark.hadoop.fs.s3a.connection.maximum=15",

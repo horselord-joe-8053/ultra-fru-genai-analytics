@@ -26,6 +26,11 @@ data:
   enable-analytics-scheduler: "${ENABLE_ANALYTICS_SCHEDULER}"
   analytics-scheduler-interval-seconds: "${ANALYTICS_SCHEDULER_INTERVAL_SECONDS}"
   
+  # Spark batch analytics (required when ENABLE_ANALYTICS_SCHEDULER=true)
+  delta-table-path: "${DELTA_TABLE_PATH}"
+  container-type: "${CONTAINER_TYPE}"
+  delta-lake-package: "${DELTA_LAKE_PACKAGE}"
+  
   # CORS configuration
   allowed-origins: "${ALLOWED_ORIGINS}"
 

@@ -47,19 +47,19 @@ def run_spark_analytics():
         # Detect if path is S3-based (AWS deployments use S3)
         is_s3_based = delta_path.startswith('s3://') or delta_path.startswith('s3a://')
         
-        # Validate: CONTAINER_TYPE must match path type (fail-fast)
-        if is_ecs_deployment != is_s3_based:
-            if is_ecs_deployment and not is_s3_based:
+        # Validate: AWS deployments (ECS/EKS) need S3 path; non-AWS need local path
+        if is_aws_deployment != is_s3_based:
+            if is_aws_deployment and not is_s3_based:
                 error_msg = (
-                    f"Configuration mismatch: CONTAINER_TYPE={container_type} indicates ECS deployment, "
+                    f"Configuration mismatch: CONTAINER_TYPE={container_type} indicates AWS deployment, "
                     f"but DELTA_TABLE_PATH={delta_path} is not an S3 path (should start with s3:// or s3a://). "
-                    f"Please ensure DELTA_TABLE_PATH is set to an S3 path for ECS deployments."
+                    f"Please ensure DELTA_TABLE_PATH is set to an S3 path for ECS/EKS deployments."
                 )
-            elif not is_ecs_deployment and is_s3_based:
+            elif not is_aws_deployment and is_s3_based:
                 error_msg = (
                     f"Configuration mismatch: DELTA_TABLE_PATH={delta_path} is an S3 path, "
-                    f"but CONTAINER_TYPE={container_type or '(not set)'} does not indicate ECS deployment. "
-                    f"For ECS deployments, CONTAINER_TYPE should be set to 'ecs' via Terraform."
+                    f"but CONTAINER_TYPE={container_type or '(not set)'} does not indicate ECS/EKS. "
+                    f"For AWS deployments, CONTAINER_TYPE should be set to 'ecs' or 'eks'."
                 )
             else:
                 error_msg = f"Configuration mismatch: CONTAINER_TYPE={container_type}, DELTA_TABLE_PATH={delta_path}"
@@ -116,7 +116,7 @@ def run_spark_analytics():
         cmd = [spark_submit, "--packages", spark_packages]
         
         # Add S3A configuration for AWS deployments (required for S3 access)
-        if is_ecs_deployment:
+        if is_aws_deployment:
             cmd.extend(get_s3a_spark_config())
             logger.info("Added S3A configuration for AWS S3 access")
         

@@ -665,7 +665,7 @@ We use K8s as the owner for the EKS LB because **using Terraform to create and m
 ### 15.4 Resolution
 
 - **ECS:** Kept ALB (and target group, listeners, SGs) in Terraform. No change—this is the standard pattern for ECS.
-- **EKS:** Kept LB creation out of Terraform. Terraform creates the EKS cluster only. The deploy pipeline (Helm/kubectl) deploys the Ingress controller and its Service; AWS creates the NLB. Scripts (e.g. `update-cloudfront-loadbalancer-simple.sh`) wait for the K8s Service's LoadBalancer hostname and then that DNS is used by the frontend-eks Terraform (e.g. `alb_dns_name`) for CloudFront origin. No Terraform Kubernetes provider for the LB.
+- **EKS:** Kept LB creation out of Terraform. Terraform creates the EKS cluster only. The deploy pipeline (Helm/kubectl) deploys the Ingress controller and its Service; AWS creates the NLB. The canonical path is to update CloudFront’s API origin using `update-cloudfront-loadbalancer.sh` (called by `kube/aws/deploy.sh`) after the Ingress hostname is available. No Terraform Kubernetes provider for the LB.
 - **Documentation:** Captured the split and the rationale so future changes don't accidentally push EKS LB into Terraform (Kubernetes provider) or ECS ALB into a non-Terraform path.
 
 ### 15.5 Takeaway
@@ -856,33 +856,241 @@ This appears during Phase 2 (Deploy infrastructure layer) after a preempt or tea
 ### 19.4 Option A (Current): Fail-Back with state-rm
 
 | Aspect | Description |
-|--------|-------------|
-| **Idea** | Keep Secrets Manager in the **same** infrastructure layer. Use `prevent_destroy` so normal destroy doesn't delete secrets. When PREEMPT=true, **state rm** the protected resources and re-run destroy so the rest (VPC, Aurora, subnet group) are removed. |
-| **Pros** | No Terraform refactor. One layer, one place to maintain. |
-| **Cons** | Teardown script has extra logic (state rm + second destroy). List of state addresses must be kept in sync if secrets change. prevent_destroy blocks the **entire** destroy until we work around it. |
-| **Goal achievable?** | Yes. `./run.sh aws kube dev --preempt` works with the current code (import before destroy + state-rm workaround). |
+|---
 
-### 19.5 Option B: Separate Long-Term Layer (Recommended for Clean Design)
+## 20. CONTAINER_IMAGE After Phase 1: Background Job vs Main Shell When Using --skip-build
 
-| Aspect | Description |
-|--------|-------------|
-| **Idea** | Put long-term components (Secrets Manager) in a **separate** Terragrunt layer (e.g. `infrastructure-longterm`). That layer has its **own** state and directory. **Deploy:** apply longterm first, then infrastructure. **Teardown:** only destroy the infrastructure layer; **never** destroy the longterm layer in the main flow. Optional: dedicated `teardown-longterm.sh` for explicit destruction when needed. |
-| **Pros** | Teardown stays simple: "destroy infrastructure" never touches Secrets Manager. No prevent_destroy or state-rm in the main path. Clear split: ephemeral infra (VPC, Aurora, IAM) vs long-term (Secrets). |
-| **Cons** | Requires refactor: new layer directory, move secrets out of infrastructure module, wire deploy order and (e.g.) `terraform_remote_state` for secret ARNs. |
-| **Goal achievable?** | Yes. After refactor, `./run.sh aws kube dev --preempt` runs without any state-rm workaround; infrastructure destroy removes VPC, Aurora, subnet group in one pass. |
+**creation:** `<260202>`
+**last_updated:** `<260202>`
 
-See **docs/learned/TERRA_LEARNED.md** §3 (Option B) and **docs/learned/REFACTOR_PLAN_OPTION_B_SEPARATE_LONGTERM_LAYER.md** for a full refactor plan.
+**keywords:** CONTAINER_IMAGE, --skip-build, ECR, latest tag, background process, Delta table, image not found, orchestration
+**difficulty:** 7
+**significance:** 8
 
-### 19.6 VPC/Subnet "Option B" (Different Concept)
+### 20.1 Context
 
-In **docs/learned/VPC_LEARNED.md** §3.2, **Option B — Import** refers to **importing** the existing VPC and subnet group into Terraform state so Terraform "owns" them and doesn't try to create a second VPC or change the subnet group. That is a **state alignment** fix (keep one VPC, align state to it). It is **not** the same as "Option B: separate long-term layer" (which is about **layer split** for Secrets Manager). Both are valid; the names are reused in different docs for different options.
+With `./run.sh aws kube dev --skip-build`, Phase 1 (check_or_build_image) correctly set `CONTAINER_IMAGE` to the ECR `latest` image and skipped build/push. Later, Delta table creation (Phase 5) failed with "image not found" for a **different** tag (e.g. `fru_dev_..._dirty_20260202_200059`). The same image identifier must be used for the whole run (Terraform, Delta, k8s); otherwise downstream steps try to pull an image that was never built.
 
-### 19.7 Takeaway
+### 20.2 Root Cause
 
-To fix "The new Subnets are not in the same Vpc as the existing subnet group":
+1. **Startup:** At script startup, `load_image_identifiers "aws"` runs and sets `CONTAINER_IMAGE` via `resolve_container_image_for_aws`, which produces a **new** tag (commit + timestamp, e.g. `..._200059`). So the main shell had `CONTAINER_IMAGE` = that new tag from the start.
 
-1. **Align state and reality:** Import before destroy so teardown can remove orphaned resources; use preempt with `--container-type all` so shared infra is torn down.
-2. **Handle prevent_destroy:** Either **Option A** — state rm + re-destroy when PREEMPT=true (current), or **Option B** — move Secrets Manager to a separate layer that is never destroyed in the main flow (refactor).
-3. After either approach, **`./run.sh aws kube dev --preempt`** can run problem-free. Option B simplifies teardown and avoids maintaining a state-rm list; see the refactor plan for implementation steps.
+2. **Phase 1 in background:** Phase 1 runs in a **background** process (`deploy_phase_check_image ... &`). In that process, with `--skip-build`, we set `CONTAINER_IMAGE` to `ECR:latest` and logged it. That only affected the background process; the main shell never saw it.
+
+3. **After Phase 1:** The main script only overwrote `CONTAINER_IMAGE` when it was **empty**. It was not empty (still the startup value), so we kept the **startup** tag and never used the value Phase 1 had actually used.
+
+4. **Phase 5 (Delta):** Data-lake setup and `run-spark-job-docker-ecr.sh` use `CONTAINER_IMAGE` from the environment. They received the main shell’s value—the **startup** tag that was never built—so `docker run` failed with "image not found".
+
+So the bug was not in Delta or in --skip-build logic per se; it was that the **main shell** never adopted the image identifier that Phase 1 (running in the background) had set and logged.
+
+### 20.3 Key Insight
+
+> When a long-running step runs in a **background** process, any variables it sets (e.g. CONTAINER_IMAGE) are not visible in the parent. The parent must either (1) get that value from the child’s output (e.g. extract from logs) and set it in the main shell, or (2) not run that step in background. Prefer extracting the canonical value from the step’s output so the rest of the pipeline uses exactly what that step used (e.g. ECR:latest when --skip-build).
+
+### 20.4 Resolution
+
+- **After Phase 1:** In `orchestration/aws/run.sh`, after the Phase 1 background job completes, we now **always** try to extract `CONTAINER_IMAGE` from the Phase 1 output (lines matching `CONTAINER_IMAGE=`, `Using container image:`, or `Using CONTAINER_IMAGE:`). If we find a match, we set and export that value in the main shell; only if we find nothing do we keep the current value or regenerate. So the rest of the run (Terraform, Delta, k8s) uses the **same** image Phase 1 used (e.g. `ECR:latest` when --skip-build, or the built tag when we built).
+
+- **--skip-build semantics:** We also standardized on: with `--skip-build`, Phase 1 sets `CONTAINER_IMAGE` to `ECR_REPO_URI:latest` and fails fast if the `latest` tag is not present in ECR. The build-push script was updated so that after every successful build it **must** push the `latest` tag (script exits with failure if that push fails), guaranteeing that a successful first run leaves `latest` in ECR for future --skip-build runs.
+
+- **Grep pattern:** The extraction pattern was updated to match the log line emitted in the --skip-build path (`Using CONTAINER_IMAGE: ...`) so that path is captured correctly.
+
+### 20.5 Takeaway
+
+If a step that "sets the canonical value" for the rest of the pipeline (e.g. CONTAINER_IMAGE) runs in a **background** process, the parent must **adopt** that value from the child’s output (e.g. by parsing logs) and set it in the main shell. Do not assume "if CONTAINER_IMAGE is already set, leave it"—the existing value may be from an earlier phase (e.g. startup) and wrong for downstream. Prefer "extract from the step that actually chose the image; use that for the rest of the run." For --skip-build, use a single, well-defined tag (e.g. ECR:latest) and ensure the build path always updates that tag so --skip-build is reliable.
+
+---
+
+## 21. S3A NumberFormatException ("30s" / "60s") — Why It Resurfaced After Refactor
+
+### 21.1 What Happened
+
+During Delta table creation (Phase 5), Spark failed with `NumberFormatException: For input string: "60s"` and later `"30s"`. Hadoop/S3A expects **numeric** values (e.g. milliseconds or seconds) for time-related config; Spark or Hadoop defaults were supplying duration **strings** like `"30s"` / `"60s"`, which the S3A client cannot parse.
+
+### 21.2 Why It Worked Before and Resurfaced
+
+- **Before refactor:** Data-lake setup used `EXECUTION_METHOD=ecs_task` and called **run-spark-job-aws.sh**. That script gets S3A config from the **Python** helper `get_s3a_spark_config()` (in `spark_jobs/utils/spark_config.py`), which sets **all** time-related params to **numeric** values (e.g. `connection.establish.timeout=5000`, `threads.keepalivetime=60`). So the ECS path never hit duration-string defaults.
+
+- **After refactor:** Setup was changed to `EXECUTION_METHOD=docker_ecr` and **run-spark-job-docker-ecr.sh**. The refactor plan said "get S3A config from existing Python helper," but the **implementation** built a **minimal inline** S3A config in shell (impl, credentials provider, connection.timeout only) so it could use `DefaultAWSCredentialsProviderChain` for local Docker. That path **did not** use the Python helper, so it never got the full set of numeric overrides. Spark/Hadoop defaults (with `"30s"` / `"60s"`) were used → NumberFormatException resurfaced.
+
+So the bug was **fixed once** in the Python single source of truth, but a **new code path** (Docker ECR) duplicated config in shell and lost those overrides.
+
+### 21.3 Resolution
+
+1. **Single source of truth:** `run-spark-job-docker-ecr.sh` now gets full S3A config from **Python** `get_s3a_spark_config()`, then overrides only the credentials provider to `DefaultAWSCredentialsProviderChain` for local Docker. All time-related params (and any future ones) stay numeric and come from one place.
+
+2. **Fallback:** If the Python helper is unavailable, the script falls back to an inline config that includes **numeric** overrides for `connection.establish.timeout`, `threads.keepalivetime`, and `connection.timeout`.
+
+3. **Other call sites:** `temp_delta_oneoff_fix.sh` was updated with the same numeric overrides. Any script that builds S3A config without calling the Python helper must use numeric values for every time/interval parameter (see `spark_config.py` docstring).
+
+4. **Documentation:** `spark_config.get_s3a_spark_config()` docstring now states that all time/interval values must be numeric; Hadoop rejects duration strings.
+
+### 21.4 Takeaway
+
+When you introduce a **new code path** that does the same job as an existing one (e.g. Docker ECR vs ECS for Delta), reuse the **same** source of config (e.g. Python helper) instead of reimplementing a minimal version. Reimplementing leads to drift (e.g. missing numeric overrides) and resurfacing of bugs that were already fixed elsewhere. For S3A/Hadoop, **all** time-related config must be numeric (no `"30s"` / `"60s"`); keep that in one place and reference it everywhere.
+
+---
+
+## 22. Spark/Delta Job: From ECS-Dependent to Local Fat Image (EKS/ECS-Independent)
+
+### 22.1 What Happened
+
+The one-off Spark job that creates the Delta table (CSV → Delta in S3) used to run **only on ECS** (ECS Run Task). After a major refactor, it runs **on the operator’s local machine** inside Docker, using the same ECR image. That made Delta creation work for **EKS-only** (no ECS) but introduced a heavy local dependency: pull and run a fat image (Spark, Java, Hadoop, app) on your laptop.
+
+### 22.2 Before the Refactor
+
+- **Where it ran:** ECS. `EXECUTION_METHOD=ecs_task` → `run-spark-job-aws.sh` → **ECS Run Task** with the app image. The Spark job ran **in AWS** as a one-off ECS task.
+- **Dependency:** You **had to have an ECS cluster**. For **ECS** deploys (`aws nonkube`), that was fine. For **EKS-only** (`aws kube`), there was no ECS cluster to run the task, so **Delta table creation failed** unless you also stood up ECS just for this step.
+- **Image:** Same app image (API + Spark) ran in ECS for the task; no local Docker needed.
+
+```mermaid
+%%{init: {'theme':'base', 'themeVariables': {'fontSize':'10px'}}}%%
+flowchart LR
+  subgraph local[" "]
+    direction TB
+    A[run.sh]
+    B[setup-and-verify]
+    C[create-delta-table<br/>ecs_task]
+    D[run-spark-job-aws.sh]
+    A --> B --> C --> D
+  end
+  D --> E
+  F --> E
+  E --> G
+  subgraph aws["AWS"]
+    E[ECS Run Task<br/>fat image]
+    F[(S3 CSV)]
+    G[(S3 Delta)]
+  end
+  style local fill:#fff3e0
+  style aws fill:#ffebee
+  style E fill:#ef5350,color:#fff
+```
+
+### 22.3 After the Refactor
+
+- **Where it runs:** **Local Docker.** `EXECUTION_METHOD=docker_ecr` → `run-spark-job-docker-ecr.sh` → `docker run ... $CONTAINER_IMAGE /bin/sh -c "spark-submit ... ingest_delta.py <s3a-in> <s3a-out>"`. The job runs **once** on the operator’s machine; CSV and Delta live in S3, so only compute is local.
+- **Dependency:** **Independent of EKS and ECS.** One code path for both `aws kube` and `aws nonkube`. No ECS cluster required for EKS-only.
+- **Tradeoff:** The image is **fat** (Java, Spark, Hadoop, Python, backend, spark_jobs). You must **pull** it from ECR and **run** it locally. If the raw CSV changes and you want to refresh the Delta table, you re-run the same step (or later, a scheduled job in AWS); you don’t need the VM or Docker running 24/7, only when you actually run the job.
+
+```mermaid
+%%{init: {'theme':'base', 'themeVariables': {'fontSize':'10px'}}}%%
+flowchart LR
+  subgraph local["Operator machine"]
+    direction TB
+    A[run.sh]
+    B[setup-and-verify]
+    C[create-delta-table<br/>docker_ecr]
+    D[run-spark-job-docker-ecr.sh]
+    E[docker run<br/>fat image]
+    A --> B --> C --> D --> E
+  end
+  G --> E
+  E --> H
+  subgraph aws["AWS"]
+    G[(S3 CSV)]
+    H[(S3 Delta)]
+  end
+  style local fill:#e8f5e9
+  style aws fill:#e3f2fd
+  style E fill:#2e7d32,color:#fff
+```
+
+### 22.4 Takeaway
+
+To support EKS-only without requiring ECS, we moved the Delta-creation job from “run in ECS” to “run in local Docker with the ECR image.” That removed the ECS dependency but tied the step to a **local fat image** run. For future improvement: separate a thin API image from a Spark/Delta image, and optionally run the Spark job in AWS again (e.g. EKS Job or ECS task) so the operator doesn’t need to pull/run the heavy image locally.
+
+---
+
+## 23. EKS API/Frontend URL Not Available: Missing NGINX Ingress Controller in Deploy Pipeline
+
+**creation:** `<260203>`
+**last_updated:** `<260203>`
+
+**keywords:** EKS, Kubernetes Ingress, NGINX Ingress Controller, NLB, API URL not available, Frontend URL not available, run12.log, deploy pipeline
+**difficulty:** 7
+**significance:** 8
+
+### 23.1 Context (what we saw in tmp/logs/run12.log)
+
+After a full EKS deploy, Phase 5.2 reported success ("Kubernetes manifests deployed") but Phase 7 validation failed:
+
+- **API URL not available for validation**
+- **Frontend URL not available for validation**
+- **Skipping query stream endpoint validation (API health check did not pass)**
+
+The log also showed a non-fatal shell error right after the deploy step:
+
+```text
+kubernetes-manifests.sh: line 771: pids[@]: unbound variable
+```
+
+So we had two issues: (1) validation could not get API/Frontend URLs, and (2) a `set -u` unbound variable when cleaning up the deployment-wait loop.
+
+### 23.2 Root Cause
+
+**Why API/Frontend URL were "not available"**
+
+The verification scripts get the EKS API URL from the **Ingress** object's status:
+
+```bash
+K8S_INGRESS_HOST=$(kubectl get ingress fru-api-ingress -n "$namespace" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' ...)
+```
+
+That `.status.loadBalancer.ingress[0].hostname` is **only filled by the Ingress Controller** (in our case, NGINX). NGINX's Service is `type: LoadBalancer`; AWS creates an NLB for it. NGINX then copies that NLB hostname into every Ingress it **adopts** (those with `ingressClassName: fru-nginx-cls`).
+
+We were applying the app Ingress (from our template) but **we never installed the NGINX Ingress Controller** as part of the automated deploy. So:
+
+- No NGINX → no NLB for ingress traffic.
+- No controller adopting the Ingress → Ingress `.status.loadBalancer.ingress` stayed empty.
+- `K8S_INGRESS_HOST` was empty → API URL and CloudFront origin (NLB) were unavailable → "API URL not available" and "Frontend URL not available."
+
+**Why `pids[@]: unbound variable`**
+
+The deploy script runs with `set -u`. After the parallel deployment-wait loop, we unset each `pids[$i]` as deployments complete. In some shells/paths, the array can end up effectively unset; then `${#pids[@]}` or `${pids[@]}` in the cleanup block triggers "unbound variable."
+
+### 23.3 Key Insight
+
+> The Ingress resource only gets a hostname in `.status.loadBalancer.ingress` when an **Ingress Controller** is running and has adopted it. Installing the controller (NGINX via Helm) must be a step in the EKS deploy pipeline, **before** applying application manifests that reference `ingressClassName: fru-nginx-cls`.
+
+### 23.4 Resolution
+
+1. **Add NGINX Ingress Controller to the deploy pipeline**
+   - New Helm values: `ingress-nginx-values-eks.yaml` (NLB, `ingressClassResource.name: fru-nginx-cls`).
+   - New helper: `install-ingress-nginx-eks.sh` (Helm install using that values file).
+   - Integrated as **Substep 4.5** in `module_infra_kubetypes/kube/aws/deploy.sh`, so NGINX is installed **before** app manifests (and thus before the app Ingress).
+
+2. **Use a single ingress class name**
+   - Ingress template and Helm values both use `fru-nginx-cls` so the app Ingress is adopted by the NGINX controller we install.
+
+3. **Harden the deployment-wait cleanup**
+   - In `kubernetes-manifests.sh`, the cleanup block now uses `((${#pids[@]:-0} > 0))` and `"${pids[@]+"${pids[@]}"}"` (and the same pattern for `temp_files`) so we never reference an unset array under `set -u`.
+
+4. **CloudFront**
+   - The script that updates CloudFront origin reads the NLB hostname from the same Ingress status; once NGINX is installed and adopts the Ingress, that hostname is set and CloudFront can be updated.
+
+### 23.5 Minimum steps to apply and retest (without full run.sh)
+
+- Ensure EKS cluster and `kubectl` context are ready.
+- Run the EKS deploy script (this installs NGINX, applies manifests, updates CloudFront):
+
+  ```bash
+  export REPO_ROOT=/path/to/fru-genai-analytics-all
+  export ENVIRONMENT=dev
+  export CONTAINER_TYPE=eks
+  "$REPO_ROOT/module_infra_kubetypes/kube/aws/deploy.sh"
+  ```
+
+- Run verification:
+
+  ```bash
+  "$REPO_ROOT/orchestration/aws/verification/validate-endpoints.sh"
+  ```
+
+(If you use `orchestration/aws/run.sh`, you can resume from Phase 5.2 and then run Phase 7, assuming earlier phases are already done.)
+
+### 23.6 Takeaway
+
+"API/Frontend URL not available" after applying an Ingress usually means **no Ingress Controller is running** to provision the load balancer and fill Ingress `.status`. For EKS with NGINX, install the controller in the deploy pipeline before applying Ingresses that reference its class. Fix shell cleanup under `set -u` by using default-empty for array length and elements (`${arr[@]:-}`, `((${#arr[@]:-0} > 0))`) so empty/unset arrays don't trigger unbound variable.
 
 ---

@@ -35,48 +35,54 @@ command_exists() {
 }
 
 # Fetch EKS deployment information from Terraform outputs and Kubernetes
+# EKS layer lives under module_infra_kubetypes/kube/aws/terra (cluster_name).
+# Frontend EKS CloudFront lives under module_infra_basic (frontend-eks layer).
 fetch_eks_deployment_info() {
-    # TERRAFORM_DIR and ENVIRONMENT should be set by parent function
     local terraform_dir="${TERRAFORM_DIR:-}"
-    
+    local environment="${ENVIRONMENT:-dev}"
     if [ -z "$terraform_dir" ]; then
-        log_warning "TERRAFORM_DIR not set, cannot fetch EKS deployment info"
+        terraform_dir="$REPO_ROOT/module_infra_basic/aws/terra/environments/$environment"
+    fi
+    if [ -z "${REPO_ROOT:-}" ]; then
+        log_warning "REPO_ROOT not set, cannot fetch EKS deployment info"
         return 1
     fi
-    
-    # Fetch EKS cluster name from EKS terraform outputs
-    local eks_dir="$terraform_dir/eks"
+
+    # EKS layer path (cluster_name) — under kube terra, not module_infra_basic
+    local eks_terra_dir="$REPO_ROOT/module_infra_kubetypes/kube/aws/terra/environments/$environment"
+    local eks_dir="$eks_terra_dir/eks"
+    # Frontend EKS CloudFront — under module_infra_basic frontend-eks layer
+    local frontend_eks_dir="$terraform_dir/frontend-eks"
+
+    # Fetch EKS cluster name from EKS terraform layer (correct path)
     if [ -d "$eks_dir" ] && command_exists terragrunt; then
         local orig_dir
         orig_dir=$(pwd)
         cd "$eks_dir" 2>/dev/null || return 0
         if [ -z "${EKS_CLUSTER_NAME:-}" ]; then
-            log_info "Fetching Terraform output: cluster_name (from EKS module)"
+            log_info "Fetching Terraform output: cluster_name (from EKS layer at $eks_dir)"
             EKS_CLUSTER_NAME=$(terragrunt output -raw cluster_name 2>/dev/null || echo "")
             if [ -n "$EKS_CLUSTER_NAME" ]; then
                 log_info "Output retrieved: cluster_name=$EKS_CLUSTER_NAME"
             else
-                log_warning "Could not read Terraform output 'cluster_name' from EKS module"
+                log_warning "Could not read Terraform output 'cluster_name' from EKS layer"
             fi
         fi
         cd "$orig_dir" 2>/dev/null || true
     fi
-    
-    # Fetch CloudFront domain from eks terraform outputs (for EKS frontend)
-    local app_dir="$terraform_dir/eks"
-    if [ -d "$app_dir" ] && command_exists terragrunt; then
+
+    # Fetch CloudFront domain from frontend-eks layer (not from eks layer)
+    if [ -d "$frontend_eks_dir" ] && command_exists terragrunt; then
         local orig_dir
         orig_dir=$(pwd)
-        cd "$app_dir" 2>/dev/null || return 0
-        
+        cd "$frontend_eks_dir" 2>/dev/null || return 0
         if [ -z "${CLOUDFRONT_DOMAIN:-}" ]; then
-            log_info "Fetching Terraform output: cloudfront_domain_name (from eks module, for EKS)"
-            # Fetch from eks module which has separate CloudFront distribution
+            log_info "Fetching Terraform output: cloudfront_domain_name (from frontend-eks layer)"
             local terragrunt_error
             if ! CLOUDFRONT_DOMAIN=$(terragrunt output -raw cloudfront_domain_name 2>&1); then
                 terragrunt_error="$CLOUDFRONT_DOMAIN"
                 CLOUDFRONT_DOMAIN=""
-                log_warning "Could not read Terraform output 'cloudfront_domain_name' via terragrunt (for EKS); frontend URL may be unavailable"
+                log_warning "Could not read Terraform output 'cloudfront_domain_name' from frontend-eks; frontend URL may be unavailable"
                 if command -v log_info >/dev/null 2>&1 && [ -n "$terragrunt_error" ]; then
                     log_info "Terragrunt error: ${terragrunt_error:0:200}"
                 fi
@@ -84,7 +90,6 @@ fetch_eks_deployment_info() {
                 log_info "Output retrieved: cloudfront_domain_name=$CLOUDFRONT_DOMAIN"
             fi
         fi
-        
         cd "$orig_dir" 2>/dev/null || true
     fi
     

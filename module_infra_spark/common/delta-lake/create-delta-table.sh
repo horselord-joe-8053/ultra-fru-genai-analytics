@@ -7,12 +7,13 @@
 # Required Environment Variables:
 #   SPARK_PACKAGES - Maven coordinates for Spark packages
 #   PATH_CHECK_METHOD - "filesystem" or "s3"
-#   EXECUTION_METHOD - "docker" or "ecs_task"
+#   EXECUTION_METHOD - "docker", "ecs_task", or "docker_ecr"
 #   REPO_ROOT - Repository root directory
 #
 # Optional Environment Variables:
 #   CLUSTER_NAME - ECS cluster name (required for ecs_task)
 #   SERVICE_NAME - ECS service name (required for ecs_task)
+#   CONTAINER_IMAGE - ECR image URI (required for docker_ecr)
 #   DRY_RUN - "true" to preview without creating
 #   FORCE_REFRESH_DATA - "true" to force refresh (delete existing table before creating)
 
@@ -152,8 +153,18 @@ case "$EXECUTION_METHOD" in
             "$CLUSTER_NAME" \
             "$SERVICE_NAME"
         ;;
+    docker_ecr)
+        if [ -z "$CONTAINER_IMAGE" ]; then
+            log_error "CONTAINER_IMAGE is required for docker_ecr (set by run.sh / load-image-identifiers.sh)"
+            exit 1
+        fi
+        "$SCRIPT_DIR/helpers/aws/run-spark-job-docker-ecr.sh" \
+            "$INPUT_PATH" \
+            "$OUTPUT_PATH" \
+            "$SPARK_PACKAGES"
+        ;;
     *)
-        log_error "Unknown execution method: $EXECUTION_METHOD (must be 'docker' or 'ecs_task')"
+        log_error "Unknown execution method: $EXECUTION_METHOD (must be 'docker', 'ecs_task', or 'docker_ecr')"
         exit 1
         ;;
 esac
@@ -189,6 +200,10 @@ if [ "$DELTA_TABLE_WAS_CREATED" = "true" ] && [ "$DRY_RUN" != "true" ]; then
                     log_warning "Scheduler will run analytics on next interval"
                 fi
             fi
+            ;;
+        docker_ecr)
+            # App (EKS/ECS) scheduler will run analytics periodically; no one-off trigger
+            log_info "Scheduler in app pod will run analytics on next interval"
             ;;
         *)
             log_warning "Unknown execution method for analytics trigger: $EXECUTION_METHOD"

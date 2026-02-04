@@ -723,6 +723,11 @@ validate_urls() {
         if validate_api_endpoint "http://$ALB_DNS"; then
             api_ok=true
         fi
+    elif [ -n "$K8S_INGRESS_HOST" ]; then
+        api_base_url="http://$K8S_INGRESS_HOST"
+        if validate_api_endpoint "http://$K8S_INGRESS_HOST"; then
+            api_ok=true
+        fi
     else
         log_info "API URL not available for validation"
     fi

@@ -239,6 +239,17 @@ generate_kubernetes_manifests() {
                     log_warning "Could not fetch Aurora endpoint from Terraform (timeout or error), using PGHOST from environment or default"
                     export PGHOST="${PGHOST:-localhost}"
                 fi
+                # Fetch s3_delta_table_path for EKS analytics scheduler (Spark reads from S3)
+                local s3_delta_path
+                if s3_delta_path=$(terragrunt_output_with_timeout "$terraform_dir" "s3_delta_table_path" 120 "$aws_profile"); then
+                    if [ -n "$s3_delta_path" ] && [ "$s3_delta_path" != "null" ]; then
+                        # Convert s3:// to s3a:// and append /fru_sales (Spark uses s3a, bash 3.2 compatible)
+                        local delta_path_eks
+                        delta_path_eks="$(echo "$s3_delta_path" | sed 's|^s3://|s3a://|')/fru_sales"
+                        export DELTA_TABLE_PATH="$delta_path_eks"
+                        log_info "Using DELTA_TABLE_PATH from Terraform: $DELTA_TABLE_PATH"
+                    fi
+                fi
             else
                 # Fallback to environment variable or localhost
                 if [ -z "$terraform_dir" ]; then
@@ -366,6 +377,9 @@ generate_kubernetes_manifests() {
             export LOG_LEVEL="${LOG_LEVEL:-INFO}"
             export ENABLE_ANALYTICS_SCHEDULER="${ENABLE_ANALYTICS_SCHEDULER:-false}"
             export ANALYTICS_SCHEDULER_INTERVAL_SECONDS="${ANALYTICS_SCHEDULER_INTERVAL_SECONDS:-3600}"
+            export DELTA_TABLE_PATH="${DELTA_TABLE_PATH:-}"
+            export CONTAINER_TYPE="${CONTAINER_TYPE:-eks}"
+            export DELTA_LAKE_PACKAGE="${DELTA_LAKE_PACKAGE:-io.delta:delta-spark_2.13:4.0.0}"
             # Export PROJECT_ID and ENVIRONMENT for namespace template
             export PROJECT_ID="${PROJECT_ID:-fru-genai-analytics}"
             export ENVIRONMENT="${ENVIRONMENT:-dev}"
@@ -396,12 +410,13 @@ generate_kubernetes_manifests() {
         if [ -n "$envsubst_cmd" ]; then
             # Export sensitive variables for envsubst (Kubernetes Secret template)
             # Note: PGPASSWORD and OPENAI_API_KEY are now exported by load-env.sh
-            # Load bedrock credentials from .env (not exported by load-env.sh for security)
-            # These are used to populate Kubernetes Secret for application runtime
+            # Load AWS credentials from .env (not exported by load-env.sh for security)
+            # EKS pods need both Bedrock (LLM) and S3 (analytics scheduler); use admin creds which have both.
+            # Bedrock-only user lacks s3:ListBucket on analytics bucket.
             if [ -f "$repo_root/.env" ]; then
                 source "$repo_root/.env"
-                export AWS_ACCESS_KEY_ID="${AWS_BEDROCK_ACCESS_KEY_ID:-}"
-                export AWS_SECRET_ACCESS_KEY="${AWS_BEDROCK_SECRET_ACCESS_KEY:-}"
+                export AWS_ACCESS_KEY_ID="${AWS_ADMIN_ACCESS_KEY_ID:-${AWS_BEDROCK_ACCESS_KEY_ID:-}}"
+                export AWS_SECRET_ACCESS_KEY="${AWS_ADMIN_SECRET_ACCESS_KEY:-${AWS_BEDROCK_SECRET_ACCESS_KEY:-}}"
             fi
             
             "$envsubst_cmd" < "$secret_template" > "$secret_output"
@@ -860,14 +875,19 @@ wait_for_deployments_parallel() {
     done
     
     # Cleanup any remaining processes (shouldn't happen, but safety)
-    for pid in "${pids[@]}"; do
-        kill "$pid" 2>/dev/null || true
-    done
+    # Use ${pids[@]:-} / ${#pids[@]:-0} to avoid "unbound variable" when set -u and array is empty/unset
+    if ((${#pids[@]:-0} > 0)); then
+        for pid in "${pids[@]+"${pids[@]}"}"; do
+            kill "$pid" 2>/dev/null || true
+        done
+    fi
     
     # Cleanup temp files
-    for temp_file in "${temp_files[@]}"; do
-        rm -f "$temp_file" 2>/dev/null || true
-    done
+    if ((${#temp_files[@]:-0} > 0)); then
+        for temp_file in "${temp_files[@]+"${temp_files[@]}"}"; do
+            rm -f "$temp_file" 2>/dev/null || true
+        done
+    fi
     
     # Summary
     log_info "Deployment wait summary: ${success_count} succeeded, ${failure_count} failed out of ${total} total"
@@ -992,7 +1012,8 @@ apply_kubernetes_manifests() {
               "$basename_file" == "service-generated.yaml" || \
               "$basename_file" == ".gitignore" || \
               "$basename_file" == "README.md" || \
-              "$basename_file" == "ingress-nginx-values-local.yaml" ]]; then
+              "$basename_file" == "ingress-nginx-values-local.yaml" || \
+              "$basename_file" == "ingress-nginx-values-eks.yaml" ]]; then
             continue
         fi
             yaml_files+=("$file")
@@ -1603,37 +1624,40 @@ PYTHON_SCRIPT
 }
 
 # Verify deployment status
+# Usage: verify_kubernetes_deployment [namespace]
+#   namespace: Kubernetes namespace where app is deployed (e.g. fru-api-dev). Default: default
 verify_kubernetes_deployment() {
-    log_step "Verifying deployment status"
+    local namespace="${1:-default}"
+    log_step "Verifying deployment status (namespace: $namespace)"
     
     # Check pods
     log_info "Checking pod status..."
-    if kubectl get pods >/dev/null 2>&1; then
-        kubectl get pods
-        local pending_pods=$(kubectl get pods --field-selector=status.phase!=Running,status.phase!=Succeeded 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')
+    if kubectl get pods -n "$namespace" >/dev/null 2>&1; then
+        kubectl get pods -n "$namespace"
+        local pending_pods=$(kubectl get pods -n "$namespace" --field-selector=status.phase!=Running,status.phase!=Succeeded 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')
         if [ "$pending_pods" -gt 0 ]; then
             log_warning "Some pods are not running yet"
-            log_info "Check status with: kubectl get pods"
+            log_info "Check status with: kubectl get pods -n $namespace"
         else
             log_success "All pods are running"
         fi
     else
-        log_warning "No pods found (may be normal if manifests don't create pods yet)"
+        log_warning "No pods found in namespace $namespace (may be normal if manifests don't create pods yet)"
     fi
     
     # Check services
     log_info "Checking service status..."
-    if kubectl get svc >/dev/null 2>&1; then
-        kubectl get svc
+    if kubectl get svc -n "$namespace" >/dev/null 2>&1; then
+        kubectl get svc -n "$namespace"
     else
-        log_info "No services found"
+        log_info "No services found in namespace $namespace"
     fi
     
     # Check ingress (if applicable)
     log_info "Checking ingress status..."
-    if kubectl get ingress >/dev/null 2>&1; then
-        kubectl get ingress
+    if kubectl get ingress -n "$namespace" >/dev/null 2>&1; then
+        kubectl get ingress -n "$namespace"
     else
-        log_info "No ingress found (may be normal)"
+        log_info "No ingress found in namespace $namespace (may be normal)"
     fi
 }

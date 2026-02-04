@@ -139,10 +139,10 @@ else
     
     DELTA_TABLE_PATH="${S3_DELTA_PATH:-s3://$S3_BUCKET_ID/delta}/fru_sales"
     
-    # Get Spark packages and convert paths using Python helpers
+    # Get Spark packages and convert paths using Python helpers (spark_jobs lives under module_app_core)
     PYTHON_HELPER_OUTPUT=$("$PYTHON_CMD" -c "
 import sys
-sys.path.insert(0, '$REPO_ROOT')
+sys.path.insert(0, '$REPO_ROOT/module_app_core')
 from spark_jobs.utils.spark_config import get_spark_packages, to_spark_path
 csv_path = '$CSV_PATH'
 delta_path = '$DELTA_TABLE_PATH'
@@ -159,12 +159,15 @@ print(f'{get_spark_packages(is_aws_deployment=True)}|{to_spark_path(csv_path)}|{
     CSV_PATH=$(echo "$PYTHON_HELPER_OUTPUT" | cut -d'|' -f2)
     DELTA_TABLE_PATH=$(echo "$PYTHON_HELPER_OUTPUT" | cut -d'|' -f3)
     
+    # Delta creation via local Docker + ECR image (works for both ECS and EKS; no ECS/EKS required)
+    if [ -z "${CONTAINER_IMAGE:-}" ]; then
+        log_error "CONTAINER_IMAGE not set. Run from deploy (run.sh) so image is set, or export CONTAINER_IMAGE=your-ecr-uri:tag"
+        exit 1
+    fi
     export PATH_CHECK_METHOD="s3"
-    export EXECUTION_METHOD="ecs_task"
+    export EXECUTION_METHOD="docker_ecr"
     export SPARK_PACKAGES
-    export CLUSTER_NAME="fru-${ENVIRONMENT}-cluster"
-    export SERVICE_NAME="fru-${ENVIRONMENT}-api-service"
-    # Export AWS credentials for ECS task execution
+    export CONTAINER_IMAGE
     export AWS_PROFILE="${AWS_PROFILE:-admin}"
     export AWS_REGION="${AWS_REGION:-us-east-1}"
     create_cmd="$REPO_ROOT/module_infra_spark/common/delta-lake/create-delta-table.sh $CSV_PATH $DELTA_TABLE_PATH"

@@ -5,7 +5,7 @@ controller:
   service:
     type: NodePort  # Local: use NodePort instead of LoadBalancer
   ingressClassResource:
-    name: nginx
+    name: fru-nginx-cls
   # No nodeSelector/tolerations (single node, no taints)
   resources:
     requests:

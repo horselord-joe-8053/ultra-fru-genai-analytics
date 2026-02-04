@@ -50,7 +50,7 @@ run_scripts/main_application_scripts/aws/
 │   ├── container-deploy-common.sh
 │   └── helpers/
 │       ├── kubernetes-manifests.sh
-│       ├── update-cloudfront-alb.sh
+│       ├── update-cloudfront-loadbalancer.sh
 │       └── install-aws-load-balancer-controller.sh
 ├── ecs/                             ✅ ECS-specific deployment
 └── eks/                             ✅ EKS-specific deployment

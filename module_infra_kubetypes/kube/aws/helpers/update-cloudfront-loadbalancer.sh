@@ -1,9 +1,10 @@
 #!/bin/bash
 # Update CloudFront with EKS Ingress ALB (EKS Helper Script)
 # ===========================================================
-# This script updates a CloudFront distribution to point API paths to the ALB
-# created by a Kubernetes Ingress resource. The Ingress automatically creates
-# an ALB via the AWS Load Balancer Controller.
+# This script updates a CloudFront distribution to point API paths to the NLB
+# whose hostname appears in the Kubernetes Ingress status. That hostname is
+# populated by the NGINX Ingress Controller (it copies its LoadBalancer Service's
+# NLB DNS to Ingress status). See docs/README_WORKFLOW_EKS_NOTES.md.
 #
 # **Container Type**: EKS-specific (uses kubectl to get Ingress ALB DNS)
 # **Location**: run_scripts/main_application_scripts/aws/eks/helpers/
@@ -25,7 +26,8 @@
 #
 # Prerequisites:
 #   - kubectl configured and pointing to EKS cluster
-#   - Ingress resource exists and AWS Load Balancer Controller is installed
+#   - NGINX Ingress Controller installed (so Ingress status gets NLB hostname)
+#   - Ingress resource exists (app Ingress with ingressClassName: fru-nginx-cls)
 #   - CloudFront distribution ID available (from Terraform or argument)
 #   - AWS CLI configured with CloudFront permissions
 
@@ -39,19 +41,18 @@ INGRESS_NAME="${1:-fru-api-ingress}"
 NAMESPACE="${2:-default}"
 CF_DIST_ID="${3:-}"
 
-# Get CloudFront distribution ID from Terraform if not provided
+# Get CloudFront distribution ID from Terraform if not provided.
+# The output lives in the frontend module; for EKS we read it from the frontend-eks Terragrunt layer.
 if [ -z "$CF_DIST_ID" ]; then
-    log_info "Getting CloudFront distribution ID from Terraform..."
-    terraform_dir="${REPO_ROOT}/module_infra_kubetypes/kube/aws/terra/environments/dev/eks"
-    if [ -d "$terraform_dir" ] && command -v terragrunt >/dev/null 2>&1; then
-        # Try to get distribution ID directly
-        CF_DIST_ID=$(cd "$terraform_dir" && AWS_PROFILE="${AWS_PROFILE:-admin}" terragrunt output -raw cloudfront_distribution_id 2>/dev/null || echo "")
-        
-        # If not available, look up by domain name
+    log_info "Getting CloudFront distribution ID from Terraform (frontend-eks)..."
+    env_for_tf="${ENVIRONMENT:-dev}"
+    frontend_eks_dir="${REPO_ROOT}/module_infra_basic/aws/terra/environments/${env_for_tf}/frontend-eks"
+    if [ -d "$frontend_eks_dir" ] && command -v terragrunt >/dev/null 2>&1; then
+        CF_DIST_ID=$(cd "$frontend_eks_dir" && AWS_PROFILE="${AWS_PROFILE:-admin}" terragrunt output -raw cloudfront_distribution_id 2>/dev/null || echo "")
         if [ -z "$CF_DIST_ID" ]; then
-            CF_DOMAIN=$(cd "$terraform_dir" && AWS_PROFILE="${AWS_PROFILE:-admin}" terragrunt output -raw cloudfront_domain_name 2>/dev/null || echo "")
+            CF_DOMAIN=$(cd "$frontend_eks_dir" && AWS_PROFILE="${AWS_PROFILE:-admin}" terragrunt output -raw cloudfront_domain_name 2>/dev/null || echo "")
             if [ -n "$CF_DOMAIN" ]; then
-                log_info "Looking up CloudFront distribution ID by domain name: $CF_DOMAIN"
+                log_info "Looking up CloudFront distribution ID by domain: $CF_DOMAIN"
                 CF_DIST_ID=$(aws cloudfront list-distributions --profile "${AWS_PROFILE:-admin}" --query "DistributionList.Items[?DomainName=='${CF_DOMAIN}'].Id" --output text 2>/dev/null || echo "")
             fi
         fi
@@ -69,9 +70,9 @@ log_info "Waiting for Ingress ALB to be ready..."
 log_info "Ingress: $INGRESS_NAME (namespace: $NAMESPACE)"
 log_info "CloudFront Distribution: $CF_DIST_ID"
 
-# Wait for Ingress ALB DNS (with timeout)
-# Note: Ingress creates ALB automatically via AWS Load Balancer Controller
-TIMEOUT=300  # 5 minutes (ALB creation can take 2-3 minutes)
+# Wait for Ingress NLB hostname (with timeout)
+# Note: Hostname is set by NGINX Ingress Controller (copies its Service's NLB DNS to Ingress status)
+TIMEOUT=300  # 5 minutes (NLB creation can take 2-3 minutes after NGINX controller is installed)
 INTERVAL=10  # Check every 10 seconds
 ELAPSED=0
 LB_DNS=""
@@ -94,9 +95,9 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
 done
 
 if [ -z "$LB_DNS" ] || [ "$LB_DNS" = "null" ]; then
-    log_error "Timeout: Ingress ALB DNS not available after ${TIMEOUT} seconds"
+    log_error "Timeout: Ingress NLB hostname not available after ${TIMEOUT} seconds"
     log_info "Check Ingress status: kubectl get ingress -n $NAMESPACE $INGRESS_NAME"
-    log_info "Note: ALB is created automatically by AWS Load Balancer Controller when Ingress is applied"
+    log_info "Note: Hostname is set by NGINX Ingress Controller (install it first; see install-ingress-nginx-eks.sh)"
     exit 1
 fi
 
@@ -116,7 +117,13 @@ CF_DIST_CONFIG=$(echo "$CF_CONFIG" | jq -r '.DistributionConfig')
 # Update or add LoadBalancer origin in CloudFront config
 log_info "Updating LoadBalancer origin in CloudFront config..."
 ORIGIN_ID="ALB-fru-dev-eks"  # Match Terraform's api_origin_id format
-UPDATED_CONFIG=$(echo "$CF_DIST_CONFIG" | jq --arg lb_dns "$LB_DNS" --arg origin_id "$ORIGIN_ID" '
+JQ_FILTER=$(cat <<'JQ'
+  # Ensure CacheBehaviors exists (CloudFront API can omit it)
+  if (.CacheBehaviors == null) then
+    .CacheBehaviors = {"Quantity": 0, "Items": []}
+  else
+    .
+  end |
   # Check if ALB/LB origin already exists
   . as $config |
   if ($config.Origins.Items | map(select(.Id | startswith("ALB-") or startswith("LB-"))) | length > 0) then
@@ -148,9 +155,9 @@ UPDATED_CONFIG=$(echo "$CF_DIST_CONFIG" | jq --arg lb_dns "$LB_DNS" --arg origin
     .Origins.Quantity = (.Origins.Items | length)
   end |
   # Add ordered cache behaviors for API routes if they don't exist
-  if (.OrderedCacheBehaviors.Quantity == 0) then
-    .OrderedCacheBehaviors.Quantity = 3 |
-    .OrderedCacheBehaviors.Items = [
+  if (.CacheBehaviors.Quantity == 0) then
+    .CacheBehaviors.Quantity = 3 |
+    .CacheBehaviors.Items = [
       {
         "PathPattern": "/query",
         "TargetOriginId": $origin_id,
@@ -211,7 +218,7 @@ UPDATED_CONFIG=$(echo "$CF_DIST_CONFIG" | jq --arg lb_dns "$LB_DNS" --arg origin
     ]
   else
     # Update existing cache behaviors to use new origin
-    .OrderedCacheBehaviors.Items = (.OrderedCacheBehaviors.Items | map(
+    .CacheBehaviors.Items = (.CacheBehaviors.Items | map(
       if (.PathPattern == "/query" or .PathPattern == "/analytics" or .PathPattern == "/query/stream") then
         .TargetOriginId = $origin_id
       else
@@ -219,16 +226,19 @@ UPDATED_CONFIG=$(echo "$CF_DIST_CONFIG" | jq --arg lb_dns "$LB_DNS" --arg origin
       end
     ))
   end
-')
+JQ
+)
+UPDATED_CONFIG=$(echo "$CF_DIST_CONFIG" | jq --arg lb_dns "$LB_DNS" --arg origin_id "$ORIGIN_ID" "$JQ_FILTER")
 
 # Update CloudFront distribution
 log_info "Applying CloudFront configuration update..."
-aws cloudfront update-distribution \
+update_output=$(aws cloudfront update-distribution \
     --id "$CF_DIST_ID" \
     --if-match "$ETAG" \
     --distribution-config "$UPDATED_CONFIG" \
-    --profile "${AWS_PROFILE:-admin}" > /dev/null 2>&1 || {
+    --profile "${AWS_PROFILE:-admin}" 2>&1) || {
     log_error "Failed to update CloudFront distribution"
+    log_error "AWS error: $update_output"
     exit 1
 }
 

@@ -2,6 +2,7 @@
 # Main EKS deployment orchestrator
 # This script orchestrates the full EKS deployment process
 # Usage: ./deploy.sh [--skip-build] [--skip-frontend] [--manifests-dir <path>]
+#   --skip-build: Skip ECR build/push; use IMAGE_TAG=latest (or set IMAGE_TAG/CONTAINER_IMAGE to override).
 #
 # NOTE: Unlike ECS, EKS deployment requires kubectl access to the cluster API server endpoint
 # - ECS: Uses AWS APIs (public endpoints) - works from anywhere with AWS credentials, no VPC access needed
@@ -72,11 +73,11 @@ main() {
     log_step "Starting AWS EKS deployment"
     
     # Step 1: Check AWS credentials
-    log_step "Substep 1/5: Checking AWS credentials"
+    log_step "Substep 1/6: Checking AWS credentials"
     "$REPO_ROOT/orchestration/aws/check-aws-credentials.sh" || exit 1
     
     # Step 2: Check kubectl and cluster access
-    log_step "Substep 2/5: Checking kubectl and EKS cluster access"
+    log_step "Substep 2/6: Checking kubectl and EKS cluster access"
     if ! check_kubectl_complete; then
         log_error "kubectl check failed"
         exit 1
@@ -84,15 +85,21 @@ main() {
     
     # Step 3: Build and push to ECR
     if [ "$SKIP_BUILD" = false ]; then
-        log_step "Substep 3/5: Building and pushing Docker image to ECR"
+        log_step "Substep 3/6: Building and pushing Docker image to ECR"
         "$REPO_ROOT/module_infra_basic/aws/build-push-ecr.sh" || exit 1
     else
-        log_info "Substep 3/5: Skipping ECR build/push (--skip-build flag set)"
+        log_info "Substep 3/6: Skipping ECR build/push (--skip-build flag set)"
+        # When skipping build, default to tag 'latest' so deployment uses an image that exists in ECR.
+        # Override by setting IMAGE_TAG (or CONTAINER_IMAGE) before running deploy.
+        if [ -z "${IMAGE_TAG:-}" ] && [ -z "${CONTAINER_IMAGE:-}" ]; then
+            export IMAGE_TAG="latest"
+            log_info "Using IMAGE_TAG=latest for manifest apply (set IMAGE_TAG or CONTAINER_IMAGE to override)"
+        fi
     fi
     
     # Step 4: Deploy frontend
     if [ "$SKIP_FRONTEND" = false ]; then
-        log_step "Substep 4/5: Deploying frontend to S3"
+        log_step "Substep 4/6: Deploying frontend to S3"
         # Ensure frontend is built (using helper)
         if ! build_frontend_if_needed; then
             log_error "Frontend preparation failed"
@@ -104,11 +111,15 @@ main() {
         export CONTAINER_TYPE="${CONTAINER_TYPE:-eks}"
         "$REPO_ROOT/module_infra_basic/aws/deploy-frontend.sh" || exit 1
     else
-        log_info "Substep 4/5: Skipping frontend deployment (--skip-frontend flag set)"
+        log_info "Substep 4/6: Skipping frontend deployment (--skip-frontend flag set)"
     fi
     
+    # Step 4.5: Install NGINX Ingress Controller (provisions NLB so Ingress gets hostname)
+    log_step "Substep 4.5/6: Installing NGINX Ingress Controller (EKS NLB)"
+    "$SCRIPT_DIR/helpers/install-ingress-nginx-eks.sh" || exit 1
+    
     # Step 5: Apply Kubernetes manifests
-    log_step "Substep 5/5: Applying Kubernetes manifests"
+    log_step "Substep 5/6: Applying Kubernetes manifests"
     local manifests_dir
     if manifests_dir=$(find_manifests_directory); then
         log_info "Found manifests directory: $manifests_dir"
@@ -135,7 +146,7 @@ main() {
         fi
         
         apply_kubernetes_manifests "$manifests_dir"
-        verify_kubernetes_deployment
+        verify_kubernetes_deployment "$namespace"
 
         # After backend is healthy and ingress is applied, wire CloudFront to the EKS ALB
         # This updates the Terraform-managed CloudFront distribution so that /query, /query/stream,

@@ -65,18 +65,21 @@ perf_phase_start() {
     
     if [ "$HAS_JQ" = true ]; then
         # Update JSON using jq
-        local temp_file=$(mktemp)
-        jq --arg pn "$phase_num" \
-           --arg name "$phase_name" \
-           --argjson start "$start_time" \
-           '.phases[$pn] = {
-             "name": $name,
-             "start": $start,
-             "end": null,
-             "elapsed": null,
-             "steps": {}
-           }' "$PERF_DATA_FILE" > "$temp_file"
-        mv "$temp_file" "$PERF_DATA_FILE"
+        local temp_file
+        temp_file=$(mktemp 2>/dev/null) || true
+        if [ -n "$temp_file" ]; then
+            jq --arg pn "$phase_num" \
+               --arg name "$phase_name" \
+               --argjson start "$start_time" \
+               '.phases[$pn] = {
+                 "name": $name,
+                 "start": $start,
+                 "end": null,
+                 "elapsed": null,
+                 "steps": {}
+               }' "$PERF_DATA_FILE" > "$temp_file"
+            mv "$temp_file" "$PERF_DATA_FILE"
+        fi
     else
         # Store in associative arrays
         PERF_PHASE_START["$phase_num"]=$start_time
@@ -97,13 +100,16 @@ perf_phase_end() {
         local start_time=$(jq -r ".phases[\"$phase_num\"].start // 0" "$PERF_DATA_FILE")
         if [ "$start_time" != "0" ] && [ "$start_time" != "null" ]; then
             local elapsed=$((end_time - start_time))
-            local temp_file=$(mktemp)
-            jq --arg pn "$phase_num" \
-               --argjson end "$end_time" \
-               --argjson elapsed "$elapsed" \
-               '.phases[$pn].end = $end | .phases[$pn].elapsed = $elapsed' \
-               "$PERF_DATA_FILE" > "$temp_file"
-            mv "$temp_file" "$PERF_DATA_FILE"
+            local temp_file
+            temp_file=$(mktemp 2>/dev/null) || true
+            if [ -n "$temp_file" ] && [ -f "$temp_file" ]; then
+                jq --arg pn "$phase_num" \
+                   --argjson end "$end_time" \
+                   --argjson elapsed "$elapsed" \
+                   '.phases[$pn].end = $end | .phases[$pn].elapsed = $elapsed' \
+                   "$PERF_DATA_FILE" > "$temp_file"
+                mv "$temp_file" "$PERF_DATA_FILE"
+            fi
         fi
     else
         local start_time="${PERF_PHASE_START[$phase_num]:-0}"
@@ -125,19 +131,22 @@ perf_step_start() {
     fi
     
     if [ "$HAS_JQ" = true ]; then
-        local temp_file=$(mktemp)
-        jq --arg pn "$phase_num" \
-           --arg sn "$step_num" \
-           --arg name "$step_name" \
-           --argjson start "$start_time" \
-           '.phases[$pn].steps[$sn] = {
-             "name": $name,
-             "start": $start,
-             "end": null,
-             "elapsed": null,
-             "status": null
-           }' "$PERF_DATA_FILE" > "$temp_file"
-        mv "$temp_file" "$PERF_DATA_FILE"
+        local temp_file
+        temp_file=$(mktemp 2>/dev/null) || true
+        if [ -n "$temp_file" ] && [ -f "$temp_file" ]; then
+            jq --arg pn "$phase_num" \
+               --arg sn "$step_num" \
+               --arg name "$step_name" \
+               --argjson start "$start_time" \
+               '.phases[$pn].steps[$sn] = {
+                 "name": $name,
+                 "start": $start,
+                 "end": null,
+                 "elapsed": null,
+                 "status": null
+               }' "$PERF_DATA_FILE" > "$temp_file"
+            mv "$temp_file" "$PERF_DATA_FILE"
+        fi
     else
         local key="${phase_num}_${step_num}"
         PERF_STEP_START["$key"]=$start_time
@@ -161,17 +170,20 @@ perf_step_end() {
         local start_time=$(jq -r ".phases[\"$phase_num\"].steps[\"$step_num\"].start // 0" "$PERF_DATA_FILE")
         if [ "$start_time" != "0" ] && [ "$start_time" != "null" ]; then
             local elapsed=$((end_time - start_time))
-            local temp_file=$(mktemp)
-            jq --arg pn "$phase_num" \
-               --arg sn "$step_num" \
-               --arg status "$status" \
-               --argjson end "$end_time" \
-               --argjson elapsed "$elapsed" \
-               '.phases[$pn].steps[$sn].end = $end | 
-                .phases[$pn].steps[$sn].elapsed = $elapsed | 
-                .phases[$pn].steps[$sn].status = $status' \
-               "$PERF_DATA_FILE" > "$temp_file"
-            mv "$temp_file" "$PERF_DATA_FILE"
+            local temp_file
+            temp_file=$(mktemp 2>/dev/null) || true
+            if [ -n "$temp_file" ] && [ -f "$temp_file" ]; then
+                jq --arg pn "$phase_num" \
+                   --arg sn "$step_num" \
+                   --arg status "$status" \
+                   --argjson end "$end_time" \
+                   --argjson elapsed "$elapsed" \
+                   '.phases[$pn].steps[$sn].end = $end | 
+                    .phases[$pn].steps[$sn].elapsed = $elapsed | 
+                    .phases[$pn].steps[$sn].status = $status' \
+                   "$PERF_DATA_FILE" > "$temp_file"
+                mv "$temp_file" "$PERF_DATA_FILE"
+            fi
         fi
     else
         local key="${phase_num}_${step_num}"
@@ -219,30 +231,40 @@ perf_print_summary() {
     echo ""
     
     if [ "$HAS_JQ" = true ]; then
-        # Print using jq
+        # Print using jq - include phases that have steps or have elapsed (so failed phases show)
         local phase_nums=$(jq -r '.phases | keys[]' "$PERF_DATA_FILE" | sort -n)
         for phase_num in $phase_nums; do
-            local phase_name=$(jq -r ".phases[\"$phase_num\"].name" "$PERF_DATA_FILE")
+            local phase_name=$(jq -r ".phases[\"$phase_num\"].name // \"Phase $phase_num\"" "$PERF_DATA_FILE")
             local phase_elapsed=$(jq -r ".phases[\"$phase_num\"].elapsed // 0" "$PERF_DATA_FILE")
+            local has_steps
+            has_steps=$(jq -r ".phases[\"$phase_num\"].steps | keys | length" "$PERF_DATA_FILE" 2>/dev/null || echo "0")
             
-            if [ "$phase_elapsed" != "0" ] && [ "$phase_elapsed" != "null" ]; then
-                echo "Phase $phase_num: $phase_name ($(format_elapsed_time $phase_elapsed))"
+            # Show phase if it has elapsed (completed) or has steps (may be incomplete/failed)
+            if [ "$has_steps" != "0" ] && [ "$has_steps" != "null" ] || { [ "$phase_elapsed" != "0" ] && [ "$phase_elapsed" != "null" ]; }; then
+                if [ "$phase_elapsed" != "0" ] && [ "$phase_elapsed" != "null" ]; then
+                    echo "Phase $phase_num: $phase_name ($(format_elapsed_time $phase_elapsed))"
+                else
+                    echo "Phase $phase_num: $phase_name (incomplete)"
+                fi
                 
-                # Print steps in this phase
-                local step_nums=$(jq -r ".phases[\"$phase_num\"].steps | keys[]" "$PERF_DATA_FILE" | sort -n)
+                # Print steps in this phase (include steps with status even if elapsed 0)
+                local step_nums=$(jq -r ".phases[\"$phase_num\"].steps | keys[]" "$PERF_DATA_FILE" 2>/dev/null | sort -n)
                 for step_num in $step_nums; do
-                    local step_name=$(jq -r ".phases[\"$phase_num\"].steps[\"$step_num\"].name" "$PERF_DATA_FILE")
+                    local step_name=$(jq -r ".phases[\"$phase_num\"].steps[\"$step_num\"].name // \"\"" "$PERF_DATA_FILE")
                     local step_elapsed=$(jq -r ".phases[\"$phase_num\"].steps[\"$step_num\"].elapsed // 0" "$PERF_DATA_FILE")
                     local step_status=$(jq -r ".phases[\"$phase_num\"].steps[\"$step_num\"].status // \"UNKNOWN\"" "$PERF_DATA_FILE")
                     
-                    if [ "$step_elapsed" != "0" ] && [ "$step_elapsed" != "null" ]; then
-                        local status_label="[UNKNOWN]"
-                        case "$step_status" in
-                            "SUCCESS") status_label="[PASSED]" ;;
-                            "FAILED") status_label="[FAILED]" ;;
-                            "SKIPPED") status_label="[SKIPPED]" ;;
-                        esac
-                        printf "  Step %s: %-50s %6s %s\n" "$step_num" "$step_name" "$(format_elapsed_time $step_elapsed)" "$status_label"
+                    local status_label="[UNKNOWN]"
+                    case "$step_status" in
+                        "SUCCESS") status_label="[PASSED]" ;;
+                        "FAILED") status_label="[FAILED]" ;;
+                        "SKIPPED") status_label="[SKIPPED]" ;;
+                    esac
+                    # Show step if we have status or elapsed (so failed steps always show)
+                    if [ "$step_status" != "null" ] && [ "$step_status" != "" ] || { [ "$step_elapsed" != "0" ] && [ "$step_elapsed" != "null" ]; }; then
+                        local elapsed_str="0s"
+                        [ "$step_elapsed" != "0" ] && [ "$step_elapsed" != "null" ] && elapsed_str=$(format_elapsed_time "$step_elapsed")
+                        printf "  Step %s: %-50s %6s %s\n" "$step_num" "$step_name" "$elapsed_str" "$status_label"
                     fi
                 done
                 echo ""
@@ -299,6 +321,7 @@ perf_print_statistics() {
     local total_steps=0
     local skipped_steps=0
     local failed_steps=0
+    local failed_phases=0
     local min_step_time=999999
     local max_step_time=0
     local min_step_phase=""
@@ -307,50 +330,65 @@ perf_print_statistics() {
     local max_step_num=""
     local total_step_time=0
     
+    local failed_phases=0
     if [ "$HAS_JQ" = true ]; then
-        # Calculate statistics using jq
+        # Calculate statistics using jq - count phases that have steps or elapsed
         local phase_nums=$(jq -r '.phases | keys[]' "$PERF_DATA_FILE" | sort -n)
         for phase_num in $phase_nums; do
             local phase_elapsed=$(jq -r ".phases[\"$phase_num\"].elapsed // 0" "$PERF_DATA_FILE")
-            if [ "$phase_elapsed" != "0" ] && [ "$phase_elapsed" != "null" ]; then
+            local has_steps=$(jq -r ".phases[\"$phase_num\"].steps | keys | length" "$PERF_DATA_FILE" 2>/dev/null || echo "0")
+            if [ "$has_steps" != "0" ] && [ "$has_steps" != "null" ]; then
+                total_phases=$((total_phases + 1))
+            elif [ "$phase_elapsed" != "0" ] && [ "$phase_elapsed" != "null" ]; then
                 total_phases=$((total_phases + 1))
             fi
             
-            # Count steps
+            # Count steps (include steps with status even if elapsed 0)
             local step_nums=$(jq -r ".phases[\"$phase_num\"].steps | keys[]" "$PERF_DATA_FILE" 2>/dev/null | sort -n)
+            local phase_has_failed=0
             for step_num in $step_nums; do
                 local step_elapsed=$(jq -r ".phases[\"$phase_num\"].steps[\"$step_num\"].elapsed // 0" "$PERF_DATA_FILE")
                 local step_status=$(jq -r ".phases[\"$phase_num\"].steps[\"$step_num\"].status // \"UNKNOWN\"" "$PERF_DATA_FILE")
                 
-                if [ "$step_elapsed" != "0" ] && [ "$step_elapsed" != "null" ]; then
+                if [ "$step_status" != "null" ] && [ "$step_status" != "" ]; then
                     total_steps=$((total_steps + 1))
-                    
                     case "$step_status" in
                         "SKIPPED") skipped_steps=$((skipped_steps + 1)) ;;
-                        "FAILED") failed_steps=$((failed_steps + 1)) ;;
+                        "FAILED") failed_steps=$((failed_steps + 1)); phase_has_failed=1 ;;
                     esac
                     
-                    # Only include successful/failed steps in min/max/avg (not skipped)
                     if [ "$step_status" != "SKIPPED" ]; then
                         total_step_time=$((total_step_time + step_elapsed))
-                        
-                        if [ "$step_elapsed" -lt "$min_step_time" ]; then
+                        if [ "$step_elapsed" -lt "$min_step_time" ] 2>/dev/null; then
                             min_step_time=$step_elapsed
                             min_step_phase="$phase_num"
                             min_step_num="$step_num"
                         fi
-                        
                         if [ "$step_elapsed" -gt "$max_step_time" ]; then
                             max_step_time=$step_elapsed
                             max_step_phase="$phase_num"
                             max_step_num="$step_num"
                         fi
                     fi
+                elif [ "$step_elapsed" != "0" ] && [ "$step_elapsed" != "null" ]; then
+                    total_steps=$((total_steps + 1))
+                    total_step_time=$((total_step_time + step_elapsed))
+                    if [ "$step_elapsed" -lt "$min_step_time" ] 2>/dev/null; then
+                        min_step_time=$step_elapsed
+                        min_step_phase="$phase_num"
+                        min_step_num="$step_num"
+                    fi
+                    if [ "$step_elapsed" -gt "$max_step_time" ]; then
+                        max_step_time=$step_elapsed
+                        max_step_phase="$phase_num"
+                        max_step_num="$step_num"
+                    fi
                 fi
             done
+            [ "$phase_has_failed" = "1" ] && failed_phases=$((failed_phases + 1))
         done
     else
-        # Calculate statistics using associative arrays
+        # Calculate statistics using associative arrays (failed_phases not computed for bash-only path)
         total_phases=${#PERF_PHASE_START[@]}
         
         for key in "${!PERF_STEP_START[@]}"; do
@@ -422,18 +460,28 @@ perf_print_statistics() {
         echo "Steps Failed: $failed_steps"
     fi
     
+    if [ "${failed_phases:-0}" -gt 0 ]; then
+        echo "Phases Failed: $failed_phases"
+    fi
+    
     echo ""
     echo "Phase Breakdown:"
     
     if [ "$HAS_JQ" = true ]; then
         local phase_nums=$(jq -r '.phases | keys[]' "$PERF_DATA_FILE" | sort -n)
         for phase_num in $phase_nums; do
-            local phase_name=$(jq -r ".phases[\"$phase_num\"].name" "$PERF_DATA_FILE")
+            local phase_name=$(jq -r ".phases[\"$phase_num\"].name // \"Phase $phase_num\"" "$PERF_DATA_FILE")
             local phase_elapsed=$(jq -r ".phases[\"$phase_num\"].elapsed // 0" "$PERF_DATA_FILE")
+            local has_steps=$(jq -r ".phases[\"$phase_num\"].steps | keys | length" "$PERF_DATA_FILE" 2>/dev/null || echo "0")
             
-            if [ "$phase_elapsed" != "0" ] && [ "$phase_elapsed" != "null" ]; then
-                local percentage=$((phase_elapsed * 100 / total_elapsed))
-                echo "  Phase $phase_num: $(format_elapsed_time $phase_elapsed)  ($percentage% of total)"
+            # Include phase if it has elapsed or has steps (so failed/incomplete phases show)
+            if [ "$has_steps" != "0" ] && [ "$has_steps" != "null" ] || { [ "$phase_elapsed" != "0" ] && [ "$phase_elapsed" != "null" ]; }; then
+                if [ "$phase_elapsed" != "0" ] && [ "$phase_elapsed" != "null" ]; then
+                    local percentage=$((phase_elapsed * 100 / total_elapsed))
+                    echo "  Phase $phase_num: $(format_elapsed_time $phase_elapsed)  ($percentage% of total)"
+                else
+                    echo "  Phase $phase_num: (incomplete)"
+                fi
             fi
         done
     else

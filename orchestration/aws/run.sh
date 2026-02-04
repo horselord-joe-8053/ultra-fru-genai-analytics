@@ -292,7 +292,7 @@ ${BLUE}Environments:${NC}
   ${BLUE}Options:${NC}
   ${GREEN}--container-type <ecs|eks>${NC}  Container orchestration type (required for deploy)
   ${GREEN}--dry-run${NC}          Preview changes without modifying AWS resources
-  ${GREEN}--skip-build${NC}       Skip container image build/push; use existing image (tag from git)
+  ${GREEN}--skip-build${NC}       Skip container image build/push; use ECR image \"latest\" (no manual CONTAINER_IMAGE)
   ${GREEN}--preempt${NC}          Destroy existing infrastructure before deployment (clean slate)
   ${GREEN}--skip-data-lake${NC}   Skip data-lake setup even if analytics scheduler is enabled
   ${GREEN}--force-refresh-data${NC} Force refresh of data resources (database schema, data, Delta tables) without destroying infrastructure
@@ -386,16 +386,27 @@ check_or_build_image() {
         return 0
     fi
     
-    # --skip-build: resolve CONTAINER_IMAGE for later steps but do not build or push (image must exist in ECR or deploy will fail at pull)
+    # --skip-build: use ECR 'latest' image so no manual CONTAINER_IMAGE is needed (no build or push)
     if [ "${SKIP_BUILD:-false}" = "true" ]; then
         log_info "Skipping container image check and build (--skip-build)"
-        CONTAINER_IMAGE=$(resolve_container_image_for_aws 2>/dev/null)
-        if [ -z "$CONTAINER_IMAGE" ] || [[ "$CONTAINER_IMAGE" != *":"* ]]; then
-            log_error "CONTAINER_IMAGE could not be resolved. Ensure git_helpers and load-image-identifiers are available."
+        # Use ECR repo URI from startup (load_aws_identifiers); fallback to building it if unset
+        local ecr_uri="${ECR_REPO_URI:-}"
+        if [ -z "$ecr_uri" ] || [[ "$ecr_uri" != *".dkr.ecr."* ]]; then
+            ecr_uri=$(build_ecr_repo_uri 2>/dev/null | grep -E "^[0-9]+\.dkr\.ecr\." | head -1)
+        fi
+        if [ -z "$ecr_uri" ]; then
+            log_error "ECR_REPO_URI not set and could not be built. Run without --skip-build once, or set CONTAINER_IMAGE."
             exit 1
         fi
+        CONTAINER_IMAGE="${ecr_uri}:latest"
+        # Fail fast: require ECR tag 'latest' when --skip-build (avoid deploy failing later at image pull)
+        if ! AWS_PROFILE="${AWS_PROFILE:-admin}" aws ecr describe-images --repository-name "${ecr_uri##*/}" --image-ids imageTag=latest --region "${AWS_REGION:-us-east-1}" --output text >/dev/null 2>&1; then
+            log_error "ECR tag 'latest' not found in repo ${ecr_uri##*/}. Cannot use --skip-build."
+            log_error "Push an image as 'latest' (run without --skip-build once), or do not use --skip-build."
+            exit 1
+        fi
+        log_info "Using CONTAINER_IMAGE: $CONTAINER_IMAGE (ECR 'latest' exists; no build/push)"
         export CONTAINER_IMAGE
-        log_info "Using CONTAINER_IMAGE: $CONTAINER_IMAGE (no build/push)"
         return 0
     fi
     
@@ -680,7 +691,7 @@ deploy_eks_full() {
     
     # Get step information from main() (accounts for Phase 0 steps and preempt if enabled)
     local step_num="${CURRENT_STEP:-5}"  # Default to 5 (after Phase 0.1-0.4, or 0.5 if preempt)
-    local total_steps="${TOTAL_STEPS:-12}"  # Default for eks: 4 (Phase 0) + 7 (deploy incl. 5.1b frontend-eks) + 1 (Phase 7)
+    local total_steps="${TOTAL_STEPS:-13}"  # Default for eks: 4 (Phase 0) + 8 (deploy incl. 5.1b, 5.2b) + 1 (Phase 7)
     log_info "[DEBUG] Starting at step: $step_num/$total_steps"
     
     # ============================================================================
@@ -752,31 +763,25 @@ deploy_eks_full() {
     step_num=$(grep -E '^[0-9]+$' "$temp_output" | tail -1)
     log_info "[DEBUG] Extracted step_num=$step_num from output"
     
-    # Extract CONTAINER_IMAGE from output if it was logged
-    # The check_or_build_image function should have set CONTAINER_IMAGE, but since it ran in background,
-    # we need to re-export it in the main shell. Check if it's already set, otherwise extract from logs.
-    if [ -z "${CONTAINER_IMAGE:-}" ]; then
-        # Try to extract CONTAINER_IMAGE from the output logs
-        # Look for lines like: "CONTAINER_IMAGE='...'" or "Using container image: ..."
-        # Extract the full ECR URI with tag, removing any quotes
-        local extracted_image=$(grep -E "(CONTAINER_IMAGE=|Using container image:)" "$temp_output" | \
-            grep -oE "[0-9]+\.dkr\.ecr\.[^:']+:[^[:space:]']+" | head -1 | tr -d "'\"")
-        if [ -n "$extracted_image" ]; then
-            export CONTAINER_IMAGE="$extracted_image"
-            log_info "[DEBUG] Extracted CONTAINER_IMAGE from function output: $CONTAINER_IMAGE"
-        else
-            # If not found in logs, regenerate it (should be fast since image already exists)
-            log_info "[DEBUG] CONTAINER_IMAGE not found in output, regenerating..."
-            if command -v resolve_container_image_for_aws >/dev/null 2>&1; then
-                export CONTAINER_IMAGE=$(resolve_container_image_for_aws 2>/dev/null)
-                log_info "[DEBUG] Regenerated CONTAINER_IMAGE: $CONTAINER_IMAGE"
-            fi
+    # Use CONTAINER_IMAGE from Phase 1 output so rest of run (Delta, Terraform, k8s) uses same image
+    # Phase 1 ran in background; startup may have set CONTAINER_IMAGE to a new tag (load_image_identifiers).
+    # Prefer the value Phase 1 actually used (e.g. ECR:latest when --skip-build) so Delta and deploy don't use a tag that was never built.
+    local extracted_image
+    extracted_image=$(grep -E "(CONTAINER_IMAGE=|Using container image:|Using CONTAINER_IMAGE:)" "$temp_output" 2>/dev/null | \
+        grep -oE "[0-9]+\.dkr\.ecr\.[^:']+:[^[:space:]']+" | head -1 | tr -d "'\"")
+    if [ -n "$extracted_image" ]; then
+        export CONTAINER_IMAGE="$extracted_image"
+        log_info "[DEBUG] Using CONTAINER_IMAGE from Phase 1 output: $CONTAINER_IMAGE"
+    elif [ -z "${CONTAINER_IMAGE:-}" ]; then
+        log_info "[DEBUG] CONTAINER_IMAGE not in Phase 1 output and unset, regenerating..."
+        if command -v resolve_container_image_for_aws >/dev/null 2>&1; then
+            export CONTAINER_IMAGE=$(resolve_container_image_for_aws 2>/dev/null)
+            log_info "[DEBUG] Regenerated CONTAINER_IMAGE: $CONTAINER_IMAGE"
         fi
     else
-        # Clean up any quotes that might have been included
         CONTAINER_IMAGE=$(echo "$CONTAINER_IMAGE" | tr -d "'\"")
         export CONTAINER_IMAGE
-        log_info "[DEBUG] CONTAINER_IMAGE already set (cleaned): $CONTAINER_IMAGE"
+        log_info "[DEBUG] CONTAINER_IMAGE not in Phase 1 output, keeping current (cleaned): $CONTAINER_IMAGE"
     fi
     
     # Cleanup
@@ -825,9 +830,18 @@ deploy_eks_full() {
     fi
     
     # ============================================================================
-    # (Phase 3: Database Setup is handled via Kubernetes manifests for EKS)
+    # Phase 3: Database Setup (pgvector, schema, fru_sales_embeddings, data)
     # ============================================================================
-    
+    _phase3_tmp=$(mktemp)
+    deploy_phase_setup_database "$step_num" "$total_steps" "$SCRIPT_DIR" "$ENVIRONMENT" "${FORCE_REFRESH_DATA:-false}" "${DRY_RUN:-false}" 2>&1 | tee "$_phase3_tmp"
+    _phase3_rc=${PIPESTATUS[0]}
+    step_num=$(grep -E '^[0-9]+$' "$_phase3_tmp" | tail -1)
+    rm -f "$_phase3_tmp"
+    if [ "$_phase3_rc" -ne 0 ]; then
+        log_error "Phase 3 (Database Setup) failed; exiting."
+        exit 1
+    fi
+
     # ============================================================================
     # Phase 4: Data Lake Setup (optional, conditional)
     # ============================================================================
@@ -1008,8 +1022,71 @@ deploy_eks_full() {
     elapsed=$(( $(date +%s) - step_start_time ))
     perf_step_end 5 "5.2" "SUCCESS" "Kubernetes manifests deployed"
     log_success "Phase 5: Step 5.2 - Step ${step_num}/${total_steps} PASSED: Kubernetes manifests deployed (took $(format_elapsed_time $elapsed))"
+    step_num=$((step_num + 1))
+
+    # Step 5.2b: Update CloudFront with real EKS Ingress hostname (so UI /query, /version, /analytics reach API)
+    # frontend-eks was applied in 5.1b with placeholder; after Ingress exists we re-apply with EKS_ALB_DNS_NAME.
+    if [ "$DRY_RUN" != "true" ]; then
+        perf_step_start 5 "5.2b" "Updating CloudFront with EKS Ingress hostname"
+        step_start_time_5_2b=$(date +%s)
+        log_step "Phase 5: Step 5.2b - Step ${step_num}/${total_steps}: Updating CloudFront with EKS Ingress hostname (so UI can reach API)" >&2
+        INGRESS_NAMESPACE="${NAMESPACE:-}"
+        if [ -z "$INGRESS_NAMESPACE" ]; then
+            INGRESS_NAMESPACE=$(kubectl get pods -l app=fru-api -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null | head -1 || echo "")
+            [ -z "$INGRESS_NAMESPACE" ] && INGRESS_NAMESPACE="default"
+        fi
+        INGRESS_NAME="fru-api-ingress"
+        if [ "$INGRESS_NAMESPACE" != "default" ]; then
+            if kubectl get ingress "fru-api-ingress-${INGRESS_NAMESPACE#fru-api-}" -n "$INGRESS_NAMESPACE" >/dev/null 2>&1; then
+                INGRESS_NAME="fru-api-ingress-${INGRESS_NAMESPACE#fru-api-}"
+            elif kubectl get ingress "fru-api-ingress" -n "$INGRESS_NAMESPACE" >/dev/null 2>&1; then
+                INGRESS_NAME="fru-api-ingress"
+            fi
+        fi
+        EKS_INGRESS_HOSTNAME=""
+        EKS_5_2B_TIMEOUT=300
+        EKS_5_2B_INTERVAL=10
+        ELAPSED_5_2B=0
+        log_info "Waiting for Ingress hostname (Ingress: $INGRESS_NAME, namespace: $INGRESS_NAMESPACE, timeout: ${EKS_5_2B_TIMEOUT}s)..." >&2
+        while [ $ELAPSED_5_2B -lt $EKS_5_2B_TIMEOUT ]; do
+            EKS_INGRESS_HOSTNAME=$(kubectl get ingress "$INGRESS_NAME" -n "$INGRESS_NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            if [ -n "$EKS_INGRESS_HOSTNAME" ] && [ "$EKS_INGRESS_HOSTNAME" != "null" ]; then
+                log_success "Ingress hostname: $EKS_INGRESS_HOSTNAME" >&2
+                break
+            fi
+            if [ $((ELAPSED_5_2B % 30)) -eq 0 ] && [ $ELAPSED_5_2B -gt 0 ]; then
+                log_info "Still waiting for Ingress hostname... (${ELAPSED_5_2B}s / ${EKS_5_2B_TIMEOUT}s)" >&2
+            fi
+            sleep $EKS_5_2B_INTERVAL
+            ELAPSED_5_2B=$((ELAPSED_5_2B + EKS_5_2B_INTERVAL))
+        done
+        if [ -n "$EKS_INGRESS_HOSTNAME" ] && [ "$EKS_INGRESS_HOSTNAME" != "null" ]; then
+            export EKS_ALB_DNS_NAME="$EKS_INGRESS_HOSTNAME"
+            log_info "Re-applying frontend-eks with EKS_ALB_DNS_NAME=$EKS_ALB_DNS_NAME so CloudFront routes /query, /version, /analytics to API" >&2
+            if ! "$REPO_ROOT/orchestration/terraform/deploy.sh" "$ENVIRONMENT" frontend-eks; then
+                elapsed_5_2b=$(( $(date +%s) - step_start_time_5_2b ))
+                perf_step_end 5 "5.2b" "FAILED" "frontend-eks re-apply failed"
+                log_error "Phase 5: Step 5.2b - Step ${step_num}/${total_steps} FAILED: frontend-eks re-apply failed (took $(format_elapsed_time $elapsed_5_2b))" >&2
+                log_error "CloudFront may still point to placeholder; UI /query and /version may not work. Fix: export EKS_ALB_DNS_NAME=<ingress-hostname> and run: orchestration/terraform/deploy.sh $ENVIRONMENT frontend-eks" >&2
+                exit 1
+            fi
+            elapsed_5_2b=$(( $(date +%s) - step_start_time_5_2b ))
+            perf_step_end 5 "5.2b" "SUCCESS" "CloudFront updated with Ingress hostname"
+            log_success "Phase 5: Step 5.2b - Step ${step_num}/${total_steps} PASSED: CloudFront updated with Ingress hostname (took $(format_elapsed_time $elapsed_5_2b))" >&2
+        else
+            elapsed_5_2b=$(( $(date +%s) - step_start_time_5_2b ))
+            perf_step_end 5 "5.2b" "FAILED" "Ingress hostname not available (timeout)"
+            log_warning "Phase 5: Step 5.2b - Step ${step_num}/${total_steps}: Ingress hostname not available after ${EKS_5_2B_TIMEOUT}s (took $(format_elapsed_time $elapsed_5_2b))" >&2
+            log_warning "CloudFront still has placeholder; UI /query and /version will not work until you run:" >&2
+            log_warning "  EKS_ALB_DNS_NAME=\$(kubectl get ingress $INGRESS_NAME -n $INGRESS_NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')" >&2
+            log_warning "  export EKS_ALB_DNS_NAME && $REPO_ROOT/orchestration/terraform/deploy.sh $ENVIRONMENT frontend-eks" >&2
+            # Do not exit: deploy succeeded; user can re-run frontend-eks apply once Ingress is ready
+        fi
+        # step_num already reflects 5.2b (we incremented once before 5.2b); no second increment
+    fi
+
     perf_phase_end 5
-    
+
     # Export updated step number for Phase 7 in main()
     export CURRENT_STEP=$((step_num + 1))
     
@@ -1108,7 +1185,7 @@ main() {
     
     if [ "$DEPLOY_COMMAND" = "deploy" ]; then
         if [ "$container_type_for_steps" = "eks" ]; then
-        total_steps=12  # 4 (Phase 0) + 7 (deploy incl. 5.1b frontend-eks) + 1 (Phase 7)
+        total_steps=13  # 4 (Phase 0) + 8 (deploy incl. 5.1b frontend-eks, 5.2b CloudFront update) + 1 (Phase 7)
         fi
     elif [ "$DEPLOY_COMMAND" = "infrastructure" ]; then
         total_steps=6  # 4 (Phase 0) + 2 (infrastructure only)
@@ -1351,8 +1428,8 @@ main() {
         local total_steps="${TOTAL_STEPS:-13}"  # Default for ecs
         if [ "$container_type_for_steps" = "eks" ]; then
             # Defaults for eks if not set
-            step_num="${CURRENT_STEP:-11}"  # Default: after Phase 0 (4) + deploy (7) + 1 = 11
-            total_steps="${TOTAL_STEPS:-12}"  # Default for eks
+            step_num="${CURRENT_STEP:-12}"  # Default: after Phase 0 (4) + deploy (8 incl. 5.2b) + 1 = 12
+            total_steps="${TOTAL_STEPS:-13}"  # Default for eks
         fi
         perf_phase_start 7 "Validation and Verification"
         perf_step_start 7 "7.1" "Verifying deployment and generating test instructions"

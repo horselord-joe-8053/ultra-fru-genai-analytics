@@ -174,7 +174,7 @@ build_and_push_ecr() {
         log_success "ECR repository created"
     fi
     
-    # If image exists and we're not forcing rebuild, we're done
+    # If image exists and we're not forcing rebuild, we're done (no push; 'latest' assumed from prior build)
     if [ "$should_rebuild" = false ]; then
         log_success "Image already exists: $ECR_REPO_URI:$IMAGE_TAG"
         log_info "To force rebuild, set FORCE_REBUILD=true"
@@ -208,12 +208,13 @@ build_and_push_ecr() {
     log_success "ECR login succeeded"
     
     # --- Step 4/4: Docker build (this is the slow step; output streams so you see progress) ---
-    log_info "[Phase 1 build-push] Step 4/4: Building Docker image for linux/amd64 (required for ECS Fargate)..."
+    DOCKER_PLATFORM="${DOCKER_RUN_REMOTE_PLATFORM:-linux/amd64}"
+    log_info "[Phase 1 build-push] Step 4/4: Building Docker image for ${DOCKER_PLATFORM} (required for ECS/EKS)..."
     log_info "  Build args: SPARK_VERSION=${SPARK_VERSION:-4.0.1}, HADOOP_VERSION=${HADOOP_VERSION:-3}"
     log_info "  Dockerfile: $REPO_ROOT/module_app_core/pack_with_docker/Dockerfile.api"
     log_info "  Docker build output (streaming) — next lines are from 'docker build':"
     cd "$REPO_ROOT"
-    docker build --platform linux/amd64 --progress=plain \
+    docker build --platform "$DOCKER_PLATFORM" --progress=plain \
         --build-arg SPARK_VERSION=${SPARK_VERSION:-4.0.1} \
         --build-arg HADOOP_VERSION=${HADOOP_VERSION:-3} \
         -t "$ECR_REPO_NAME:$IMAGE_TAG" \
@@ -232,11 +233,13 @@ build_and_push_ecr() {
         exit 1
     fi
     
-    # Also tag as 'latest' for convenience (Terraform will use the git SHA tag)
-    # This allows manual operations to use 'latest' while Terraform uses specific version
-    log_info "Tagging as 'latest' for convenience..."
+    # Also tag and push 'latest' so --skip-build can use it (required for downstream --skip-build runs)
+    log_info "Tagging and pushing as 'latest'..."
     docker tag "$ECR_REPO_URI:$IMAGE_TAG" "$ECR_REPO_URI:latest"
-    docker push "$ECR_REPO_URI:latest" || log_warning "Failed to push 'latest' tag (non-critical)"
+    if ! docker push "$ECR_REPO_URI:latest"; then
+        log_error "Push of 'latest' tag failed. --skip-build requires 'latest' to exist in ECR."
+        exit 1
+    fi
     
     log_success "Image pushed successfully: $ECR_REPO_URI:$IMAGE_TAG"
     log_info "Image URI for Terraform: $ECR_REPO_URI:$IMAGE_TAG"

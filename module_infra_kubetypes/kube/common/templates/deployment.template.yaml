@@ -141,6 +141,24 @@ spec:
               name: fru-config
               key: analytics-scheduler-interval-seconds
               optional: true
+        - name: DELTA_TABLE_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: delta-table-path
+              optional: true
+        - name: CONTAINER_TYPE
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: container-type
+              optional: true
+        - name: DELTA_LAKE_PACKAGE
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: delta-lake-package
+              optional: true
         - name: ALLOWED_ORIGINS
           valueFrom:
             configMapKeyRef:

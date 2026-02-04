@@ -339,6 +339,7 @@ load_data_aws() {
     log_info "  Database: $db_name"
     
     cd "$REPO_ROOT"
+    export PYTHONPATH="${REPO_ROOT}/module_app_core${PYTHONPATH:+:$PYTHONPATH}"
     python -m backend.etl.load_openai_embeddings_to_pgvector_rds_api
     
     if [ $? -eq 0 ]; then
