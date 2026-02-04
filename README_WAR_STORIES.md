@@ -1094,3 +1094,142 @@ The deploy script runs with `set -u`. After the parallel deployment-wait loop, w
 "API/Frontend URL not available" after applying an Ingress usually means **no Ingress Controller is running** to provision the load balancer and fill Ingress `.status`. For EKS with NGINX, install the controller in the deploy pipeline before applying Ingresses that reference its class. Fix shell cleanup under `set -u` by using default-empty for array length and elements (`${arr[@]:-}`, `((${#arr[@]:-0} > 0))`) so empty/unset arrays don't trigger unbound variable.
 
 ---
+
+## 24. EKS Analytics Scheduler: "No analytics data available" — Scheduler Validation, S3A Credentials, and Admin vs Bedrock
+
+**creation:** `<260203>`
+**last_updated:** `<260203>`
+
+**keywords:** EKS, analytics scheduler, Spark, Delta Lake, S3A, CONTAINER_TYPE, DELTA_TABLE_PATH, credentials provider, bedrock-admin, admin
+**difficulty:** 7
+**significance:** 8
+
+### 24.1 Context
+
+The analytics panel in the UI showed "No analytics data available yet. Analytics will be available after the first batch run." The Spark batch analytics job runs inside the API pod (via `run_scheduler.py`) when `ENABLE_ANALYTICS_SCHEDULER=true`, but it was not producing data. Clicking "Retry" didn't help.
+
+### 24.2 Root Cause (Multiple Fixes)
+
+1. **Scheduler validation rejected EKS:** The scheduler checked `is_ecs_deployment` for S3 path validation. EKS uses `CONTAINER_TYPE=eks`, so `is_ecs_deployment` was false, and the code raised: "DELTA_TABLE_PATH is an S3 path, but CONTAINER_TYPE=eks does not indicate ECS deployment." The fix: use `is_aws_deployment = is_ecs_deployment or is_eks_deployment` for validation and S3A config.
+
+2. **Missing env vars in K8s:** `DELTA_TABLE_PATH`, `CONTAINER_TYPE`, and `DELTA_LAKE_PACKAGE` were not in the ConfigMap or Deployment. The scheduler and Spark jobs need these. Added them to `configmap.template.yaml`, `deployment.template.yaml`, and `kubernetes-manifests.sh` (fetching `s3_delta_table_path` from Terraform, converting `s3://` to `s3a://.../fru_sales`).
+
+3. **S3 access denied (bedrock-admin):** EKS pods used bedrock-admin credentials (from the K8s secret). That IAM user has Bedrock permissions but not S3. The Spark job and Delta verification failed with `AccessDenied` on `s3:ListBucket` for the analytics bucket. Fix: use **admin** credentials for the K8s secret (EKS pods need both Bedrock and S3). Updated `kubernetes-manifests.sh` to export `AWS_ACCESS_KEY_ID="${AWS_ADMIN_ACCESS_KEY_ID:-...}"` and `AWS_SECRET_ACCESS_KEY="${AWS_ADMIN_SECRET_ACCESS_KEY:-...}"` when generating the Secret.
+
+4. **S3A credentials provider:** Spark uses Hadoop S3A. We had `IAMInstanceCredentialsProvider` (instance metadata). EKS pods use **static env credentials**, not instance metadata. The JVM didn't pick up `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` from the pod. Fix: use a **chain** of providers: `EnvironmentVariableCredentialsProvider,IAMInstanceCredentialsProvider` in `spark_config.py`, so env vars are tried first (EKS), then instance metadata (ECS).
+
+### 24.3 Key Insight
+
+> EKS pods with static credentials need env-based S3A providers. Use a credential chain (env first, then instance metadata) so both EKS (env) and ECS (task role) work. For EKS pods that need both Bedrock and S3, use admin credentials in the K8s secret; bedrock-admin alone lacks S3.
+
+### 24.4 Resolution
+
+- **Scheduler:** `scheduler.py` now uses `is_aws_deployment` for path validation and S3A config.
+- **ConfigMap/Deployment:** Added `delta-table-path`, `container-type`, `delta-lake-package`; manifest generation fetches `s3_delta_table_path` from Terraform and converts to `s3a://`.
+- **Secret:** K8s secret now uses admin credentials for EKS (both Bedrock and S3 access).
+- **S3A config:** `get_s3a_spark_config()` uses `EnvironmentVariableCredentialsProvider,IAMInstanceCredentialsProvider`.
+
+### 24.5 Takeaway
+
+For EKS analytics: (1) treat EKS as an AWS deployment (`is_aws_deployment`); (2) pass `DELTA_TABLE_PATH`, `CONTAINER_TYPE`, `DELTA_LAKE_PACKAGE` into pods; (3) use admin credentials if pods need both Bedrock and S3; (4) use S3A credential chain with env provider first for static credentials in EKS.
+
+---
+
+## 25. Making Kube Work with Cloud-Provider Agnostic NLB: Why It Worked Before but Not After Refactor
+
+**creation:** `<260203>`
+**last_updated:** `<260203>`
+
+**keywords:** EKS, Kubernetes, NGINX Ingress Controller, NLB, cloud-provider agnostic, LoadBalancer Service, teardown, helm uninstall
+**difficulty:** 8
+**significance:** 9
+
+### 25.1 Context and the Struggle
+
+We struggled to figure out why the EKS NLB worked before but no longer worked after a refactor. Deployments reported success, but the API URL and Frontend URL were "not available," and `/analytics` returned 502. The refactor had reorganized deploy steps and Terraform layers; the NLB used to appear, then it didn't.
+
+### 25.2 How Kube Gets an NLB (Cloud-Provider Agnostic)
+
+We use a **cloud-provider agnostic** approach: Kubernetes abstractions, not AWS-specific Terraform for the load balancer.
+
+| Component | What it is | Who creates it |
+|-----------|------------|----------------|
+| **Ingress** | K8s resource that routes HTTP traffic | Our deploy applies manifest (`ingress.template.yaml`) |
+| **Ingress Controller** | Watches Ingresses and configures a proxy | NGINX Ingress Controller (Helm) |
+| **Service (LoadBalancer)** | K8s object; when `type: LoadBalancer`, the **cloud** creates a real LB | NGINX chart creates `ingress-nginx-controller` Service; AWS creates NLB |
+| **NLB hostname** | DNS of the load balancer | Appears in `Service.status.loadBalancer.ingress` and in each adopted **Ingress** `.status.loadBalancer.ingress` |
+
+The NLB is **not** in Terraform. It is created by AWS when the NGINX controller's Service (`type: LoadBalancer`) is applied. NGINX adopts Ingresses with `ingressClassName: fru-nginx-cls` and copies the NLB hostname into their `.status`. CloudFront and verification scripts read that hostname to reach the API.
+
+### 25.3 Why It Worked Before and Broke After Refactor
+
+- **Before:** NGINX Ingress Controller was installed manually or by an earlier pipeline step. When we applied the app Ingress, NGINX was already running, adopted it, and filled `.status.loadBalancer.ingress` with the NLB hostname.
+- **After refactor:** The deploy pipeline was reordered. We applied the app Ingress **before** installing NGINX (or NGINX install was removed from the automated flow). No controller → no NLB → Ingress `.status` stayed empty → API/Frontend URLs unavailable, CloudFront 502.
+
+So the "refactor" didn't break the Ingress manifest; it **dropped or reordered** the step that installs the Ingress Controller. See War Story 23 for the fix (add NGINX install as Substep 4.5 before app manifests).
+
+### 25.4 Teardown: Releasing the NLB
+
+The NLB is created by the NGINX controller's Service. When we teardown EKS:
+
+1. **Option A (current):** Terraform destroys the EKS cluster → all K8s resources (including NGINX, its Service, and the NLB) are removed. AWS releases the NLB asynchronously (ENIs can linger 10–30 min; see War Story 7).
+2. **Option B (cleaner):** Explicitly uninstall the NGINX Ingress Controller **before** Terraform destroy. That deletes the LoadBalancer Service, so AWS releases the NLB sooner. We add `helm uninstall ingress-nginx -n ingress-nginx` to the EKS pre-destroy flow (`stop-eks-services.sh` or `eks_pre_destroy.py`).
+
+We use Option B: `stop-eks-services.sh` now uninstalls the NGINX Helm release first, then scales down deployments and deletes app services. This ensures the NLB (and its ENIs) are released in a predictable order during teardown.
+
+### 25.5 Where Teardown Lives
+
+- **EKS pre-destroy:** `module_infra_kubetypes/kube/aws/teardown/eks_pre_destroy.py` calls `stop-eks-services.sh`.
+- **NGINX uninstall:** Inside `stop-eks-services.sh`, before scaling deployments, we run `helm uninstall ingress-nginx -n ingress-nginx` (if Helm and the release exist). This is the correct place because: (1) it runs before Terraform destroy; (2) it runs while the cluster is still up and kubectl works; (3) it explicitly releases the NLB so we don't rely solely on cluster deletion.
+
+### 25.6 Takeaway
+
+The kube NLB is created by Kubernetes (NGINX Ingress Controller's LoadBalancer Service), not Terraform. Install NGINX in the deploy pipeline **before** app Ingresses. For teardown, uninstall NGINX explicitly so the NLB is released before cluster destroy; otherwise ENIs can linger. The "cloud-provider agnostic" design means we use standard K8s abstractions; the cloud (AWS) creates the actual NLB when it sees the LoadBalancer Service.
+
+---
+
+## 26. CloudFront 502 for EKS: Why Post-Deploy Origin Update is Kube-Only
+
+**creation:** `<260203>`
+**last_updated:** `<260203>`
+
+**keywords:** CloudFront, 502 Bad Gateway, EKS, NLB, API origin, frontend-eks, update-cloudfront-loadbalancer, kube-only
+**difficulty:** 6
+**significance:** 8
+
+### 26.1 Context
+
+After EKS deploy, the frontend (CloudFront) showed **502 Bad Gateway** for `/query`, `/analytics`, and other API paths. The API was healthy when hit directly via the NLB, but CloudFront could not reach it.
+
+### 26.2 Root Cause
+
+CloudFront's **API origin** (the backend URL for `/query`, `/analytics`, etc.) was never updated to the real EKS NLB hostname.
+
+- **ECS (nonkube):** Terraform has `alb_dns_name` from the ECS stack at apply time. The frontend-ecs layer applies with that value, so CloudFront's API origin is correct from the start. **No post-deploy script needed.**
+- **EKS (kube):** The NLB hostname appears only **after** the NGINX Ingress Controller and app Ingress exist (see War Story 25). Terraform (frontend-eks) is applied earlier with a placeholder. So we need a **post-deploy** step that: (1) reads the real NLB hostname from the Ingress, (2) updates CloudFront's API origin to that hostname.
+
+The script `update-cloudfront-loadbalancer.sh` does that. But it was reading `cloudfront_distribution_id` from the **EKS** Terraform layer (`.../kube/aws/terra/environments/dev/eks`), which does **not** define that output. The output lives in the **frontend** module, used by the **frontend-eks** layer. So the script got no ID, **skipped** the update, and CloudFront kept pointing at a placeholder or stale origin → 502.
+
+### 26.3 Why This Is Kube-Only
+
+| Backend | Who creates LB | When LB hostname exists | CloudFront origin |
+|---------|----------------|-------------------------|-------------------|
+| **ECS** | Terraform (ALB) | At Terraform apply | Set at apply time by frontend-ecs |
+| **EKS** | Kubernetes (NGINX → NLB) | After Ingress and NGINX are up | **Must** be updated post-deploy |
+
+ECS uses Terraform-owned infrastructure; EKS uses the cloud-provider agnostic NLB (War Story 25). For EKS, the NLB is created by Kubernetes, so its hostname is not available at Terraform apply time. Hence the post-deploy CloudFront update is **only needed for kube (EKS)**.
+
+### 26.4 The Fix
+
+- **update-cloudfront-loadbalancer.sh** now reads `cloudfront_distribution_id` from the **frontend-eks** layer:  
+  `module_infra_basic/aws/terra/environments/<env>/frontend-eks`
+
+- It waits for the Ingress NLB hostname, then updates that CloudFront distribution's API origin to the NLB. CloudFront can reach the EKS API → 502 goes away.
+
+See `docs/CLOUDFRONT_ORIGIN_WALKTHROUGH.md` and `docs/README_CLOUDFRONT_SCRIPTS.md` for details.
+
+### 26.5 Takeaway
+
+502 for API paths through CloudFront on EKS usually means CloudFront's API origin was never updated to the EKS NLB. The post-deploy script must read `cloudfront_distribution_id` from the **frontend-eks** layer (where it's defined), not the EKS layer. This step is kube-only because EKS uses a Kubernetes-created NLB whose hostname appears only after deploy.
+
+---

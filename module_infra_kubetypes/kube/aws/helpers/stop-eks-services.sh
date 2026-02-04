@@ -70,9 +70,27 @@ stop_eks_services() {
     log_info "Using kubectl context: $current_context"
     
     if [ "$dry_run" = "true" ]; then
+        log_info "[DRY-RUN] Would uninstall NGINX Ingress Controller"
         log_info "[DRY-RUN] Would scale down Kubernetes deployments to 0"
         log_info "[DRY-RUN] Would delete Kubernetes deployments and services"
         return 0
+    fi
+    
+    # Step 0: Uninstall NGINX Ingress Controller (releases NLB and its ENIs; see War Story 25)
+    # The NLB is created by the NGINX controller's LoadBalancer Service. Uninstalling
+    # releases it before cluster destroy so ENIs don't linger (War Story 7).
+    log_info "  Step 0: Uninstalling NGINX Ingress Controller (releases NLB)..."
+    if command -v helm >/dev/null 2>&1; then
+        if helm status ingress-nginx -n ingress-nginx >/dev/null 2>&1; then
+            helm uninstall ingress-nginx -n ingress-nginx 2>/dev/null || {
+                log_warning "      Failed to uninstall ingress-nginx (may not exist)"
+            }
+            log_info "    NGINX Ingress Controller uninstalled"
+        else
+            log_info "    NGINX Ingress Controller not installed (skip)"
+        fi
+    else
+        log_warning "    helm not found - skipping NGINX uninstall"
     fi
     
     # Step 1: Scale down all deployments to 0
