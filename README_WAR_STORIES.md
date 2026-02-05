@@ -824,7 +824,7 @@ That's why Terraform has first-class **import** and **refresh**: adoption and dr
 
 Import scripts reconcile **state with reality**: they don’t apply external state files—they pull current AWS reality into Terraform state. You need them **before apply** when resources exist in AWS but not in state (so apply doesn’t try to create and hit "already exists"). You also need them **before destroy** when state is empty but AWS still has resources (so destroy can remove orphans instead of no-op’ing and causing the next deploy to re-import and hit errors like `The new Subnets are not in the same Vpc as the existing subnet group`). Same tool, two moments: before apply and before destroy, to keep the whole Terraform flow consistent.
 
-For a focused reference on the per-layer import scripts, their CLI, and teardown-mode behaviors (state locks, “already managed”, “non-existent” patterns), see `docs/learned/README_IMPORT_PREEXIST.md`.
+For a focused reference on the per-layer import scripts, their CLI, and teardown-mode behaviors (state locks, “already managed”, “non-existent” patterns), see `docs/learned/TERRA_LEARN_IMPORT_PREEXIST.md`.
 
 ---
 
@@ -1254,5 +1254,157 @@ See `docs/CLOUDFRONT_ORIGIN_WALKTHROUGH.md` and `docs/README_CLOUDFRONT_SCRIPTS.
 ### 26.5 Takeaway
 
 502 for API paths through CloudFront on EKS usually means CloudFront's API origin was never updated to the EKS NLB. The post-deploy script must read `cloudfront_distribution_id` from the **frontend-eks** layer (where it's defined), not the EKS layer. This step is kube-only because EKS uses a Kubernetes-created NLB whose hostname appears only after deploy.
+
+---
+
+## 27. ECR Prune: Manifest List and Why "Oldest First" Fails for Some Images
+
+**creation:** `<260205>`
+**last_updated:** `<260205>`
+
+**keywords:** AWS ECR, manifest list, multi-arch, batch-delete-image, ImageReferencedByManifestList, Docker
+**difficulty:** 6
+**significance:** 7
+
+### 27.1 Context
+
+A prune script deleted most old ECR images but left a few behind with `ImageReferencedByManifestList` errors. Deleting "oldest first" (to keep the N most recent) meant the script tried to delete child images (e.g. amd64/arm64 manifests) before the parent; ECR refuses to delete a child while a manifest list still references it.
+
+### 27.2 Root Cause
+
+Multi-arch builds (e.g. Docker buildx with `--platform linux/amd64,linux/arm64`) produce a **manifest list** (one digest that points to multiple platform images). The tag (e.g. `latest`) lives on the manifest list; the per-platform images have no tag in the UI. ECR's `batch-delete-image` returns `ImageReferencedByManifestList` when you try to delete a digest that is still referenced by another digest (the manifest list). Deletion order matters: you must delete the **manifest list digest first**, then the child digests become orphaned and can be deleted.
+
+### 27.3 Key Insight
+
+> When pruning ECR, delete **newest first** (by `imagePushedAt` desc) so the manifest list (usually the "tag" / newest) is removed before its children. Deleting oldest first leaves manifest-list children undeletable until the parent is gone.
+
+### 27.4 Resolution
+
+- Prune script: sort images by push date and delete in **newest-first** order (or when doing "keep N", the "to delete" set is the oldest, but send them to the API in an order that processes manifest lists before children—e.g. still newest-first for the batch so the list is in the same batch and deleted first).
+- To clear everything: delete the manifest list digest explicitly first (identify it as the one that had the tag), then run prune again so the now-orphaned children can be deleted.
+
+### 27.5 Takeaway
+
+ECR manifest lists create a parent-child relationship. Always delete the parent (manifest list) before its children; newest-first ordering usually achieves this. The "untagged" / `<none>` images in the console are often those child manifests.
+
+---
+
+## 28. Teardown and ECR: No Tags, No Deletion — Why Teardown Left All Images and How We Fixed It
+
+**creation:** `<260205>`
+**last_updated:** `<260205>`
+
+**keywords:** ECR, teardown, container-type, image tags, eks, ecs, build-push
+**difficulty:** 5
+**significance:** 7
+
+### 28.1 Context
+
+Running `./teardown.sh aws all dev` (or eks/ecs only) never deleted ECR images; the repo kept accumulating builds. We also wanted teardown with `--container-type eks` to delete only EKS-related images and leave ECS images intact (and vice versa), but there was no way to tell which images belonged to which target.
+
+### 28.2 Root Cause
+
+Two separate issues:
+
+1. **Teardown never touched ECR.** The teardown path only runs Terraform destroy and optional orphan cleanup. The ECR repository is not managed by Terraform in this repo, and the only script that deletes ECR (`delete-recreatable-resources.sh`) is never invoked by teardown. So images were simply never deleted.
+
+2. **No tag to identify deployment target.** Images were pushed with only a version tag and `latest`. To delete "only EKS" or "only ECS" images we need a tag that identifies the target (e.g. literal tags `eks` and `ecs`). Without that, we could only delete all or none.
+
+### 28.3 Key Insight
+
+> Teardown must run an explicit ECR cleanup step. To scope deletion by container-type, tag images at build time with the deployment target (`eks` and/or `ecs`); then teardown can delete only images that have the matching tag.
+
+### 28.4 Resolution
+
+- **Build-push:** After pushing the version tag and `latest`, push one or both of the literal tags `eks` and `ecs` based on `CONTAINER_TYPE` (eks, ecs, or all). Same digest, extra tags; no change to version or `latest` semantics.
+- **Teardown:** Added a step that runs `ecr-delete-by-container-type.sh`: for `--container-type eks` delete only images with tag `eks`; for `ecs` only tag `ecs`; for `all` delete all images. Newest-first deletion order to respect manifest lists.
+
+### 28.5 Takeaway
+
+If teardown should clean ECR, it must call ECR deletion explicitly—Terraform won't do it if the repo isn't in state. For teardown-by-container-type, tag at push time (e.g. `eks`, `ecs`) so you can filter at delete time. See `docs/learned/REFACTOR_PLAN_ECR_TAGS_AND_TEARDOWN.md` and `docs/learned/REFACTOR_PLAN_ECR_TEARDOWN.md`.
+
+---
+
+## 29. Shell Scripts "Permission Denied" After a Major Refactor: Git Mode 100755 → 100644
+
+**creation:** `<260205>`
+**last_updated:** `<260205>`
+
+**keywords:** Git, file mode, execute bit, chmod, 100644, 100755, shell scripts, refactor
+**difficulty:** 4
+**significance:** 6
+
+### 29.1 Context
+
+After a large refactor commit (logger migration, ECR scripts, many file touches), orchestration and deploy started failing with "Permission denied" when invoking scripts—e.g. `orchestration/local/setup-python.sh`, `orchestration/terraform/setup-s3-bucket.sh`, and others. The same scripts had worked before the refactor.
+
+### 29.2 Root Cause
+
+Git records each file's **mode** (e.g. 100644 = regular file, 100755 = executable). The refactor commit had many "mode change 100755 => 100644" entries: shell scripts that were previously committed as executable were committed again as **non-executable**. Once that's in history, every checkout (and every clone) gets those files without the execute bit, so the shell refuses to run them and returns "Permission denied".
+
+Common causes for the mode drop during a refactor:
+- **Staging from an environment that didn't have execute bit set** (e.g. editor or IDE that doesn't preserve it, or files copied/touched in a way that cleared it).
+- **Checkout on a filesystem or Git config** where `core.fileMode` is false or execute bits aren't preserved, then add/commit from that state.
+- **Bulk operations** (find/replace, move, or tooling) that rewrote or re-added files without preserving mode.
+
+### 29.3 Key Insight
+
+> After a big refactor, if many scripts suddenly report "Permission denied", check Git mode: they may have been committed as 100644. Fix with `chmod +x` and **re-commit the mode** so the fix is permanent for everyone.
+
+### 29.4 Resolution
+
+- **Immediate fix:** Restore execute bit on all shell scripts:  
+  `find . -name '*.sh' -type f ! -path './.git/*' -exec chmod +x {} \;`
+- **Permanent fix:** Stage and commit the permission change so the index has 100755 for those files:  
+  `git add -u '*.sh'` (or add the specific scripts), then commit e.g. "fix: restore execute bit on shell scripts (were committed as 100644)".
+- **Prevention:** When doing large refactors, avoid re-adding or rewriting scripts in a way that drops the execute bit; after bulk changes, run `chmod +x` on `*.sh` and include that in the commit. Optionally add a CI or pre-commit check that verifies known entrypoint scripts are executable.
+
+### 29.5 Takeaway
+
+Git does not enforce "this file should be executable"; it only stores the mode that was committed. If scripts are committed as 100644, they will be checked out non-executable everywhere. After a refactor that touches many scripts, verify they still run—and if not, fix mode and commit the fix so the repo stays runnable.
+
+---
+
+## 30. Calling Child Shell Scripts: exec vs Run-Then-Exit, and Not Swallowing Output
+
+**creation:** `<260205>`
+**last_updated:** `<260205>`
+
+**keywords:** Bash, exec, child script, exit code, command substitution, stdout, stderr, logging, dispatcher
+**difficulty:** 5
+**significance:** 7
+
+### 30.1 Context
+
+We added simple start/end log lines to entrypoint scripts (`run.sh`, `teardown.sh`, `orchestration/run.sh`, `orchestration/teardown.sh`) so logs would show e.g. `### start of orchestration/run.sh ###` and `### end of orchestration/run.sh ###`. On successful runs we never saw the "end" lines. Separately, when a phase failed (e.g. ECS Phase 1 container image check), the log showed only a generic "Phase failed (fail-fast)" with no underlying error (ECR/git/resolve)—the real error was missing from the log.
+
+### 30.2 Root Cause (Two Different Issues)
+
+**Why "end" never appeared:** The dispatchers used **exec** to run the next script (e.g. `exec "$REPO_ROOT/orchestration/aws/run.sh" ...`). **exec** replaces the current process with the child; the parent script never returns. So any code after the exec (including `log_info "### end of ... ###"`) is never executed. The "end" line only ran on error/help paths that exited before the exec.
+
+**Why phase errors were invisible:** The ECS workflow used `step_num=$(run_phase_and_capture deploy_phase_check_image ...)`. Inside `run_phase_and_capture`, the phase ran as `"$@" 2>&1 | tee "$tmpf"`. All phase stdout/stderr went through the pipe; **tee** wrote to the temp file and to its stdout. That stdout was the only stdout of the function, and it was **consumed by the command substitution** (`step_num=$(...)`). So the phase’s log output (including `log_error` and the real failure reason) was captured into the substitution result and then discarded—never printed. Only the final "Phase failed (fail-fast)" from the caller was visible.
+
+### 30.3 Key Insight
+
+> **exec** is "run and never return": use it when you want the child to fully replace the parent (e.g. save one process slot). If the parent must run code after the child finishes (e.g. log "end", cleanup, or aggregate exit code), **do not use exec**—run the child as a normal command, capture its exit code, then do the post-work and exit with that code.
+>
+> **Command substitution** `var=$(cmd)` captures all stdout of `cmd`. If `cmd` is a pipeline (e.g. `phase 2>&1 | tee file`), then the pipeline’s stdout (everything tee writes to stdout) becomes the substitution result. So the user never sees that output—it’s swallowed. If the user must see phase output (especially errors), either don’t put it in a substitution, or duplicate it to stderr (e.g. `tee "$file" >&2`) so it’s visible while still writing to the file.
+
+### 30.4 Resolution
+
+- **"End" logging:** Replaced **exec** with run-then-exit in all four entrypoints. The parent runs the child script (no exec), captures exit code with `set +e` / `_rc=$?` / `set -e`, logs `### end of ... ###`, then `exit $_rc`. Exit codes are preserved; "end" is always logged when the dispatcher finishes.
+- **Phase output visibility (ECS):** In `run_phase_and_capture`, changed the pipeline to `"$@" 2>&1 | tee "$tmpf" >&2` so tee’s output is duplicated to stderr. The user (and any `2>&1 | tee log` around the run) now sees the phase output including the real error; the temp file is still used to parse the step number.
+
+### 30.5 Calling Child Scripts: General Guidelines
+
+- **When to use exec:** When the parent is a thin launcher and you want the child to replace it completely (same PID, no code after the child). Good for "exec the real binary" or "exec the next stage and never return."
+- **When not to use exec:** When the parent must run after the child (logging, cleanup, aggregating exit codes, or running multiple children). Run the child as a normal command, capture `$?`, then do the rest and `exit $rc`.
+- **Propagating exit codes:** With `set -e`, a failing child will make the parent exit before you can capture `$?`. Use `set +e` around the child call, then `rc=$?`, then `set -e`, then your cleanup/logging, then `exit $rc`.
+- **Don’t swallow important output:** If you run `result=$(some_script 2>&1 | tee file)`, the user sees nothing from `some_script`—it’s all in `result`. For phases or scripts that log errors to stdout/stderr, either run them without capturing (so output goes to the terminal) or tee to stderr: `some_script 2>&1 | tee file >&2` so output is visible and still in `file`.
+- **exit vs return in called functions:** If a **sourced** function uses `exit 1`, the whole process exits—the caller never gets control to log or record failure. For functions that are called (not exec’d) and where the caller should handle failure, use `return 1` so the caller can run `perf_step_end`, log, then exit. Reserve `exit` for "this process should stop here."
+
+### 30.6 Takeaway
+
+Use **exec** only when the parent must not run after the child. For dispatchers that need to log "end" or handle exit codes, run the child, capture `$?`, log/cleanup, then exit with that code. Avoid command substitution that captures the only copy of phase output—duplicate to stderr (e.g. `tee file >&2`) so errors stay visible. Prefer **return** over **exit** in shared functions so callers can record and log before exiting.
 
 ---

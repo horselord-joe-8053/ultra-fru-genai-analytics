@@ -249,16 +249,24 @@ perf_print_summary() {
                 
                 # Print steps in this phase (include steps with status even if elapsed 0)
                 local step_nums=$(jq -r ".phases[\"$phase_num\"].steps | keys[]" "$PERF_DATA_FILE" 2>/dev/null | sort -n)
+                local now_ts=$(date +%s)
                 for step_num in $step_nums; do
                     local step_name=$(jq -r ".phases[\"$phase_num\"].steps[\"$step_num\"].name // \"\"" "$PERF_DATA_FILE")
                     local step_elapsed=$(jq -r ".phases[\"$phase_num\"].steps[\"$step_num\"].elapsed // 0" "$PERF_DATA_FILE")
+                    local step_start=$(jq -r ".phases[\"$phase_num\"].steps[\"$step_num\"].start // 0" "$PERF_DATA_FILE")
                     local step_status=$(jq -r ".phases[\"$phase_num\"].steps[\"$step_num\"].status // \"UNKNOWN\"" "$PERF_DATA_FILE")
                     
-                    local status_label="[UNKNOWN]"
+                    local status_label="[INCOMPLETE]"
                     case "$step_status" in
                         "SUCCESS") status_label="[PASSED]" ;;
                         "FAILED") status_label="[FAILED]" ;;
                         "SKIPPED") status_label="[SKIPPED]" ;;
+                        "UNKNOWN"|"null"|"")
+                            # Step was started but never ended: show elapsed from start to now
+                            if [ "$step_start" != "0" ] && [ "$step_start" != "null" ]; then
+                                step_elapsed=$((now_ts - step_start))
+                            fi
+                            ;;
                     esac
                     # Show step if we have status or elapsed (so failed steps always show)
                     if [ "$step_status" != "null" ] && [ "$step_status" != "" ] || { [ "$step_elapsed" != "0" ] && [ "$step_elapsed" != "null" ]; }; then
@@ -346,17 +354,21 @@ perf_print_statistics() {
             # Count steps (include steps with status even if elapsed 0)
             local step_nums=$(jq -r ".phases[\"$phase_num\"].steps | keys[]" "$PERF_DATA_FILE" 2>/dev/null | sort -n)
             local phase_has_failed=0
+            local stat_now=$(date +%s)
             for step_num in $step_nums; do
                 local step_elapsed=$(jq -r ".phases[\"$phase_num\"].steps[\"$step_num\"].elapsed // 0" "$PERF_DATA_FILE")
+                local step_start=$(jq -r ".phases[\"$phase_num\"].steps[\"$step_num\"].start // 0" "$PERF_DATA_FILE")
                 local step_status=$(jq -r ".phases[\"$phase_num\"].steps[\"$step_num\"].status // \"UNKNOWN\"" "$PERF_DATA_FILE")
-                
+                # Incomplete step (started but no end): use elapsed from start to now for stats
+                if { [ "$step_status" = "UNKNOWN" ] || [ "$step_status" = "null" ] || [ -z "$step_status" ]; } && [ "$step_start" != "0" ] && [ "$step_start" != "null" ]; then
+                    step_elapsed=$((stat_now - step_start))
+                fi
                 if [ "$step_status" != "null" ] && [ "$step_status" != "" ]; then
                     total_steps=$((total_steps + 1))
                     case "$step_status" in
                         "SKIPPED") skipped_steps=$((skipped_steps + 1)) ;;
                         "FAILED") failed_steps=$((failed_steps + 1)); phase_has_failed=1 ;;
                     esac
-                    
                     if [ "$step_status" != "SKIPPED" ]; then
                         total_step_time=$((total_step_time + step_elapsed))
                         if [ "$step_elapsed" -lt "$min_step_time" ] 2>/dev/null; then

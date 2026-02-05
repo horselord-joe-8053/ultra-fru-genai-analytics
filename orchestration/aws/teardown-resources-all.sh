@@ -81,6 +81,7 @@ ECS_PRE_DESTROY="$REPO_ROOT/module_infra_kubetypes/nonkube/aws/teardown/ecs_pre_
 SHARED_PRE_DESTROY="$REPO_ROOT/orchestration/aws/teardown/shared_pre_destroy.py"
 CLEANUP_ORPHANED="$REPO_ROOT/orchestration/aws/teardown/cleanup_orphaned.py"
 TF_TEARDOWN="$REPO_ROOT/orchestration/terraform/teardown.sh"
+ECR_DELETE_BY_CT="$REPO_ROOT/orchestration/aws/cli/ecr-delete-by-container-type.sh"
 
 show_help() {
     cat << EOF
@@ -308,6 +309,30 @@ cleanup_orphaned() {
     echo ""
 }
 
+# --- ECR cleanup by container-type (delete only images with tag eks, ecs, or all) ---
+run_ecr_cleanup() {
+    log_step "ECR cleanup (container-type: $CONTAINER_TYPE)"
+    if [ ! -x "$ECR_DELETE_BY_CT" ]; then
+        log_info "ECR delete script not found or not executable: $ECR_DELETE_BY_CT; skipping."
+        echo ""
+        return 0
+    fi
+    if [ "$DRY_RUN" = "true" ]; then
+        log_info "[DRY-RUN] Would run: $ECR_DELETE_BY_CT --container-type $CONTAINER_TYPE --repo $ECR_REPO_NAME --dry-run"
+        echo ""
+        return 0
+    fi
+    export AWS_PROFILE AWS_REGION ECR_REPO_NAME
+    local r=0
+    "$ECR_DELETE_BY_CT" --container-type "$CONTAINER_TYPE" --repo "$ECR_REPO_NAME" --profile "$AWS_PROFILE" --region "$AWS_REGION" || r=$?
+    if [ "$r" -eq 0 ]; then
+        log_success "ECR cleanup ($CONTAINER_TYPE) done"
+    else
+        log_warning "ECR cleanup ($CONTAINER_TYPE) had issues (non-fatal)"
+    fi
+    echo ""
+}
+
 # --- Step 4: Optional local Docker cleanup ---
 cleanup_local_images() {
     log_step "Step 4: Local Docker image cleanup"
@@ -349,11 +374,13 @@ main() {
             run_pre_destroy "eks" || { failed=true; [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1; }
             run_terraform_teardown_layer "eks" || { failed=true; [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1; }
             cleanup_orphaned "eks" || true
+            run_ecr_cleanup || true
             ;;
         ecs)
             run_pre_destroy "ecs" || { failed=true; [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1; }
             run_terraform_teardown_layer "ecs" || { failed=true; [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1; }
             cleanup_orphaned "ecs" || true
+            run_ecr_cleanup || true
             ;;
         all)
             run_pre_destroy "eks" || { failed=true; [ "$TEARDOWN_FAIL_FAST" = "true" ] && exit 1; }
@@ -421,6 +448,7 @@ main() {
             fi
             cleanup_orphaned "ecs" || true
             cleanup_orphaned "eks" || true
+            run_ecr_cleanup || true
             ;;
         *) log_error "Unreachable: CONTAINER_TYPE=$CONTAINER_TYPE"; exit 1 ;;
     esac

@@ -125,11 +125,16 @@ deploy_frontend() {
             s3_bucket_name=""
         done
         if [ -z "$s3_bucket_name" ]; then
-            log_error "Terraform frontend directory not found or s3_bucket_id output missing in: ${FRONTEND_TERRA_DIRS[*]}"
-            log_info "Frontend layer (frontend-ecs or frontend-eks) must be deployed first"
-            log_info "Deploy with: ./run.sh aws kube $ENVIRONMENT  (EKS) or ./run.sh aws nonkube $ENVIRONMENT  (ECS)"
-            log_info "Standalone: CONTAINER_TYPE=eks $REPO_ROOT/module_infra_frontend/aws/deploy-frontend.sh  (or CONTAINER_TYPE=ecs for ECS)"
-            exit 1
+            if [ "$DRY_RUN" = "true" ]; then
+                s3_bucket_name="dry-run-bucket-placeholder"
+                log_info "[DRY-RUN] No s3_bucket_id output in ${FRONTEND_TERRA_DIRS[*]} (frontend layer not applied); using placeholder"
+            else
+                log_error "s3_bucket_id output missing for CONTAINER_TYPE=$CONTAINER_TYPE in: ${FRONTEND_TERRA_DIRS[*]}"
+                log_info "The frontend-${CONTAINER_TYPE} Terraform layer must be applied first (creates S3 + CloudFront)."
+                log_info "Run a full deploy without --dry-run so Phase 4 applies the frontend layer: ./run.sh aws nonkube $ENVIRONMENT  (ECS) or ./run.sh aws kube $ENVIRONMENT  (EKS)"
+                log_info "Or apply only the frontend layer: (cd $REPO_ROOT/module_infra_frontend/aws/terra/environments/$ENVIRONMENT/frontend-${CONTAINER_TYPE} && terragrunt apply -auto-approve)"
+                exit 1
+            fi
         fi
     else
         log_error "Terragrunt is not installed or not in PATH"

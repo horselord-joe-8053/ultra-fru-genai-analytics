@@ -14,9 +14,17 @@
 # docs/learned/TERRA_LEARNED.md for layers and subnet group / Secrets Manager.
 #
 # Options: --preempt (destroy before deploy), --skip-build, --skip-data-lake, etc.
-# Usage:   ./run.sh [local|aws] [kube|nonkube] [dev|prod] [options...]
 # =============================================================================
 set -e
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export REPO_ROOT
-exec "$REPO_ROOT/orchestration/run.sh" "$@"
+# shellcheck source=lib/logger.sh
+source "$REPO_ROOT/lib/logger.sh" 2>/dev/null || true
+command -v log_info >/dev/null 2>&1 || log_info() { echo "[INFO] $*"; }
+log_info "### start of run.sh ###"
+set +e
+"$REPO_ROOT/orchestration/run.sh" "$@"
+_rc=$?
+set -e
+log_info "### end of run.sh ###"
+exit $_rc

@@ -27,6 +27,8 @@ source "$REPO_ROOT/lib/logger.sh"
 source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 load_env_file 2>/dev/null || true
 
+log_info "### start of orchestration/run.sh ###"
+
 PROVIDER="${1:-}"
 ROUTE="${2:-}"
 shift 2 2>/dev/null || true
@@ -39,6 +41,7 @@ show_usage() {
     echo "  aws nonkube [env] → AWS ECS (env: dev|prod, default dev)"
     echo "  aws kube [env]    → AWS EKS (env: dev|prod, default dev)"
     echo "Pass-through options (e.g. --preempt, --skip-data-lake) are forwarded to the target script."
+    log_info "### end of orchestration/run.sh ###"
     exit 0
 }
 
@@ -47,9 +50,14 @@ case "$PROVIDER" in
     local)
         case "${ROUTE:-nonkube}" in
             kube|nonkube) ;;
-            *) log_error "Invalid route for local: $ROUTE (use kube or nonkube)"; exit 1 ;;
+            *) log_error "Invalid route for local: $ROUTE (use kube or nonkube)"; log_info "### end of orchestration/run.sh ###"; exit 1 ;;
         esac
-        exec "$REPO_ROOT/orchestration/local/run.sh" --container-type "${ROUTE:-nonkube}" "${REMAINING[@]}"
+        set +e
+        "$REPO_ROOT/orchestration/local/run.sh" --container-type "${ROUTE:-nonkube}" "${REMAINING[@]}"
+        _rc=$?
+        set -e
+        log_info "### end of orchestration/run.sh ###"
+        exit $_rc
         ;;
     aws)
         ENV="${REMAINING[0]:-dev}"
@@ -62,9 +70,14 @@ case "$PROVIDER" in
         case "${ROUTE:-nonkube}" in
             nonkube) CT="ecs" ;;
             kube)    CT="eks" ;;
-            *) log_error "Invalid route for aws: $ROUTE (use kube or nonkube)"; exit 1 ;;
+            *) log_error "Invalid route for aws: $ROUTE (use kube or nonkube)"; log_info "### end of orchestration/run.sh ###"; exit 1 ;;
         esac
-        exec "$REPO_ROOT/orchestration/aws/run.sh" deploy --container-type "$CT" "$ENV" "${REST[@]}"
+        set +e
+        "$REPO_ROOT/orchestration/aws/run.sh" deploy --container-type "$CT" "$ENV" "${REST[@]}"
+        _rc=$?
+        set -e
+        log_info "### end of orchestration/run.sh ###"
+        exit $_rc
         ;;
     "")
         log_error "Missing provider. Use: $0 <local|aws> <kube|nonkube> [env] [options...]"
@@ -72,6 +85,7 @@ case "$PROVIDER" in
         ;;
     *)
         log_error "Unknown provider: $PROVIDER (use local or aws)"
+        log_info "### end of orchestration/run.sh ###"
         exit 1
         ;;
 esac

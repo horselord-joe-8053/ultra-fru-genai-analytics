@@ -114,7 +114,7 @@
 4. **Migrate frontend-eks and frontend-ecs**  
    - Use lib and `import_one_resource`; add optional `import_frontend_oac_s3_cf` (or keep inline but call `import_one_resource`) and OAC verification.
 5. **Optional:** Add a small “import_usage” helper and document in README that scripts rely on `lib_import_common.sh`.
-6. **Leave `README_IMPORT_PREEXIST.md` and quick reference as-is** (script names and CLI unchanged).
+6. **Leave `TERRA_LEARN_IMPORT_PREEXIST.md` and quick reference as-is** (script names and CLI unchanged).
 
 ---
 

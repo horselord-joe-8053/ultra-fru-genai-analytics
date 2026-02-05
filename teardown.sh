@@ -20,4 +20,13 @@
 set -e
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export REPO_ROOT
-exec "$REPO_ROOT/orchestration/teardown.sh" "$@"
+# shellcheck source=lib/logger.sh
+source "$REPO_ROOT/lib/logger.sh" 2>/dev/null || true
+command -v log_info >/dev/null 2>&1 || log_info() { echo "[INFO] $*"; }
+log_info "### start of teardown.sh ###"
+set +e
+"$REPO_ROOT/orchestration/teardown.sh" "$@"
+_rc=$?
+set -e
+log_info "### end of teardown.sh ###"
+exit $_rc

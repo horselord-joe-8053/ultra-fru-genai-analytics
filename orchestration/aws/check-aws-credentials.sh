@@ -167,28 +167,33 @@ check_bedrock_access() {
     
     local region="${AWS_REGION:-us-east-1}"
     local model_id="${AWS_BEDROCK_MODEL_ID:-anthropic.claude-3-haiku-20240307-v1:0}"
+    # Bedrock API expects full model ID including version suffix (e.g. ...-v1:0)
+    local model_id_trimmed
+    model_id_trimmed=$(printf '%s' "$model_id" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     
-    # Extract foundation model name (before the colon)
-    local foundation_model=$(echo "$model_id" | cut -d: -f1)
-    
-    # Check if foundation model is available
+    # Check if foundation model is in the catalog (list uses full modelId e.g. ...-v1:0)
     if aws bedrock list-foundation-models $profile_flag --region "$region" \
-        --query "modelSummaries[?modelId=='$foundation_model']" \
-        --output text 2>/dev/null | grep -q "$foundation_model"; then
-        log_success "Bedrock foundation model is available: $foundation_model"
+        --query "modelSummaries[?modelId=='$model_id_trimmed']" \
+        --output text 2>/dev/null | grep -q "$model_id_trimmed"; then
+        log_success "Bedrock foundation model is available: $model_id_trimmed"
     else
-        log_warning "Bedrock foundation model may not be available: $foundation_model"
+        log_warning "Bedrock foundation model may not be available: $model_id_trimmed"
         log_info "  Region: $region"
         log_info "  Check: https://console.aws.amazon.com/bedrock/"
     fi
     
     # Try to check model access (may fail if model access not granted)
-    if aws bedrock get-foundation-model $profile_flag --region "$region" \
-        --model-identifier "$foundation_model" >/dev/null 2>&1; then
+    # get-foundation-model requires the full model identifier including version (e.g. ...-v1:0)
+    local get_model_stderr
+    get_model_stderr=$(aws bedrock get-foundation-model $profile_flag --region "$region" \
+        --model-identifier "$model_id_trimmed" 2>&1)
+    local get_rc=$?
+    if [ $get_rc -eq 0 ]; then
         log_success "Bedrock model access verified: $model_id"
     else
         log_warning "Cannot verify Bedrock model access (may need to request access)"
         log_info "  Model: $model_id"
+        [ -n "$get_model_stderr" ] && log_info "  AWS reason: $get_model_stderr"
         log_info "  Request access: https://console.aws.amazon.com/bedrock/"
     fi
     

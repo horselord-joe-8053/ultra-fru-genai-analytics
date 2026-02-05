@@ -85,6 +85,7 @@ deploy_phase_check_image() {
     
     if [ "$image_check_result" -ne 0 ]; then
         local elapsed=$(( $(date +%s) - step_start_time ))
+        perf_step_end 1 "1.3" "FAILED" "Container image check/build failed" >&2
         log_error "Phase 1: Step 1.3 - Step ${step_num}/${total_steps} FAILED: Container image check/build failed (took $(format_elapsed_time $elapsed))"
         log_info "Reason: Unable to check ECR for existing image or build/push new image"
         log_info "Check AWS credentials, ECR permissions, and Docker availability"
@@ -92,6 +93,8 @@ deploy_phase_check_image() {
     fi
     
     local elapsed=$(( $(date +%s) - step_start_time ))
+    perf_step_end 1 "1.3" "SUCCESS" "Container image ready" >&2
+    perf_phase_end 1 >&2
     log_success "Phase 1: Step 1.3 - Step ${step_num}/${total_steps} PASSED: Container image ready (took $(format_elapsed_time $elapsed))" >&2
     
     # Return incremented step number (to stdout, separate from log output)

@@ -29,6 +29,8 @@ source "$REPO_ROOT/lib/logger.sh"
 source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 load_env_file 2>/dev/null || true
 
+log_info "### start of orchestration/teardown.sh ###"
+
 PROVIDER="${1:-}"
 ROUTE="${2:-}"
 shift 2 2>/dev/null || true
@@ -42,6 +44,7 @@ show_usage() {
     echo "  aws kube [env]    → Teardown AWS EKS only"
     echo "  aws all [env]     → Teardown AWS EKS + ECS + shared infra"
     echo "Options: --force, --dry-run, etc. forwarded to target script."
+    log_info "### end of orchestration/teardown.sh ###"
     exit 0
 }
 
@@ -51,9 +54,14 @@ case "$PROVIDER" in
         case "${ROUTE:-nonkube}" in
             kube|nonkube) ;;
             all) ROUTE="nonkube" ;;
-            *) log_error "Invalid route for local: $ROUTE"; exit 1 ;;
+            *) log_error "Invalid route for local: $ROUTE"; log_info "### end of orchestration/teardown.sh ###"; exit 1 ;;
         esac
-        exec "$REPO_ROOT/orchestration/local/teardown-resources-all.sh" --container-type "${ROUTE:-nonkube}" "${REMAINING[@]}"
+        set +e
+        "$REPO_ROOT/orchestration/local/teardown-resources-all.sh" --container-type "${ROUTE:-nonkube}" "${REMAINING[@]}"
+        _rc=$?
+        set -e
+        log_info "### end of orchestration/teardown.sh ###"
+        exit $_rc
         ;;
     aws)
         ENV="${REMAINING[0]:-dev}"
@@ -67,9 +75,14 @@ case "$PROVIDER" in
             nonkube) CT="ecs" ;;
             kube)    CT="eks" ;;
             all)     CT="all" ;;
-            *) log_error "Invalid route for aws: $ROUTE (use kube, nonkube, or all)"; exit 1 ;;
+            *) log_error "Invalid route for aws: $ROUTE (use kube, nonkube, or all)"; log_info "### end of orchestration/teardown.sh ###"; exit 1 ;;
         esac
-        exec "$REPO_ROOT/orchestration/aws/teardown-resources-all.sh" "$ENV" --container-type "$CT" "${REST[@]}"
+        set +e
+        "$REPO_ROOT/orchestration/aws/teardown-resources-all.sh" "$ENV" --container-type "$CT" "${REST[@]}"
+        _rc=$?
+        set -e
+        log_info "### end of orchestration/teardown.sh ###"
+        exit $_rc
         ;;
     "")
         log_error "Missing provider. Use: $0 <local|aws> <kube|nonkube|all> [env] [options...]"
@@ -77,6 +90,7 @@ case "$PROVIDER" in
         ;;
     *)
         log_error "Unknown provider: $PROVIDER (use local or aws)"
+        log_info "### end of orchestration/teardown.sh ###"
         exit 1
         ;;
 esac

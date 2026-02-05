@@ -241,6 +241,30 @@ build_and_push_ecr() {
         exit 1
     fi
     
+    # Container-type tags (eks, ecs) for teardown-by-container-type; see docs/learned/REFACTOR_PLAN_ECR_TAGS_AND_TEARDOWN.md
+    local ct="${CONTAINER_TYPE:-all}"
+    if [ "$ct" = "all" ]; then
+        log_info "Tagging and pushing as 'eks' and 'ecs' (CONTAINER_TYPE=all)..."
+        docker tag "$ECR_REPO_URI:$IMAGE_TAG" "$ECR_REPO_URI:eks"
+        docker push "$ECR_REPO_URI:eks" || log_warning "Push of 'eks' tag failed (non-fatal)"
+        docker tag "$ECR_REPO_URI:$IMAGE_TAG" "$ECR_REPO_URI:ecs"
+        docker push "$ECR_REPO_URI:ecs" || log_warning "Push of 'ecs' tag failed (non-fatal)"
+    elif [ "$ct" = "eks" ]; then
+        log_info "Tagging and pushing as 'eks'..."
+        docker tag "$ECR_REPO_URI:$IMAGE_TAG" "$ECR_REPO_URI:eks"
+        docker push "$ECR_REPO_URI:eks" || log_warning "Push of 'eks' tag failed (non-fatal)"
+    elif [ "$ct" = "ecs" ]; then
+        log_info "Tagging and pushing as 'ecs'..."
+        docker tag "$ECR_REPO_URI:$IMAGE_TAG" "$ECR_REPO_URI:ecs"
+        docker push "$ECR_REPO_URI:ecs" || log_warning "Push of 'ecs' tag failed (non-fatal)"
+    else
+        log_info "CONTAINER_TYPE=$ct unknown; pushing both 'eks' and 'ecs' tags."
+        docker tag "$ECR_REPO_URI:$IMAGE_TAG" "$ECR_REPO_URI:eks"
+        docker push "$ECR_REPO_URI:eks" || log_warning "Push of 'eks' tag failed (non-fatal)"
+        docker tag "$ECR_REPO_URI:$IMAGE_TAG" "$ECR_REPO_URI:ecs"
+        docker push "$ECR_REPO_URI:ecs" || log_warning "Push of 'ecs' tag failed (non-fatal)"
+    fi
+    
     log_success "Image pushed successfully: $ECR_REPO_URI:$IMAGE_TAG"
     log_info "Image URI for Terraform: $ECR_REPO_URI:$IMAGE_TAG"
     log_info "Note: Terraform will use the git SHA tag to detect changes automatically"

@@ -396,14 +396,14 @@ check_or_build_image() {
         fi
         if [ -z "$ecr_uri" ]; then
             log_error "ECR_REPO_URI not set and could not be built. Run without --skip-build once, or set CONTAINER_IMAGE."
-            exit 1
+            return 1
         fi
         CONTAINER_IMAGE="${ecr_uri}:latest"
         # Fail fast: require ECR tag 'latest' when --skip-build (avoid deploy failing later at image pull)
         if ! AWS_PROFILE="${AWS_PROFILE:-admin}" aws ecr describe-images --repository-name "${ecr_uri##*/}" --image-ids imageTag=latest --region "${AWS_REGION:-us-east-1}" --output text >/dev/null 2>&1; then
             log_error "ECR tag 'latest' not found in repo ${ecr_uri##*/}. Cannot use --skip-build."
             log_error "Push an image as 'latest' (run without --skip-build once), or do not use --skip-build."
-            exit 1
+            return 1
         fi
         log_info "Using CONTAINER_IMAGE: $CONTAINER_IMAGE (ECR 'latest' exists; no build/push)"
         export CONTAINER_IMAGE
@@ -430,13 +430,13 @@ check_or_build_image() {
     # Validate CONTAINER_IMAGE format before extracting
     if [ -z "$CONTAINER_IMAGE" ]; then
         log_error "CONTAINER_IMAGE is empty!"
-        exit 1
+        return 1
     fi
     
     if [[ "$CONTAINER_IMAGE" != *":"* ]]; then
         log_error "CONTAINER_IMAGE does not contain a colon separator: '$CONTAINER_IMAGE'"
         log_error "Expected format: <repository>:<tag>"
-        exit 1
+        return 1
     fi
     
     export CONTAINER_IMAGE
@@ -462,7 +462,7 @@ check_or_build_image() {
             log_info "Generated CONTAINER_IMAGE=$CONTAINER_IMAGE"
         else
             log_error "Could not generate IMAGE_TAG. Ensure git_helpers.sh is on the path (orchestration/common/git_helpers.sh)."
-            exit 1
+            return 1
         fi
     fi
     
@@ -486,7 +486,7 @@ check_or_build_image() {
     # Fail fast if IMAGE_TAG is still empty (avoids hanging or confusing AWS CLI calls)
     if [ -z "$IMAGE_TAG" ]; then
         log_error "IMAGE_TAG is empty; cannot check or push to ECR. Ensure git_helpers.sh is sourced and generate_image_tag works."
-        exit 1
+        return 1
     fi
     
     # Check if image already exists in ECR
@@ -514,7 +514,7 @@ check_or_build_image() {
         else
             log_error "Failed to check container image existence (exit code: $image_check_exit)"
             log_error "Error: $image_check_output"
-            exit 1
+            return 1
         fi
     fi
     
@@ -606,9 +606,11 @@ deploy_ecs_full() {
     # Phase 2: Infrastructure Setup - Steps 2.2, 2.3
     # ============================================================================
     # Fail-fast: run each phase, capture exit code; exit immediately on first failure
+    # Phase stdout/stderr is teed to tmpf (for step number) and duplicated to stderr so
+    # the user always sees the underlying error (e.g. ECR/git/resolve) when a phase fails.
     run_phase_and_capture() {
         local tmpf; tmpf=$(mktemp)
-        "$@" 2>&1 | tee "$tmpf"
+        "$@" 2>&1 | tee "$tmpf" >&2
         local rc=${PIPESTATUS[0]}
         local new_step; new_step=$(grep -E '^[0-9]+$' "$tmpf" | tail -1)
         rm -f "$tmpf"
