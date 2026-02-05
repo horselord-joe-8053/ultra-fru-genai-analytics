@@ -20,7 +20,7 @@ except ImportError:
 
 PROJECT_NAME = "fru"
 SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent.parent.parent  # teardown -> aws -> module_infra_basic -> repo
+REPO_ROOT = SCRIPT_DIR.parent.parent.parent  # teardown -> aws -> orchestration -> repo
 
 
 def get_account_id(session):

@@ -75,14 +75,12 @@ ENVIRONMENT="${1:-dev}"
 PROJECT_NAME="fru"
 ECR_REPO_NAME="fru-api"
 
-# Paths to module teardown scripts
+# Paths to teardown scripts (pre-destroy in trees; shared scripts in orchestration)
 EKS_PRE_DESTROY="$REPO_ROOT/module_infra_kubetypes/kube/aws/teardown/eks_pre_destroy.py"
-EKS_TF_TEARDOWN="$REPO_ROOT/module_infra_kubetypes/kube/aws/teardown/eks_terraform_teardown.sh"
 ECS_PRE_DESTROY="$REPO_ROOT/module_infra_kubetypes/nonkube/aws/teardown/ecs_pre_destroy.py"
-ECS_TF_TEARDOWN="$REPO_ROOT/module_infra_kubetypes/nonkube/aws/teardown/ecs_terraform_teardown.sh"
-SHARED_PRE_DESTROY="$REPO_ROOT/module_infra_basic/aws/teardown/shared_pre_destroy.py"
-SHARED_TF_TEARDOWN="$REPO_ROOT/module_infra_basic/aws/teardown/shared_terraform_teardown.sh"
-CLEANUP_ORPHANED="$REPO_ROOT/module_infra_basic/aws/teardown/cleanup_orphaned.py"
+SHARED_PRE_DESTROY="$REPO_ROOT/orchestration/aws/teardown/shared_pre_destroy.py"
+CLEANUP_ORPHANED="$REPO_ROOT/orchestration/aws/teardown/cleanup_orphaned.py"
+TF_TEARDOWN="$REPO_ROOT/orchestration/terraform/teardown.sh"
 
 show_help() {
     cat << EOF
@@ -228,27 +226,21 @@ run_import_before_layer_destroy() {
 run_terraform_teardown_layer() {
     local ct="$1"
     log_step "Terraform destroy ($(echo "$ct" | tr '[:lower:]' '[:upper:]') layer only)"
-    local tf_wrapper=""
-    case "$ct" in
-        eks) tf_wrapper="$EKS_TF_TEARDOWN" ;;
-        ecs) tf_wrapper="$ECS_TF_TEARDOWN" ;;
-        *) log_error "Unknown container type for terraform teardown: $ct"; return 1 ;;
-    esac
-    [ ! -f "$tf_wrapper" ] && { log_error "Terraform teardown wrapper not found: $tf_wrapper"; return 1; }
+    [ ! -f "$TF_TEARDOWN" ] && { log_error "Terraform teardown script not found: $TF_TEARDOWN"; return 1; }
     if [ "$DRY_RUN" = "true" ]; then
-        log_info "[DRY-RUN] Would run: $tf_wrapper $ENVIRONMENT"
+        log_info "[DRY-RUN] Would run: $TF_TEARDOWN $ENVIRONMENT $ct"
         echo ""
         return 0
     fi
     run_import_before_layer_destroy "$ct"
-    export AWS_PROFILE AWS_REGION
+    export AWS_PROFILE AWS_REGION CONTAINER_TYPE
     [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && export PREEMPT=true
     local r=0
     if type run_with_heartbeat >/dev/null 2>&1; then
-        _run_with_heartbeat_step "Terraform destroy ($ct layer)" -- "$tf_wrapper" "$ENVIRONMENT"
+        _run_with_heartbeat_step "Terraform destroy ($ct layer)" -- "$TF_TEARDOWN" "$ENVIRONMENT" "$ct"
         r=$?
     else
-        "$tf_wrapper" "$ENVIRONMENT"
+        "$TF_TEARDOWN" "$ENVIRONMENT" "$ct"
         r=$?
     fi
     if [ "$r" -eq 0 ]; then
@@ -263,20 +255,20 @@ run_terraform_teardown_layer() {
 # --- Terraform destroy shared (infrastructure) layer ---
 run_terraform_teardown_shared() {
     log_step "Terraform destroy (shared infrastructure)"
-    [ ! -f "$SHARED_TF_TEARDOWN" ] && { log_error "Shared teardown wrapper not found: $SHARED_TF_TEARDOWN"; return 1; }
+    [ ! -f "$TF_TEARDOWN" ] && { log_error "Terraform teardown script not found: $TF_TEARDOWN"; return 1; }
     if [ "$DRY_RUN" = "true" ]; then
-        log_info "[DRY-RUN] Would run: $SHARED_TF_TEARDOWN $ENVIRONMENT"
+        log_info "[DRY-RUN] Would run: $TF_TEARDOWN $ENVIRONMENT infrastructure"
         echo ""
         return 0
     fi
-    export AWS_PROFILE AWS_REGION
+    export AWS_PROFILE AWS_REGION CONTAINER_TYPE
     [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && export PREEMPT=true
     local r=0
     if type run_with_heartbeat >/dev/null 2>&1; then
-        _run_with_heartbeat_step "Terraform destroy (shared)" -- "$SHARED_TF_TEARDOWN" "$ENVIRONMENT"
+        _run_with_heartbeat_step "Terraform destroy (shared)" -- "$TF_TEARDOWN" "$ENVIRONMENT" "infrastructure"
         r=$?
     else
-        "$SHARED_TF_TEARDOWN" "$ENVIRONMENT"
+        "$TF_TEARDOWN" "$ENVIRONMENT" "infrastructure"
         r=$?
     fi
     if [ "$r" -eq 0 ]; then
@@ -393,8 +385,8 @@ main() {
                     set +e
                     export AWS_PROFILE AWS_REGION
                     [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && export PREEMPT=true
-                    [ ! -f "$SHARED_TF_TEARDOWN" ] && { log_error "Shared teardown wrapper not found: $SHARED_TF_TEARDOWN"; set -e; failed=true; rm -f "$_tmp_out"; break; }
-                    "$SHARED_TF_TEARDOWN" "$ENVIRONMENT" 2>&1 | tee "$_tmp_out"
+                    [ ! -f "$TF_TEARDOWN" ] && { log_error "Terraform teardown script not found: $TF_TEARDOWN"; set -e; failed=true; rm -f "$_tmp_out"; break; }
+                    "$TF_TEARDOWN" "$ENVIRONMENT" "infrastructure" 2>&1 | tee "$_tmp_out"
                     r=${PIPESTATUS[0]}
                     set -e
                     if [ "$r" -eq 0 ]; then
