@@ -36,12 +36,12 @@ command_exists() {
 
 # Fetch EKS deployment information from Terraform outputs and Kubernetes
 # EKS layer lives under module_infra_kubetypes/kube/aws/terra (cluster_name).
-# Frontend EKS CloudFront lives under module_infra_basic (frontend-eks layer).
+# Frontend EKS CloudFront lives under module_infra_frontend (frontend-eks layer).
 fetch_eks_deployment_info() {
     local terraform_dir="${TERRAFORM_DIR:-}"
     local environment="${ENVIRONMENT:-dev}"
     if [ -z "$terraform_dir" ]; then
-        terraform_dir="$REPO_ROOT/module_infra_basic/aws/terra/environments/$environment"
+        terraform_dir="$REPO_ROOT/module_infra_frontend/aws/terra/environments/$environment"
     fi
     if [ -z "${REPO_ROOT:-}" ]; then
         log_warning "REPO_ROOT not set, cannot fetch EKS deployment info"
@@ -51,7 +51,7 @@ fetch_eks_deployment_info() {
     # EKS layer path (cluster_name) — under kube terra, not module_infra_basic
     local eks_terra_dir="$REPO_ROOT/module_infra_kubetypes/kube/aws/terra/environments/$environment"
     local eks_dir="$eks_terra_dir/eks"
-    # Frontend EKS CloudFront — under module_infra_basic frontend-eks layer
+    # Frontend EKS CloudFront — under module_infra_frontend frontend-eks layer
     local frontend_eks_dir="$terraform_dir/frontend-eks"
 
     # Fetch EKS cluster name from EKS terraform layer (correct path)

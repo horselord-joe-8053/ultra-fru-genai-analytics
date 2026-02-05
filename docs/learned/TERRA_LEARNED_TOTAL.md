@@ -10,9 +10,9 @@ This doc is the **structural map** of how we use Terraform and Terragrunt in thi
 
 ## 1. Where Terra lives in this project (total mapping)
 
-### 1.1 The three `terra` trees
+### 1.1 The five `terra` trees
 
-We have three separate Terra/Terragrunt trees. Each has the same **layout pattern**: `environments/<env>/<layer>/` (Terragrunt config) and `modules/` (Terraform `.tf` source).
+We have five separate Terra/Terragrunt trees. Each has the same **layout pattern**: `environments/<env>/<layer>/` (Terragrunt config) and `modules/` (Terraform `.tf` source). After the refactor, core infra, long-term (Secrets Manager), and frontend (S3 + CloudFront) each have their own tree.
 
 ```mermaid
 %%{init: {'themeVariables': {'fontSize': '9px'}}}%%
@@ -23,6 +23,20 @@ flowchart LR
     B_comp[_component/]
     B_env --- B_mod
     B_env --- B_comp
+  end
+  subgraph longterm["module_infra_longterm/aws/terra"]
+    L_env[environments/dev, prod]
+    L_mod[modules/secrets-manager]
+    L_comp[_component/]
+    L_env --- L_mod
+    L_env --- L_comp
+  end
+  subgraph frontend["module_infra_frontend/aws/terra"]
+    F_env[environments/dev, prod]
+    F_mod[modules/frontend]
+    F_comp[_component/]
+    F_env --- F_mod
+    F_env --- F_comp
   end
   subgraph kube["module_infra_kubetypes/kube/aws/terra"]
     K_env[environments/dev, prod]
@@ -39,19 +53,23 @@ flowchart LR
     N_env --- N_comp
   end
   style basic fill:#e3f2fd
+  style longterm fill:#e8f5e9
+  style frontend fill:#f3e5f5
   style kube fill:#fff3e0
   style nonkube fill:#fce4ec
 ```
 
 | Tree | Purpose | Example layers (dev) | Example modules |
 |------|--------|----------------------|-----------------|
-| **module_infra_basic/aws/terra/** | Infra + frontend + longterm | infrastructure, infrastructure-longterm, frontend-eks, frontend-ecs | root_infrastructure, vpc, aurora, iam, s3-data, frontend, secrets-manager |
+| **module_infra_basic/aws/terra/** | Core infra (VPC, Aurora, IAM, S3 data) | infrastructure | root_infrastructure, vpc, aurora, iam, s3-data |
+| **module_infra_longterm/aws/terra/** | Long-term resources (Secrets Manager) | infrastructure-longterm | secrets-manager |
+| **module_infra_frontend/aws/terra/** | Frontend (S3 + CloudFront) | frontend-eks, frontend-ecs | frontend |
 | **module_infra_kubetypes/kube/aws/terra/** | EKS app | eks | root_eks |
 | **module_infra_kubetypes/nonkube/aws/terra/** | ECS app | ecs | root_ecs, alb |
 
 ### 1.2 One layer = one directory under `environments/<env>/`
 
-- **Path:** e.g. `module_infra_basic/aws/terra/environments/dev/infrastructure/`
+- **Path:** e.g. `module_infra_basic/aws/terra/environments/dev/infrastructure/` (or `module_infra_frontend/.../frontend-eks`, `module_infra_longterm/.../infrastructure-longterm`, etc.)
 - **Contents:** `terragrunt.hcl` (required), often `.terraform.lock.hcl` (provider versions).
 - **Meaning:** Running `terragrunt apply` (or `plan`/`destroy`) in that directory applies **one layer** and uses **one state file** (e.g. S3 key `dev/infrastructure/terraform.tfstate`). See [TERRA_LEARNED.md §1](TERRA_LEARNED.md#1-what-is-a-layer).
 
@@ -222,7 +240,7 @@ flowchart LR
 
 Numbered flow for one layer (e.g. **dev/infrastructure**):
 
-1. You run `terragrunt apply` in `module_infra_basic/aws/terra/environments/dev/infrastructure/`.
+1. You run `terragrunt apply` in `module_infra_basic/aws/terra/environments/dev/infrastructure/` (or the appropriate layer dir in another tree).
 2. Terragrunt loads `terragrunt.hcl` → includes `root.hcl` and `_component/infrastructure-base.hcl`.
 3. From component: `source = ".../modules//root_infrastructure"`, `download_dir = ".../temp_terra_gen/.terragrunt-cache/dev/infrastructure"`.
 4. Terragrunt copies the full `modules/` dir into that cache; Terraform root = `root_infrastructure/`.
@@ -246,6 +264,7 @@ No step in this flow **edits** the committed repo; only the cache and remote sta
 | **Cache** | `temp_terra_gen/.terragrunt-cache/<env>/<layer>/` — copied module tree + generated backend.tf, provider.tf, .terraform/ after init. |
 | **State key** | From root.hcl: `path_relative_to_include()/terraform.tfstate` (e.g. `dev/infrastructure/terraform.tfstate`). |
 | **Generated files** | backend.tf, provider.tf (from root.hcl); lock file can live in layer dir or cache; state in S3. |
+| **Import/reconcile scripts** | Per-layer `import-existing-*.sh` helpers that reconcile Terraform state with AWS before **apply** and **destroy** (including lock handling and “already managed / non-existent” cases). See `docs/learned/README_IMPORT_PREEXIST.md`. |
 
 ---
 

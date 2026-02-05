@@ -338,7 +338,7 @@ deploy_phase_deploy_frontend() {
     log_step "Phase 6: Step 6.1 - Step ${step_num}/${total_steps}: Deploying frontend to S3"
     
     export ENVIRONMENT="$environment"
-    if ! "$REPO_ROOT_COMMON/module_infra_basic/aws/deploy-frontend.sh"; then
+    if ! "$REPO_ROOT_COMMON/module_infra_frontend/aws/deploy-frontend.sh"; then
         local elapsed=$(( $(date +%s) - step_start_time ))
         perf_step_end 6 "6.1" "FAILED" "Frontend deployment failed"
         log_error "Phase 6: Step 6.1 - Step ${step_num}/${total_steps} FAILED: Frontend deployment failed (took $(format_elapsed_time $elapsed))"

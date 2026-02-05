@@ -1,7 +1,7 @@
 #!/bin/bash
 # Teardown infrastructure using Terragrunt
 # Idempotent: terragrunt destroy is safe to run multiple times
-# Usage: ./teardown.sh [dev|prod] [infrastructure|ecs|eks|all]
+# Usage: ./teardown.sh [dev|prod] [infra_basic|longterm|ecs|eks|all]
 #
 # State lock: on "Error acquiring the state lock", we parse the lock ID from Terraform
 # output, run terragrunt force-unlock -force <LOCK_ID>, then retry destroy once. Side-effect:
@@ -18,6 +18,8 @@ source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 
 TERRAFORM_DIR="$REPO_ROOT/module_infra_basic/aws/terra/environments"
 INFRA_TERRAFORM_DIR="$REPO_ROOT/module_infra_basic/aws/terra/environments"
+FRONTEND_TERRAFORM_DIR="$REPO_ROOT/module_infra_frontend/aws/terra/environments"
+LONGTERM_TERRAFORM_DIR="$REPO_ROOT/module_infra_longterm/aws/terra/environments"
 EKS_TERRAFORM_DIR="$REPO_ROOT/module_infra_kubetypes/kube/aws/terra/environments"
 ECS_TERRAFORM_DIR="$REPO_ROOT/module_infra_kubetypes/nonkube/aws/terra/environments"
 
@@ -27,13 +29,17 @@ LAYER="${2:-all}"
 
 if [[ ! "$ENVIRONMENT" =~ ^(dev|prod)$ ]]; then
     log_error "Invalid environment: $ENVIRONMENT"
-    log_info "Usage: $0 [dev|prod] [infrastructure|application|all]"
+    log_info "Usage: $0 [dev|prod] [infra_basic|longterm|ecs|eks|all]"
     exit 1
 fi
 
-if [[ ! "$LAYER" =~ ^(infrastructure|ecs|eks|all)$ ]]; then
+# Accept infrastructure as alias for infra_basic (backward compat)
+if [ "$LAYER" = "infrastructure" ]; then
+    LAYER="infra_basic"
+fi
+if [[ ! "$LAYER" =~ ^(infra_basic|longterm|ecs|eks|all)$ ]]; then
     log_error "Invalid layer: $LAYER"
-    log_info "Usage: $0 [dev|prod] [infrastructure|ecs|eks|all]"
+    log_info "Usage: $0 [dev|prod] [infra_basic|longterm|ecs|eks|all]"
     exit 1
 fi
 
@@ -77,6 +83,8 @@ teardown_terragrunt() {
     
     ENV_DIR="$TERRAFORM_DIR/$ENVIRONMENT"
     INFRA_ENV_DIR="$INFRA_TERRAFORM_DIR/$ENVIRONMENT"
+    FRONTEND_ENV_DIR="$FRONTEND_TERRAFORM_DIR/$ENVIRONMENT"
+    LONGTERM_ENV_DIR="$LONGTERM_TERRAFORM_DIR/$ENVIRONMENT"
     EKS_ENV_DIR="$EKS_TERRAFORM_DIR/$ENVIRONMENT"
     ECS_ENV_DIR="$ECS_TERRAFORM_DIR/$ENVIRONMENT"
     
@@ -87,7 +95,7 @@ teardown_terragrunt() {
     
     # Run terragrunt destroy; on "Error acquiring the state lock", parse LOCK_ID, force-unlock, then retry
     # with 30s wait between attempts, up to 2 min total (handles S3 propagation / timing).
-    # Call only when already in the layer directory (e.g. cd "$INFRA_ENV_DIR/frontend-eks" then destroy_with_unlock_fallback "frontend-eks").
+    # Call only when already in the layer directory (e.g. cd "$FRONTEND_ENV_DIR/frontend-eks" then destroy_with_unlock_fallback "frontend-eks").
     destroy_with_unlock_fallback() {
         local layer_name="${1:-unknown}"
         local tmp_out
@@ -112,7 +120,8 @@ teardown_terragrunt() {
         clean_out="$(mktemp)"
         sed -E 's/\x1B\[[0-9;]*[mK]//g' "$tmp_out" > "$clean_out"
         local lock_id
-        lock_id="$(grep -iE '^[[:space:]]*ID:[[:space:]]+[0-9a-fA-F]{8}-' "$clean_out" | head -1 | grep -Eo '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | head -1)"
+        # Terragrunt prefixes lines with timestamp/STDERR, so match "ID: <uuid>" anywhere on the line
+        lock_id="$(grep -iE 'ID:[[:space:]]+[0-9a-fA-F]{8}-' "$clean_out" | head -1 | grep -Eo '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | head -1)"
         rm -f "$clean_out"
         if [ -z "$lock_id" ]; then
             log_error "Could not parse lock ID from output. Manual unlock: cd $(pwd) && terragrunt force-unlock <LOCK_ID> -force"
@@ -151,11 +160,11 @@ teardown_terragrunt() {
     # Destroy in reverse order: frontend first, then application, then infrastructure
     # Frontend (S3 + CloudFront) depends on app layer; app depends on infrastructure
     
-    # Destroy frontend-ecs layer (lives in module_infra_basic; S3 + CloudFront)
+    # Destroy frontend-ecs layer (lives in module_infra_frontend; S3 + CloudFront)
     if [ "$LAYER" = "ecs" ] || ([ "$LAYER" = "all" ] && [ "$CONTAINER_TYPE" = "ecs" ]); then
-        if [ -d "$INFRA_ENV_DIR/frontend-ecs" ]; then
+        if [ -d "$FRONTEND_ENV_DIR/frontend-ecs" ]; then
             log_step "Destroying frontend-ecs layer (S3, CloudFront)"
-            cd "$INFRA_ENV_DIR/frontend-ecs"
+            cd "$FRONTEND_ENV_DIR/frontend-ecs"
             terragrunt init -reconfigure >/dev/null 2>&1 || true
             if terragrunt state list >/dev/null 2>&1; then
                 terragrunt plan -destroy >/dev/null 2>&1 || true
@@ -177,11 +186,11 @@ teardown_terragrunt() {
         fi
     fi
     
-    # Destroy frontend-eks layer (lives in module_infra_basic; S3 + CloudFront)
+    # Destroy frontend-eks layer (lives in module_infra_frontend; S3 + CloudFront)
     if [ "$LAYER" = "eks" ] || ([ "$LAYER" = "all" ] && [ "$CONTAINER_TYPE" = "eks" ]); then
-        if [ -d "$INFRA_ENV_DIR/frontend-eks" ]; then
+        if [ -d "$FRONTEND_ENV_DIR/frontend-eks" ]; then
             log_step "Destroying frontend-eks layer (S3, CloudFront)"
-            cd "$INFRA_ENV_DIR/frontend-eks"
+            cd "$FRONTEND_ENV_DIR/frontend-eks"
             terragrunt init -reconfigure >/dev/null 2>&1 || true
             if terragrunt state list >/dev/null 2>&1; then
                 terragrunt plan -destroy >/dev/null 2>&1 || true
@@ -309,8 +318,8 @@ teardown_terragrunt() {
         sleep "${TEARDOWN_WAIT_BETWEEN_LAYERS}"
     fi
     
-    # Destroy infrastructure layer (VPC, Aurora, IAM, S3). Secrets Manager is in infrastructure-longterm; main teardown never destroys that layer (Option B).
-    if [ "$LAYER" = "infrastructure" ] || [ "$LAYER" = "all" ]; then
+    # Destroy infrastructure layer (VPC, Aurora, IAM, S3). Secrets Manager is in infrastructure-longterm; use longterm layer explicitly to destroy that.
+    if [ "$LAYER" = "infra_basic" ] || [ "$LAYER" = "all" ]; then
         log_step "Destroying infrastructure layer (VPC, Aurora, IAM)"
         
         cd "$INFRA_ENV_DIR/infrastructure"
@@ -352,6 +361,35 @@ teardown_terragrunt() {
             fi
         else
             log_info "No Terraform state found for infrastructure layer (already destroyed or never deployed)"
+        fi
+    fi
+    
+    # Destroy infrastructure-longterm layer (Secrets Manager; lives in module_infra_longterm)
+    # Explicit opt-in only - "all" does NOT include longterm (main teardown preserves secrets).
+    if [ "$LAYER" = "longterm" ]; then
+        if [ -d "$LONGTERM_ENV_DIR/infrastructure-longterm" ]; then
+            log_step "Destroying infrastructure-longterm layer (Secrets Manager)"
+            cd "$LONGTERM_ENV_DIR/infrastructure-longterm"
+            terragrunt init -reconfigure >/dev/null 2>&1 || true
+            if terragrunt state list >/dev/null 2>&1; then
+                terragrunt plan -destroy >/dev/null 2>&1 || true
+                if [ "${PREEMPT:-false}" = "true" ]; then
+                    confirm="yes"
+                else
+                    read -p "Destroy infrastructure-longterm (Secrets Manager)? (yes/no): " confirm
+                fi
+                if [ "$confirm" = "yes" ]; then
+                    if ! destroy_with_unlock_fallback "infrastructure-longterm"; then
+                        log_error "Infrastructure-longterm destroy failed"
+                        exit 1
+                    fi
+                    log_success "Infrastructure-longterm layer destroyed!"
+                fi
+            else
+                log_info "No state for infrastructure-longterm (already destroyed or never deployed)"
+            fi
+        else
+            log_info "No infrastructure-longterm directory at $LONGTERM_ENV_DIR/infrastructure-longterm"
         fi
     fi
     

@@ -13,6 +13,7 @@ source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 # Legacy name: ENV_DIR/LAYER_TERRAFORM_BASE fallback; actual layers use INFRA/EKS/ECS_TERRAFORM_DIR
 TERRAFORM_DIR="${REPO_ROOT}/module_infra_basic/aws/terra/environments"
 INFRA_TERRAFORM_DIR="${REPO_ROOT}/module_infra_basic/aws/terra/environments"
+FRONTEND_TERRAFORM_DIR="${REPO_ROOT}/module_infra_frontend/aws/terra/environments"
 EKS_TERRAFORM_DIR="${REPO_ROOT}/module_infra_kubetypes/kube/aws/terra/environments"
 ECS_TERRAFORM_DIR="${REPO_ROOT}/module_infra_kubetypes/nonkube/aws/terra/environments"
 
@@ -689,10 +690,10 @@ deploy_terragrunt() {
             log_info "ECS service should now be deploying tasks with the new image"
             log_info "Use 'aws ecs describe-services' to verify deployment status"
         fi
-        # Deploy frontend-ecs layer (S3 + CloudFront; lives in module_infra_basic)
+        # Deploy frontend-ecs layer (S3 + CloudFront; lives in module_infra_frontend)
         log_step "Deploying frontend-ecs layer (S3, CloudFront)"
-        LAYER_TERRAFORM_BASE="$INFRA_TERRAFORM_DIR"
-        cd "$INFRA_TERRAFORM_DIR/$ENVIRONMENT/frontend-ecs"
+        LAYER_TERRAFORM_BASE="$FRONTEND_TERRAFORM_DIR"
+        cd "$FRONTEND_TERRAFORM_DIR/$ENVIRONMENT/frontend-ecs"
         CURRENT_LAYER="frontend-ecs"
         # Reconcile state: import any leftover frontend-ecs resources (e.g. OAC, S3, CloudFront after brutal teardown).
         IMPORT_FRONTEND_ECS="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-frontend-ecs.sh"
@@ -767,10 +768,10 @@ deploy_terragrunt() {
             fi
             log_success "EKS layer deployed successfully!"
         fi
-        # Deploy frontend-eks layer (S3 + CloudFront; lives in module_infra_basic)
+        # Deploy frontend-eks layer (S3 + CloudFront; lives in module_infra_frontend)
         log_step "Deploying frontend-eks layer (S3, CloudFront)"
-        LAYER_TERRAFORM_BASE="$INFRA_TERRAFORM_DIR"
-        cd "$INFRA_TERRAFORM_DIR/$ENVIRONMENT/frontend-eks"
+        LAYER_TERRAFORM_BASE="$FRONTEND_TERRAFORM_DIR"
+        cd "$FRONTEND_TERRAFORM_DIR/$ENVIRONMENT/frontend-eks"
         CURRENT_LAYER="frontend-eks"
         # Reconcile state: import any leftover frontend-eks resources (e.g. OAC, S3, CloudFront after brutal teardown).
         # Import is mandatory: if OAC/S3/CF already exist (e.g. after brutal teardown), apply would fail with AlreadyExists without import.
@@ -807,8 +808,8 @@ deploy_terragrunt() {
     
     # Deploy only frontend-ecs layer (standalone; use when ECS + frontend-ecs Terraform already exist and you only want to re-apply frontend).
     if [ "$LAYER" = "frontend-ecs" ]; then
-        LAYER_TERRAFORM_BASE="$INFRA_TERRAFORM_DIR"
-        cd "$INFRA_TERRAFORM_DIR/$ENVIRONMENT/frontend-ecs"
+        LAYER_TERRAFORM_BASE="$FRONTEND_TERRAFORM_DIR"
+        cd "$FRONTEND_TERRAFORM_DIR/$ENVIRONMENT/frontend-ecs"
         CURRENT_LAYER="frontend-ecs"
         IMPORT_FRONTEND_ECS="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-frontend-ecs.sh"
         if [ -x "$IMPORT_FRONTEND_ECS" ]; then
@@ -837,8 +838,8 @@ deploy_terragrunt() {
     
     # Deploy only frontend-eks layer (standalone; use when EKS + frontend-eks Terraform already exist and you only want to re-apply frontend).
     if [ "$LAYER" = "frontend-eks" ]; then
-        LAYER_TERRAFORM_BASE="$INFRA_TERRAFORM_DIR"
-        cd "$INFRA_TERRAFORM_DIR/$ENVIRONMENT/frontend-eks"
+        LAYER_TERRAFORM_BASE="$FRONTEND_TERRAFORM_DIR"
+        cd "$FRONTEND_TERRAFORM_DIR/$ENVIRONMENT/frontend-eks"
         CURRENT_LAYER="frontend-eks"
         export AWS_PROFILE="${AWS_PROFILE:-admin}"
         IMPORT_FRONTEND_EKS="$REPO_ROOT/orchestration/terraform/import_preexist/import-existing-frontend-eks.sh"

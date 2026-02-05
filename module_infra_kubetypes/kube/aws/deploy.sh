@@ -109,7 +109,7 @@ main() {
         export REPO_ROOT
         export ENVIRONMENT="${ENVIRONMENT:-dev}"
         export CONTAINER_TYPE="${CONTAINER_TYPE:-eks}"
-        "$REPO_ROOT/module_infra_basic/aws/deploy-frontend.sh" || exit 1
+        "$REPO_ROOT/module_infra_frontend/aws/deploy-frontend.sh" || exit 1
     else
         log_info "Substep 4/6: Skipping frontend deployment (--skip-frontend flag set)"
     fi

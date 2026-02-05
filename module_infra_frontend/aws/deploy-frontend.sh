@@ -88,7 +88,7 @@ deploy_frontend() {
     export AWS_PROFILE AWS_REGION
     log_info "Using AWS profile: $AWS_PROFILE (for infrastructure operations)"
     
-    # Get S3 bucket name from Terraform outputs (frontend-ecs / frontend-eks layer in module_infra_basic)
+    # Get S3 bucket name from Terraform outputs (frontend-ecs / frontend-eks layer in module_infra_frontend)
     # When CONTAINER_TYPE is set (from run.sh), use that layer; when run standalone, try frontend-eks then frontend-ecs.
     CONTAINER_TYPE="${CONTAINER_TYPE:-}"
     # CONTAINER_TYPE must be set (eks or ecs) so we know which frontend layer to use.
@@ -97,9 +97,9 @@ deploy_frontend() {
         return 1
     fi
     if [ "$CONTAINER_TYPE" = "eks" ]; then
-        FRONTEND_TERRA_DIRS=("$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT/frontend-eks")
+        FRONTEND_TERRA_DIRS=("$REPO_ROOT/module_infra_frontend/aws/terra/environments/$ENVIRONMENT/frontend-eks")
     elif [ "$CONTAINER_TYPE" = "ecs" ]; then
-        FRONTEND_TERRA_DIRS=("$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT/frontend-ecs")
+        FRONTEND_TERRA_DIRS=("$REPO_ROOT/module_infra_frontend/aws/terra/environments/$ENVIRONMENT/frontend-ecs")
     else
         log_error "CONTAINER_TYPE must be 'eks' or 'ecs', got: $CONTAINER_TYPE"
         return 1
@@ -128,7 +128,7 @@ deploy_frontend() {
             log_error "Terraform frontend directory not found or s3_bucket_id output missing in: ${FRONTEND_TERRA_DIRS[*]}"
             log_info "Frontend layer (frontend-ecs or frontend-eks) must be deployed first"
             log_info "Deploy with: ./run.sh aws kube $ENVIRONMENT  (EKS) or ./run.sh aws nonkube $ENVIRONMENT  (ECS)"
-            log_info "Standalone: CONTAINER_TYPE=eks $REPO_ROOT/module_infra_basic/aws/deploy-frontend.sh  (or CONTAINER_TYPE=ecs for ECS)"
+            log_info "Standalone: CONTAINER_TYPE=eks $REPO_ROOT/module_infra_frontend/aws/deploy-frontend.sh  (or CONTAINER_TYPE=ecs for ECS)"
             exit 1
         fi
     else

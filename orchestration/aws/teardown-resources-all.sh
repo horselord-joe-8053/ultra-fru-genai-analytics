@@ -198,7 +198,7 @@ run_import_before_layer_destroy() {
                 log_info "Reconciling EKS state (import before destroy)..."
                 "$import_eks" "$ENVIRONMENT" "$PROJECT_NAME" || log_warning "EKS import had issues; continuing."
             fi
-            local fe_dir="$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT/frontend-eks"
+            local fe_dir="$REPO_ROOT/module_infra_frontend/aws/terra/environments/$ENVIRONMENT/frontend-eks"
             if [ -d "$fe_dir" ] && [ -x "$import_fe" ]; then
                 log_info "Reconciling frontend-eks state (import before destroy)..."
                 "$import_fe" "$ENVIRONMENT" "$PROJECT_NAME" || log_warning "Frontend-eks import had issues; continuing."
@@ -212,7 +212,7 @@ run_import_before_layer_destroy() {
                 log_info "Reconciling ECS state (import before destroy)..."
                 "$import_ecs" "$ENVIRONMENT" "$PROJECT_NAME" || log_warning "ECS import had issues; continuing."
             fi
-            local fe_dir="$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT/frontend-ecs"
+            local fe_dir="$REPO_ROOT/module_infra_frontend/aws/terra/environments/$ENVIRONMENT/frontend-ecs"
             if [ -d "$fe_dir" ] && [ -x "$import_fe" ]; then
                 log_info "Reconciling frontend-ecs state (import before destroy)..."
                 "$import_fe" "$ENVIRONMENT" "$PROJECT_NAME" || log_warning "Frontend-ecs import had issues; continuing."
@@ -257,7 +257,7 @@ run_terraform_teardown_shared() {
     log_step "Terraform destroy (shared infrastructure)"
     [ ! -f "$TF_TEARDOWN" ] && { log_error "Terraform teardown script not found: $TF_TEARDOWN"; return 1; }
     if [ "$DRY_RUN" = "true" ]; then
-        log_info "[DRY-RUN] Would run: $TF_TEARDOWN $ENVIRONMENT infrastructure"
+        log_info "[DRY-RUN] Would run: $TF_TEARDOWN $ENVIRONMENT infra_basic"
         echo ""
         return 0
     fi
@@ -265,10 +265,10 @@ run_terraform_teardown_shared() {
     [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && export PREEMPT=true
     local r=0
     if type run_with_heartbeat >/dev/null 2>&1; then
-        _run_with_heartbeat_step "Terraform destroy (shared)" -- "$TF_TEARDOWN" "$ENVIRONMENT" "infrastructure"
+        _run_with_heartbeat_step "Terraform destroy (shared)" -- "$TF_TEARDOWN" "$ENVIRONMENT" "infra_basic"
         r=$?
     else
-        "$TF_TEARDOWN" "$ENVIRONMENT" "infrastructure"
+        "$TF_TEARDOWN" "$ENVIRONMENT" "infra_basic"
         r=$?
     fi
     if [ "$r" -eq 0 ]; then
@@ -280,7 +280,7 @@ run_terraform_teardown_shared() {
     echo ""
 }
 
-# --- Step 3: Optional orphan cleanup (module_infra_basic) ---
+# --- Step 3: Optional orphan cleanup (module_infra_basic, module_infra_frontend) ---
 cleanup_orphaned() {
     local ct="$1"
     log_step "Optional orphan cleanup (container-type: $ct)"
@@ -386,7 +386,7 @@ main() {
                     export AWS_PROFILE AWS_REGION
                     [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && export PREEMPT=true
                     [ ! -f "$TF_TEARDOWN" ] && { log_error "Terraform teardown script not found: $TF_TEARDOWN"; set -e; failed=true; rm -f "$_tmp_out"; break; }
-                    "$TF_TEARDOWN" "$ENVIRONMENT" "infrastructure" 2>&1 | tee "$_tmp_out"
+                    "$TF_TEARDOWN" "$ENVIRONMENT" "infra_basic" 2>&1 | tee "$_tmp_out"
                     r=${PIPESTATUS[0]}
                     set -e
                     if [ "$r" -eq 0 ]; then

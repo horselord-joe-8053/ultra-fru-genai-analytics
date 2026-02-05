@@ -20,74 +20,33 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/orchestration/common/logger.sh"
-source "$REPO_ROOT/orchestration/common/env/load-env.sh"
-load_env_file || true
+source "$SCRIPT_DIR/common/lib_import_common.sh"
 
-ENVIRONMENT="${1:-dev}"
-PROJECT_NAME="${2:-fru}"
-FRONTEND_EKS_DIR="$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT/frontend-eks"
+import_parse_args "$@"
+import_validate_env
+
+FRONTEND_EKS_DIR="$REPO_ROOT/module_infra_frontend/aws/terra/environments/$ENVIRONMENT/frontend-eks"
 AWS_PROFILE="${AWS_PROFILE:-admin}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
-
-if [[ ! "$ENVIRONMENT" =~ ^(dev|staging|prod)$ ]]; then
-    log_error "Invalid environment: $ENVIRONMENT"
-    log_info "Usage: $0 [dev|staging|prod] [project_name]"
-    exit 1
-fi
-
-if [ ! -d "$FRONTEND_EKS_DIR" ]; then
-    log_error "frontend-eks directory not found: $FRONTEND_EKS_DIR"
-    exit 1
-fi
 
 log_step "Importing existing frontend-eks resources into Terraform state"
 log_info "Environment: $ENVIRONMENT  Project: $PROJECT_NAME"
 log_info "Dir: $FRONTEND_EKS_DIR"
 
-cd "$FRONTEND_EKS_DIR"
-log_info "Ensuring Terragrunt is initialized..."
-terragrunt init -input=false || true
+import_ensure_dir_and_cd "$FRONTEND_EKS_DIR" "frontend-eks"
+import_init_soft
 
-# Returns 0 on success or skip (already in state / not in AWS), 1 on real import failure.
-run_import() {
-    local addr="$1" id="$2"
-    local tmp_log; tmp_log="$(mktemp)"
-    if terragrunt import "$addr" "$id" >"$tmp_log" 2>&1; then
-        log_success "  OK: $addr"
-        rm -f "$tmp_log"
-        return 0
-    fi
-    if grep -qi "already managed by Terraform\|Resource already managed" "$tmp_log"; then
-        log_success "  OK (already in state): $addr"
-        rm -f "$tmp_log"
-        return 0
-    fi
-    if grep -qi "Cannot import non-existent remote object" "$tmp_log"; then
-        log_info "  Skip (resource does not exist in AWS): $addr"
-        rm -f "$tmp_log"
-        return 0
-    fi
-    log_warning "  Import failed: $addr"
-    tail -10 "$tmp_log" | while IFS= read -r line; do log_info "    $line"; done
-    rm -f "$tmp_log"
-    return 1
-}
-
-# Ensure AWS credentials are available (CloudFront is global; no --region)
 export AWS_PROFILE="${AWS_PROFILE:-admin}"
 
 # 1. CloudFront Origin Access Control (OAC) - import by OAC ID (look up by name)
 OAC_NAME="${PROJECT_NAME}-${ENVIRONMENT}-frontend-eks-oac"
-# CLI returns Items with flat Name/Id (not OriginAccessControlConfig.Name)
 OAC_ID=$(aws cloudfront list-origin-access-controls --profile "$AWS_PROFILE" \
     --query "OriginAccessControlList.Items[?Name=='$OAC_NAME'].Id | [0]" --output text 2>/dev/null || echo "")
 OAC_WAS_IN_AWS=false
 if [ -n "$OAC_ID" ] && [ "$OAC_ID" != "None" ]; then
     OAC_WAS_IN_AWS=true
     log_info "Importing aws_cloudfront_origin_access_control.frontend ($OAC_NAME, id=$OAC_ID)..."
-    if ! run_import "aws_cloudfront_origin_access_control.frontend" "$OAC_ID"; then
+    if ! import_one_resource "aws_cloudfront_origin_access_control.frontend" "$OAC_ID"; then
         log_error "OAC exists in AWS but import failed. Apply would fail with OriginAccessControlAlreadyExists."
         log_info "Fix: run this script from repo root with same AWS_PROFILE, or import manually: terragrunt import aws_cloudfront_origin_access_control.frontend $OAC_ID"
         exit 1
@@ -101,26 +60,24 @@ BUCKET_NAME="${PROJECT_NAME}-${ENVIRONMENT}-frontend-eks-$(aws sts get-caller-id
 if [ -n "$BUCKET_NAME" ] && [ "$BUCKET_NAME" != "${PROJECT_NAME}-${ENVIRONMENT}-frontend-eks-" ]; then
     if aws s3api head-bucket --bucket "$BUCKET_NAME" --profile "$AWS_PROFILE" 2>/dev/null; then
         log_info "Importing aws_s3_bucket.frontend ($BUCKET_NAME)..."
-        run_import "aws_s3_bucket.frontend" "$BUCKET_NAME"
+        import_one_resource "aws_s3_bucket.frontend" "$BUCKET_NAME"
     else
         log_info "  Skip S3 bucket (not found): $BUCKET_NAME"
     fi
 fi
 
 # 3. CloudFront distribution - import by distribution ID (look up by comment/tag)
-# Distribution comment for frontend-eks: fru-dev-frontend-eks
 CF_COMMENT="${PROJECT_NAME}-${ENVIRONMENT}-frontend-eks"
 CF_ID=$(aws cloudfront list-distributions --profile "$AWS_PROFILE" \
     --query "DistributionList.Items[?Comment=='$CF_COMMENT'].Id | [0]" --output text 2>/dev/null || echo "")
 if [ -n "$CF_ID" ] && [ "$CF_ID" != "None" ]; then
     log_info "Importing aws_cloudfront_distribution.frontend ($CF_ID)..."
-    run_import "aws_cloudfront_distribution.frontend" "$CF_ID"
+    import_one_resource "aws_cloudfront_distribution.frontend" "$CF_ID"
 else
     log_info "  Skip CloudFront distribution (not found for comment $CF_COMMENT)"
 fi
 
 # Verify: only fail if we found OAC in AWS and imported it, but it is not in state (use state list, not plan).
-# Plan can show "will be created" for other resources or in a different run context; state list is the source of truth.
 if [ "$OAC_WAS_IN_AWS" = true ]; then
     log_info "Verifying OAC is in state: terragrunt state list..."
     state_list="$(terragrunt state list -no-color 2>/dev/null || true)"

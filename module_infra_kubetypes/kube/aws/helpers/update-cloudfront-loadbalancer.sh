@@ -46,7 +46,7 @@ CF_DIST_ID="${3:-}"
 if [ -z "$CF_DIST_ID" ]; then
     log_info "Getting CloudFront distribution ID from Terraform (frontend-eks)..."
     env_for_tf="${ENVIRONMENT:-dev}"
-    frontend_eks_dir="${REPO_ROOT}/module_infra_basic/aws/terra/environments/${env_for_tf}/frontend-eks"
+    frontend_eks_dir="${REPO_ROOT}/module_infra_frontend/aws/terra/environments/${env_for_tf}/frontend-eks"
     if [ -d "$frontend_eks_dir" ] && command -v terragrunt >/dev/null 2>&1; then
         CF_DIST_ID=$(cd "$frontend_eks_dir" && AWS_PROFILE="${AWS_PROFILE:-admin}" terragrunt output -raw cloudfront_distribution_id 2>/dev/null || echo "")
         if [ -z "$CF_DIST_ID" ]; then

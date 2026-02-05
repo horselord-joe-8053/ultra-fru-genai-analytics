@@ -59,7 +59,9 @@ There are **5** Terragrunt layers that create AWS resources and can be affected 
 
 ## Import script coverage
 
-All import scripts live in **`orchestration/terraform/import_preexist/`**.
+All import scripts live in **`orchestration/terraform/import_preexist/`**. They share a common library:
+
+- **`common/lib_import_common.sh`** — Bootstrap (REPO_ROOT, logger, env), argument parsing, env validation, directory check + `cd`, `terragrunt init` (strict/soft), state-lock parsing and force-unlock retry, `import_one_resource`, and `import_batch`. Scripts source this and call the helpers; no change to CLI or callers.
 
 | Layer          | Script | Used in deploy? |
 |----------------|--------|------------------|
@@ -72,6 +74,19 @@ All import scripts live in **`orchestration/terraform/import_preexist/`**.
 All five layers have a dedicated import script. `orchestration/terraform/deploy.sh` runs each layer’s import script just before that layer’s plan/apply (per-layer, so only the layers you’re deploying get their import run).
 
 **Import before destroy (teardown):** `teardown-resources-all.sh` runs the relevant import script(s) *before* each layer's `terragrunt destroy` (infrastructure before shared destroy; EKS + frontend-eks before EKS destroy; ECS + frontend-ecs before ECS destroy). If state was empty but AWS still has resources, destroy can then remove them. All import scripts accept `dev`, `staging`, or `prod`.
+
+### Teardown-mode reconciliation details (recent learnings)
+
+- **Purpose before destroy:** imports in teardown are **only for reconciliation**. They make sure Terraform state sees any leftover AWS resources so `terragrunt destroy` can actually delete them instead of no-op’ing. If a resource does not exist or is already in state, that is **not** a fatal error.
+- **Benign errors we now classify as non-fatal:**
+  - `Resource already managed by Terraform` → treated as **OK (already in state)**.
+  - `Cannot import non-existent remote object` and similar (`NoSuchEntity`, `ResourceNotFoundException`, `does not exist`, `NoSuchKey`, etc.) → treated as **Skip (resource does not exist in AWS)**.
+  - Terragrunt dependency warnings like *“... is a dependency of ./terragrunt.hcl but detected no outputs, but mock outputs provided ...”* are expected when using `mock_outputs` for unapplied dependencies; imports for teardown don’t require those outputs.
+- **State lock handling during import:** when Terraform prints `Error acquiring the state lock`, the shared helper:
+  - Parses the lock ID from the log.
+  - Runs `terragrunt force-unlock -force <LOCK_ID>`.
+  - Retries the import once and then re-classifies the result (success, already-managed, non-existent, or real failure).
+  This prevents stale locks from breaking reconcile imports during teardown.
 
 ## Quick reference
 
@@ -89,3 +104,4 @@ Run scripts from repo root or with correct `REPO_ROOT`.
 ## See also
 
 - **docs/DEPLOYMENT_ERRORS_AND_FIXES.md** — Phase 2 Terraform "subnet group / VPC mismatch", S3 bucket empty, frontend invalid bucket, Docker not running, Terraform plugin checksum: causes and fixes.
+

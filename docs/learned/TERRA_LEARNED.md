@@ -21,9 +21,9 @@ So when we say “destroy the infrastructure layer,” we mean: run `terragrunt 
 ```text
 Layer (one apply/destroy, one state)
   └── module_infra_basic/aws/terra/environments/dev/infrastructure/
-        terragrunt.hcl  →  source = modules//infrastructure
-        modules/infrastructure/main.tf
-          ├── data "terraform_remote_state" "longterm"
+        terragrunt.hcl  →  source = modules//root_infrastructure
+        modules/root_infrastructure/main.tf
+          ├── data "terraform_remote_state" "longterm"  (from module_infra_longterm)
           ├── module "vpc"
           ├── module "iam"   (uses longterm outputs + s3_data)
           ├── module "aurora"
@@ -43,7 +43,7 @@ Layer order is **not** driven by Terragrunt `dependency` blocks. It is **explici
   2. Then, depending on **`CONTAINER_TYPE`** (set by `./run.sh aws kube …` or `./run.sh aws nonkube …`):
      - **`CONTAINER_TYPE=eks`**: **eks** → **frontend-eks**
      - **`CONTAINER_TYPE=ecs`**: **ecs** → **frontend-ecs**
-- **When `LAYER`** is a single layer (e.g. `infrastructure`, `eks`, `frontend-eks`), only that block runs; dependency on other layers is **assumed already deployed** (or you run deploy in the right order manually).
+- **When `LAYER`** is a single layer (e.g. `infrastructure`, `eks`, `frontend-eks`, `frontend-ecs`), only that block runs; dependency on other layers is **assumed already deployed** (or you run deploy in the right order manually).
 
 So: **longterm before infrastructure** (so `terraform_remote_state` works), **infrastructure before app** (EKS/ECS need VPC/subnets), **app before frontend** (frontend can reference app outputs if needed).
 
@@ -86,7 +86,7 @@ flowchart TB
 ## 3. Why layers matter for teardown
 
 - **Apply:** We run apply **per layer** (e.g. infrastructure-longterm, infrastructure, then eks/ecs, then frontend). Order is fixed in `deploy.sh` (see §2.1).
-- **Destroy:** We run destroy **per layer**, in **reverse** order (frontend first, then app, then infrastructure). Everything in that layer’s state is destroyed in one go. **infrastructure-longterm** is never destroyed by main teardown (Option B).
+- **Destroy:** We run destroy **per layer**, in **reverse** order (frontend first, then app, then **infra_basic**). Teardown script usage: `./teardown.sh [dev|prod] [infra_basic|longterm|ecs|eks|all]`. **longterm** (Secrets Manager) is never destroyed by `all`; use layer `longterm` explicitly to destroy it (Option B).
 
 So “what gets destroyed” is decided by **which layers we run destroy on**. If Secrets Manager lived **inside** the infrastructure layer (as a module), destroying that layer would try to destroy secrets too — unless we block it (e.g. `prevent_destroy`) or **exclude it from that layer** (Option B).
 
@@ -135,7 +135,7 @@ Some AWS resources have **long-term** or **cool-off** behavior (e.g. Secrets Man
 | Approach | Idea | Pros / cons |
 |----------|------|-------------|
 | **Fail-back (current)** | Keep long-term resources in the **same** layer (e.g. infrastructure). Use `prevent_destroy` so destroy fails; then **state rm** those resources and run destroy again so only the rest (VPC, Aurora, etc.) are destroyed. | No Terraform refactor. One layer, one place to maintain. Teardown script has extra logic (state rm + second destroy). |
-| **Option B: separate long-term layer** | Put long-term components (e.g. Secrets Manager) in a **separate Terragrunt layer** (e.g. `infrastructure-longterm` or `secrets`). That layer has its **own** state and its **own** directory. **Deploy:** apply both `infrastructure` and `infrastructure-longterm`. **Teardown:** only destroy `infrastructure`; **never** destroy `infrastructure-longterm` in the main flow. Optional: a dedicated `teardown-longterm.sh` to destroy that layer when explicitly needed. | Teardown logic stays simple: “destroy layer X” never touches the long-term layer. Clear split: “ephemeral infra” vs “long-term.” Requires refactor: new layer dir, move secrets out of infrastructure module, wire deploy/teardown. |
+| **Option B: separate long-term layer** | Put long-term components (e.g. Secrets Manager) in a **separate Terragrunt layer** and tree (e.g. `module_infra_longterm` with layer `infrastructure-longterm`). That layer has its **own** state and its **own** directory. **Deploy:** apply both `infrastructure` and `infrastructure-longterm`. **Teardown:** only destroy `infrastructure` (layer **infra_basic**); **never** destroy longterm in the main flow (`all`). Destroy longterm explicitly with `./teardown.sh <env> longterm`. | Teardown logic stays simple: “destroy layer X” never touches the long-term layer. Clear split: “ephemeral infra” vs “long-term.” Implemented: separate trees `module_infra_basic`, `module_infra_longterm`, `module_infra_frontend`. |
 
 **Option B in one picture:**
 
@@ -177,12 +177,12 @@ Option B (two layers):
   infrastructure-longterm (state: dev/infrastructure-longterm)
     └── secrets_manager
     └── main teardown never runs destroy here
-    └── teardown-longterm.sh can destroy this when explicitly requested
+    └── ./teardown.sh <env> longterm  can destroy this when explicitly requested
 ```
 
 So **“layers”** are the knobs we turn to decide **what is applied together** and **what is destroyed together**. Putting long-term components in a **separate layer** that we **never** destroy in the main flow is the clean way to “never delete Secrets Manager in teardown” without `prevent_destroy` or state-rm logic.
 
-**Implemented:** The repo uses **Option B**. The **infrastructure-longterm** layer (Secrets Manager only) is applied first on deploy and is **never** destroyed by main teardown. The **infrastructure** layer (VPC, Aurora, IAM, S3) reads secret ARNs via `terraform_remote_state` and is destroyed in one pass on teardown.
+**Implemented:** The repo uses **Option B**. The **infrastructure-longterm** layer lives in **module_infra_longterm** (Secrets Manager only); it is applied first on deploy and is **never** destroyed by `teardown.sh ... all`. The **infrastructure** layer in **module_infra_basic** (VPC, Aurora, IAM, S3) reads secret ARNs via `terraform_remote_state` and is destroyed with layer **infra_basic**.
 
 ---
 
@@ -194,7 +194,7 @@ So **“layers”** are the knobs we turn to decide **what is applied together**
 | **Module** | Reusable Terraform code under `modules/`. A layer can use several modules. |
 | **Deploy order (layers)** | Fixed in `orchestration/terraform/deploy.sh`: longterm → infrastructure → (eks or ecs) → frontend; app branch chosen by `CONTAINER_TYPE` when `LAYER=all`. |
 | **Order within a layer** | Terraform dependency graph (references and `depends_on`); one `terragrunt apply` per layer. |
-| **Option B** | Separate Terragrunt layer for long-term resources (e.g. secrets); main teardown never destroys that layer; optional dedicated `teardown-longterm.sh`. *(The VPC/subnet “Option B — Import” is a different idea; see [VPC_LEARNED.md §3.2](VPC_LEARNED.md#32-how-we-fix-it-align-state-and-reality).)* |
+| **Option B** | Separate Terragrunt layer (and tree **module_infra_longterm**) for long-term resources (e.g. secrets); main teardown (`all`) never destroys that layer; destroy it explicitly with `./teardown.sh <env> longterm`. *(The VPC/subnet “Option B — Import” is a different idea; see [VPC_LEARNED.md §3.2](VPC_LEARNED.md#32-how-we-fix-it-align-state-and-reality).)* |
 | **Fail-back** | *(Legacy)* When destroy failed on `prevent_destroy`, we used to remove protected resources from state and re-run destroy. With Option B, infrastructure no longer contains Secrets Manager, so this is no longer used. |
 
 ---
@@ -205,7 +205,9 @@ So **“layers”** are the knobs we turn to decide **what is applied together**
 
 | Path | Purpose |
 |------|--------|
-| `module_infra_basic/aws/terra/` | Infra + frontend + longterm: environments (dev/prod), `_component` bases, and **modules/** (root_infrastructure, frontend, secrets-manager, vpc, aurora, iam, s3-data). |
+| `module_infra_basic/aws/terra/` | Core infra only: environments (dev/prod), `_component` bases, and **modules/** (root_infrastructure, vpc, aurora, iam, s3-data). Layer: **infrastructure**. |
+| `module_infra_longterm/aws/terra/` | Long-term resources: environments (dev/prod) and **modules/secrets-manager**. Layer: **infrastructure-longterm**. |
+| `module_infra_frontend/aws/terra/` | Frontend (S3 + CloudFront): environments (dev/prod) and **modules/frontend**. Layers: **frontend-eks**, **frontend-ecs**. |
 | `module_infra_kubetypes/kube/aws/terra/` | EKS app layer: environments (dev/prod) and **modules/root_eks** only. |
 | `module_infra_kubetypes/nonkube/aws/terra/` | ECS app layer: environments (dev/prod) and **modules/root_ecs**, **modules/alb** only. |
 
@@ -213,7 +215,7 @@ Layer config lives under each `terra/environments/` (e.g. `dev/infrastructure/te
 
 ### 6.2 Why there is no `frontend` under kube/nonkube `modules/`
 
-The **frontend** Terraform module (S3 + CloudFront) lives only in **`module_infra_basic/aws/terra/modules/frontend`**. The frontend **layers** (e.g. `frontend-eks`, `frontend-ecs`) are defined in **`module_infra_basic/aws/terra/environments/dev|prod/frontend-eks|frontend-ecs/`** and use `_component/frontend-base.hcl`, which sets `source = ".../modules//frontend"` relative to that repo path. So:
+The **frontend** Terraform module (S3 + CloudFront) lives in **`module_infra_frontend/aws/terra/modules/frontend`**. The frontend **layers** (e.g. `frontend-eks`, `frontend-ecs`) are defined in **`module_infra_frontend/aws/terra/environments/dev|prod/frontend-eks|frontend-ecs/`** and use `_component/frontend-base.hcl`, which sets `source = ".../modules//frontend"` relative to that repo path. So:
 
 - **Kube** `terra` has only **modules/root_eks** (EKS cluster, node group, etc.).
 - **Nonkube** `terra` has only **modules/root_ecs** and **modules/alb**.
@@ -242,10 +244,11 @@ So you get **sibling** cache dirs, for example:
 
 The **division** is not by parent path (both are under `dev/`) but by **layer name** and **source**:
 
-- **infrastructure** layer: `source = ".../modules//root_infrastructure"` → Terragrunt copies the whole `modules/` dir; Terraform root is `root_infrastructure/` (which references ../vpc, ../aurora, etc.). No Secrets Manager in this layer. State key: `dev/infrastructure/terraform.tfstate`.
-- **infrastructure-longterm** layer: `source = ".../modules//secrets-manager"` → same idea; Terraform root is `secrets-manager/`. State key: `dev/infrastructure-longterm/terraform.tfstate`.
+- **infrastructure** layer (module_infra_basic): `source = ".../modules//root_infrastructure"` → Terragrunt copies the whole `modules/` dir; Terraform root is `root_infrastructure/`. State key: `dev/infrastructure/terraform.tfstate`.
+- **infrastructure-longterm** layer (module_infra_longterm): `source = ".../modules//secrets-manager"` → Terraform root is `secrets-manager/`. State key: `dev/infrastructure-longterm/terraform.tfstate`.
+- **frontend-eks** / **frontend-ecs** (module_infra_frontend): each has its own state key under `dev/`.
 
-So Option B is implemented: two layers, two state files, two different roots into the same repo `modules/` tree. Main teardown only runs destroy for the **infrastructure** layer and never for **infrastructure-longterm**.
+So Option B is implemented: longterm and frontend each have their own tree and state. Main teardown (`all`) runs destroy for **infra_basic** (and frontend + app) but never for **longterm**; use `./teardown.sh <env> longterm` to destroy the longterm layer.
 
 ### 6.5 Leaf vs composition modules (root_infrastructure, root_eks, root_ecs)
 

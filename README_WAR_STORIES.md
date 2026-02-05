@@ -803,6 +803,8 @@ That's why Terraform has first-class **import** and **refresh**: adoption and dr
 
 Import scripts reconcile **state with reality**: they don’t apply external state files—they pull current AWS reality into Terraform state. You need them **before apply** when resources exist in AWS but not in state (so apply doesn’t try to create and hit "already exists"). You also need them **before destroy** when state is empty but AWS still has resources (so destroy can remove orphans instead of no-op’ing and causing the next deploy to re-import and hit errors like `The new Subnets are not in the same Vpc as the existing subnet group`). Same tool, two moments: before apply and before destroy, to keep the whole Terraform flow consistent.
 
+For a focused reference on the per-layer import scripts, their CLI, and teardown-mode behaviors (state locks, “already managed”, “non-existent” patterns), see `docs/learned/README_IMPORT_PREEXIST.md`.
+
 ---
 
 ## 19. Fixing "The new Subnets are not in the same Vpc as the existing subnet group" — What We Did and Option A vs Option B

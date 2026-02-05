@@ -68,7 +68,7 @@ FRU (**Fridges R Us**) is a real, end-to-end **conversational analytics system**
 - **`./run.sh aws kube [dev|prod]`** – AWS EKS
 - **`./teardown.sh local nonkube`** / **`./teardown.sh aws all [env]`** – Teardown
 
-**Sub-projects:** `orchestration/`, `module_app_core/`, `module_infra_basic/`, `module_infra_db/`, `module_infra_spark/`, `module_infra_kubetypes/kube/`, `module_infra_kubetypes/nonkube/`, `module_test_verification/` (each has a README).
+**Sub-projects:** `orchestration/`, `module_app_core/`, `module_infra_basic/`, `module_infra_longterm/`, `module_infra_frontend/`, `module_infra_db/`, `module_infra_spark/`, `module_infra_kubetypes/kube/`, `module_infra_kubetypes/nonkube/`, `module_test_verification/` (each has a README).
 
 ---
 
@@ -225,7 +225,9 @@ fru-genai-analytics-all/
 │   │   └─ terraform/             # Terraform deployment & teardown
 │   └─ common/                    # Shared utilities
 │
-├─ module_infra_basic/             # VPC, Aurora, IAM, Secrets (Terraform)
+├─ module_infra_basic/             # Core infra: VPC, Aurora, IAM (Terraform)
+├─ module_infra_longterm/          # Long-term: Secrets Manager (Terraform)
+├─ module_infra_frontend/          # Frontend: S3 + CloudFront (Terraform)
 ├─ module_infra_kubetypes/kube/             # EKS + k8s manifests
 ├─ module_infra_kubetypes/nonkube/         # ECS, ALB, local Docker
 │
