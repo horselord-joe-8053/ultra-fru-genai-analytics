@@ -8,7 +8,7 @@
 # Usage: source this file, then call print_ecs_manual_hints
 #
 # Prerequisites:
-#   - logger.sh must be sourced by parent script
+#   - lib/logger.sh must be sourced by parent script
 #   - fetch-deployment-info.sh should be sourced before calling this (for ALB_DNS, CLOUDFRONT_DOMAIN, etc.)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,7 +17,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
 # Source shared logger if not already available
 if ! command -v log_info >/dev/null 2>&1; then
     # shellcheck source=/dev/null
-    source "$REPO_ROOT/orchestration/common/logger.sh" 2>/dev/null || true
+    source "$REPO_ROOT/lib/logger.sh" 2>/dev/null || true
 fi
 
 # Print ECS-specific manual test hints

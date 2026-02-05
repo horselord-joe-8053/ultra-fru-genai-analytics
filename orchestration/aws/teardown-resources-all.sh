@@ -43,7 +43,7 @@ HEARTBEAT_INTERVAL_SEC="${TEARDOWN_HEARTBEAT_INTERVAL:-60}"   # Heartbeat messag
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
-source "$REPO_ROOT/orchestration/common/logger.sh"
+source "$REPO_ROOT/lib/logger.sh"
 source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 
 # Optional: reuse cleanup helper for local Docker images

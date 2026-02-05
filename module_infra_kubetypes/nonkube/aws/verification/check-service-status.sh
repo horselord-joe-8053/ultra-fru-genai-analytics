@@ -8,7 +8,7 @@
 # Usage: source this file, then call check_ecs_service_status <environment>
 #
 # Prerequisites:
-#   - logger.sh must be sourced by parent script
+#   - lib/logger.sh must be sourced by parent script
 #   - AWS CLI must be installed and configured
 #   - ECS_CLUSTER_ID and ECS_SERVICE_NAME environment variables (optional, will be discovered if not set)
 
@@ -18,7 +18,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
 # Source shared logger if not already available
 if ! command -v log_info >/dev/null 2>&1; then
     # shellcheck source=/dev/null
-    source "$REPO_ROOT/orchestration/common/logger.sh" 2>/dev/null || true
+    source "$REPO_ROOT/lib/logger.sh" 2>/dev/null || true
 fi
 
 # Helper function to check if command exists

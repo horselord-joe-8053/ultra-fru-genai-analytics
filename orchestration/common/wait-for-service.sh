@@ -4,7 +4,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
-source "$REPO_ROOT/orchestration/common/logger.sh"
+source "$REPO_ROOT/lib/logger.sh"
 
 wait_for_service() {
     local url=$1

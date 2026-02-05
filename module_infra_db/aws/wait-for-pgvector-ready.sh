@@ -154,8 +154,8 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     # Source logger if available
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
-    if [ -f "$REPO_ROOT/orchestration/common/logger.sh" ]; then
-        source "$REPO_ROOT/orchestration/common/logger.sh"
+    if [ -f "$REPO_ROOT/lib/logger.sh" ]; then
+        source "$REPO_ROOT/lib/logger.sh"
     else
         # Fallback logging functions
         log_info() { echo "[INFO] $*"; }

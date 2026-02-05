@@ -28,7 +28,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../.." && pwd)}"
-source "$REPO_ROOT/orchestration/common/logger.sh"
+source "$REPO_ROOT/lib/logger.sh"
 source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 [ -f "$REPO_ROOT/.env" ] && load_env_file 2>/dev/null || true
 

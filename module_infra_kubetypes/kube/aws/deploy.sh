@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Resolve repo root. Prefer existing REPO_ROOT if set (from parent orchestrator).
 # This script lives at module_infra_kubetypes/kube/aws/ so ../../.. = repo root.
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-source "$REPO_ROOT/orchestration/common/logger.sh"
+source "$REPO_ROOT/lib/logger.sh"
 source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 
 # Use app venv when present so Python/pip and scripts (e.g. kubeconfig edit) use consistent deps

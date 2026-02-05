@@ -16,7 +16,7 @@
 # Resolve REPO_ROOT from lib location if not set (common/ -> import_preexist -> terraform -> orchestration -> repo)
 _import_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$_import_lib_dir/../../../.." && pwd)}"
-source "$REPO_ROOT/orchestration/common/logger.sh"
+source "$REPO_ROOT/lib/logger.sh"
 source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 load_env_file || true
 
@@ -72,7 +72,7 @@ import_parse_lock_id_from_file() {
     rm -f "$clean_log"
 }
 
-# Extended skip patterns: resource does not exist in AWS (safe to skip)
+# Extended skip patterns: resource does not exist in AWS (safe to skip for teardown-mode imports)
 _IMPORT_SKIP_PATTERNS="Cannot import non-existent remote object|NoSuchEntity|ResourceNotFoundException|cannot be found|does not exist|NoSuchKey"
 
 # Run a single terragrunt import; on state lock, force-unlock and retry once.
@@ -97,11 +97,11 @@ import_one_resource() {
     fi
 
     if grep -qi "already managed by Terraform\|Resource already managed" "$tmp_log"; then
-        log_success "  OK (already in state): $addr"
+        log_success "  OK (already in state): $addr (Terraform state already tracks this resource; no import needed)"
         return 0
     fi
     if grep -qiE "$_IMPORT_SKIP_PATTERNS" "$tmp_log"; then
-        log_info "  Skip (resource does not exist in AWS): $addr"
+        log_info "  Skip (resource does not exist in AWS; safe to ignore for teardown-mode import): $addr"
         return 0
     fi
 
@@ -126,11 +126,11 @@ import_one_resource() {
             fi
             # Non-zero after retry: treat \"already managed\" and skip patterns as non-fatal
             if grep -qi "already managed by Terraform\\|Resource already managed" "$tmp_log"; then
-                log_success "  OK (already in state): $addr"
+                log_success "  OK (already in state): $addr (Terraform state already tracks this resource; no import needed)"
                 return 0
             fi
             if grep -qiE "$_IMPORT_SKIP_PATTERNS" "$tmp_log"; then
-                log_info "  Skip (resource does not exist in AWS): $addr"
+                log_info "  Skip (resource does not exist in AWS; safe to ignore for teardown-mode import): $addr"
                 return 0
             fi
         fi
@@ -139,7 +139,13 @@ import_one_resource() {
     log_warning "  Import failed for $addr"
     local err_lines
     err_lines="$(grep -iE 'Error|error:' "$tmp_log" 2>/dev/null | tail -5)"
-    if [ -n "$err_lines" ]; then
+
+    # If we only captured Terragrunt's generic "error occurred" wrapper,
+    # print a larger tail of the raw log to surface the real Terraform error.
+    if [ -n "$err_lines" ] && echo "$err_lines" | grep -qi "error occurred" && ! echo "$err_lines" | grep -qi "Error: "; then
+        log_info "    (Generic Terragrunt error wrapper; showing broader context below)"
+        tail -20 "$tmp_log" | while IFS= read -r line; do log_info "    $line"; done
+    elif [ -n "$err_lines" ]; then
         echo "$err_lines" | while IFS= read -r line; do log_info "    $line"; done
     else
         tail -10 "$tmp_log" | while IFS= read -r line; do log_info "    $line"; done

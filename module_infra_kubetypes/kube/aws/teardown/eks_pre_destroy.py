@@ -81,7 +81,7 @@ def run_stop_eks_services(
     env["AWS_REGION"] = region
     env["DRY_RUN"] = "true" if dry_run else "false"
     stop_script = repo_root / "module_infra_kubetypes/kube/aws/helpers/stop-eks-services.sh"
-    logger_sh = repo_root / "orchestration/common/logger.sh"
+    logger_sh = repo_root / "lib/logger.sh"
     load_env_sh = repo_root / "orchestration/common/env/load-env.sh"
     if not stop_script.exists():
         print(f"  Warning: {stop_script} not found; skipping stop EKS services", file=sys.stderr)

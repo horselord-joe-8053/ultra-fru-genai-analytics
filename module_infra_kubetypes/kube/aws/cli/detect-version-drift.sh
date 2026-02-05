@@ -33,8 +33,8 @@
 # Source logger if available
 SCRIPT_DIR_CLI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT_CLI="${REPO_ROOT:-$(cd "$SCRIPT_DIR_CLI/../../../../.." && pwd)}"
-if [ -f "$REPO_ROOT_CLI/orchestration/common/logger.sh" ]; then
-    source "$REPO_ROOT_CLI/orchestration/common/logger.sh"
+if [ -f "$REPO_ROOT_CLI/lib/logger.sh" ]; then
+    source "$REPO_ROOT_CLI/lib/logger.sh"
 else
     # Fallback logging functions
     log_info() { echo "[INFO] $*"; }

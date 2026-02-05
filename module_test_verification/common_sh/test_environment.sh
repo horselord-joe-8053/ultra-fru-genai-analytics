@@ -17,7 +17,7 @@ setup_aws_environment() {
     
     # Source the same utilities as auto_verify_and_manual_hint.sh does
     # shellcheck source=/dev/null
-    source "$REPO_ROOT/orchestration/common/logger.sh" 2>/dev/null || {
+    source "$REPO_ROOT/lib/logger.sh" 2>/dev/null || {
         echo "ERROR: Could not source logger.sh" >&2
         exit 1
     }

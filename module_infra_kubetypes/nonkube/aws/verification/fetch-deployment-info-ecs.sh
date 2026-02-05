@@ -8,7 +8,7 @@
 # Usage: source this file, then call fetch_ecs_deployment_info
 #
 # Prerequisites:
-#   - logger.sh must be sourced by parent script
+#   - lib/logger.sh must be sourced by parent script
 #   - TERRAFORM_DIR, ENVIRONMENT, REPO_ROOT must be set in parent scope
 #   - terragrunt or aws CLI must be available
 #
@@ -27,7 +27,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
 # Source shared logger if not already available
 if ! command -v log_info >/dev/null 2>&1; then
     # shellcheck source=/dev/null
-    source "$REPO_ROOT/orchestration/common/logger.sh" 2>/dev/null || true
+    source "$REPO_ROOT/lib/logger.sh" 2>/dev/null || true
 fi
 
 # Helper function to check if command exists

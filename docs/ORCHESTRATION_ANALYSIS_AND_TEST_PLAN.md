@@ -64,7 +64,7 @@ Run from **repo root**. Assumes `.env` exists (e.g. `cp .env.example .env` and f
 
 ### 3.4 Common helpers (sourced by scripts above)
 - No direct tests required if 3.1–3.3 pass: logger, load-env, deploy phases, heartbeat, and common deps are all used along those flows.
-- Optional: run a script that only sources common (e.g. `source orchestration/common/logger.sh` and call `log_info "ok"` in a one-liner) to confirm path resolution.
+- Optional: run a script that only sources the shared logger and env loader (e.g. `source lib/logger.sh` and `source orchestration/common/env/load-env.sh`, then call `log_info "ok"`) to confirm path resolution.
 
 ### 3.5 One-liner smoke
 ```bash

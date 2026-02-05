@@ -143,7 +143,7 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     # Source logger if not already sourced
     if [ -z "${log_info:-}" ]; then
         SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        source "$REPO_ROOT/orchestration/common/logger.sh" 2>/dev/null || true
+        source "$REPO_ROOT/lib/logger.sh" 2>/dev/null || true
     fi
     
     # Source fetch-deployment-info to get values

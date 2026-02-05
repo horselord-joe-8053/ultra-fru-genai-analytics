@@ -32,8 +32,8 @@
 # Source logger if available
 SCRIPT_DIR_VERIFY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT_VERIFY="${REPO_ROOT:-$(cd "$SCRIPT_DIR_VERIFY/../../../../.." && pwd)}"
-if [ -f "$REPO_ROOT_VERIFY/orchestration/common/logger.sh" ]; then
-    source "$REPO_ROOT_VERIFY/orchestration/common/logger.sh"
+if [ -f "$REPO_ROOT_VERIFY/lib/logger.sh" ]; then
+    source "$REPO_ROOT_VERIFY/lib/logger.sh"
 else
     # Fallback logging functions
     log_info() { echo "[INFO] $*"; }

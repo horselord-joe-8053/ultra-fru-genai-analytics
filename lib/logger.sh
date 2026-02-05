@@ -20,8 +20,30 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Timestamp helper: [YYYY-MM-DD HH:MM:SS.mmm TZ]
+# Note: BSD `date` (macOS) does NOT support `%N`, so we:
+# - Prefer GNU date (if available) for true milliseconds
+# - Otherwise fall back to python3 for portable milliseconds
 _log_ts() {
-  date +"%Y-%m-%d %H:%M:%S.%3N %Z"
+  # Prefer GNU date if available (supports %3N)
+  if command -v gdate >/dev/null 2>&1; then
+    gdate +"%Y-%m-%d %H:%M:%S.%3N %Z"
+  elif date +"%N" >/dev/null 2>&1  | grep -qE '^[0-9]{9}$'; then
+    # Some environments have GNU-ish `date` as default
+    date +"%Y-%m-%d %H:%M:%S.%3N %Z"
+  elif command -v python3 >/dev/null 2>&1; then
+    # Portable fallback using python3
+    python3 - << 'EOF'
+import datetime, time
+now = datetime.datetime.now()
+ms = int(now.microsecond / 1000)
+ts = now.strftime("%Y-%m-%d %H:%M:%S.") + f"{ms:03d}"
+tz = time.tzname[0]
+print(f"{ts} {tz}")
+EOF
+  else
+    # Last resort: no milliseconds, but valid timestamp
+    date +"%Y-%m-%d %H:%M:%S %Z"
+  fi
 }
 
 _log_prefix() {

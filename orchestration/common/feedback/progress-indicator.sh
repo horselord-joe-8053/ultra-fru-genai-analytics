@@ -29,8 +29,8 @@ if [ -z "${RED:-}" ]; then
     # Try to source logger.sh
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-    if [ -f "$REPO_ROOT/orchestration/common/logger.sh" ]; then
-        source "$REPO_ROOT/orchestration/common/logger.sh"
+    if [ -f "$REPO_ROOT/lib/logger.sh" ]; then
+        source "$REPO_ROOT/lib/logger.sh"
     else
         # Fallback to basic logging
         RED='\033[0;31m'

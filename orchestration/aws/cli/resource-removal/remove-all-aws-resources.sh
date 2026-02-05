@@ -21,7 +21,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
 RESOURCE_CHECK_RESULTS="${SCRIPT_DIR}/../resource-check/results"
 PYTHON_SCRIPT="${SCRIPT_DIR}/remove-all-aws-resources.py"
 
-source "$REPO_ROOT/orchestration/common/logger.sh"
+source "$REPO_ROOT/lib/logger.sh"
 source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 
 AWS_PROFILE="${AWS_PROFILE:-admin}"

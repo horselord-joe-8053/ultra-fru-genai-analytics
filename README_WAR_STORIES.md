@@ -172,6 +172,27 @@ This approach:
 
 When a function is meant to return a value, either: (1) log to stderr only, or (2) use environment variables. Command substitution captures ALL stdout, making it impossible to separate logs from return values. Environment variables are more robust, explicit, and follow Unix conventions (stdout for data, stderr for diagnostics, or use environment for function-to-function communication).
 
+### 3.6 Timestamp Portability: `%3N` vs macOS `date`
+
+**creation:** `<260205-000000>`  
+**last_updated:** `<260205-000000>`
+
+On macOS, the initial project-wide logger used `date +"%Y-%m-%d %H:%M:%S.%3N %Z"` to render millisecond timestamps in log prefixes. This worked on Linux (GNU coreutils), but macOS ships BSD `date`, which does **not** support `%N`/`%3N`. Instead of real milliseconds, the logger printed the literal format characters, leading to confusing prefixes like:
+
+`[2026-02-05 12:29:42.3N -03] ==> Importing existing frontend-eks resources into Terraform state`
+
+The bug surfaced only when the new logger was wired into all orchestration scripts, making it a cross-cutting logging issue rather than a single-script bug.
+
+**Resolution:**
+
+- Implemented a portable `_log_ts` helper in `lib/logger.sh` that:
+  - Prefers `gdate` (GNU date) when available (supports `%3N`)
+  - Falls back to GNU-like `date` if `%N` appears to work
+  - Otherwise uses a tiny `python3` snippet (`datetime.now()` + `microsecond/1000`) to format `YYYY-MM-DD HH:MM:SS.mmm TZ`
+  - As a last resort, prints a second-resolution timestamp without milliseconds (but never prints raw `%3N`)
+
+This preserved the desired `[YYYY-MM-DD HH:MM:SS.mmm TZ]` format on macOS and Linux without requiring every developer to install GNU coreutils, and ensured that logging output never leaks format control sequences into production logs again.
+
 ---
 
 ## 4. EKS Load Balancer Type Confusion: NLB vs ALB Misunderstanding

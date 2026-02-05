@@ -11,7 +11,7 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
 # Source shared logger if not already available
 if ! command -v log_info >/dev/null 2>&1; then
   # shellcheck source=/dev/null
-  source "$REPO_ROOT/orchestration/common/logger.sh" 2>/dev/null || true
+  source "$REPO_ROOT/lib/logger.sh" 2>/dev/null || true
 fi
 
 # Default ECS log group (can be overridden via env)

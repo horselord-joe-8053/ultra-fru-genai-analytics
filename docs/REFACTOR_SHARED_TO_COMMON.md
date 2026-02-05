@@ -43,7 +43,9 @@
 
 ## 3. One-off fix (unrelated to shared vs common)
 
-- **orchestration/common/deploy/save-deployment-state.sh** — It still sources `../../../../shared/logger.sh` (stale path). Change to use `$REPO_ROOT/orchestration/common/logger.sh` or a relative path that resolves to `orchestration/common/logger.sh` (e.g. `"$REPO_ROOT/orchestration/common/logger.sh"` with `REPO_ROOT` set by caller, or `$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)` for deploy → common → orchestration then `$that/orchestration/common/logger.sh` = need repo root; simplest: `"${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}/orchestration/common/logger.sh"`).
+- **orchestration/common/deploy/save-deployment-state.sh** — Historically this sourced `../../../../shared/logger.sh` (stale path) and then `orchestration/common/logger.sh`. We now use the unified project-wide logger at `lib/logger.sh` instead. The code has been updated to:
+  - Resolve `REPO_ROOT_SAVE` from the script location, and
+  - `source "$REPO_ROOT_SAVE/lib/logger.sh"` when available, falling back to basic echo-based logging otherwise.
 
 ---
 

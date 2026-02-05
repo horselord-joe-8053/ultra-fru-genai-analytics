@@ -7,7 +7,7 @@ set -e  # Fail-fast: exit on any error
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
-source "$REPO_ROOT/orchestration/common/logger.sh"
+source "$REPO_ROOT/lib/logger.sh"
 source "$REPO_ROOT/orchestration/common/env/load-env.sh"
 
 # Search all Terraform layers (module_infra_basic, module_infra_kubetypes/kube, module_infra_kubetypes/nonkube)

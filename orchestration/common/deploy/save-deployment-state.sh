@@ -5,8 +5,8 @@
 
 # Source logger if available
 REPO_ROOT_SAVE="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
-if [ -f "$REPO_ROOT_SAVE/orchestration/common/logger.sh" ]; then
-    source "$REPO_ROOT_SAVE/orchestration/common/logger.sh"
+if [ -f "$REPO_ROOT_SAVE/lib/logger.sh" ]; then
+    source "$REPO_ROOT_SAVE/lib/logger.sh"
 else
     # Fallback logging functions
     log_info() { echo "[INFO] $*"; }

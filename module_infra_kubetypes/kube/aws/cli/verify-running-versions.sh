@@ -31,8 +31,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
 
 # Source logger
-if [ -f "$REPO_ROOT/orchestration/common/logger.sh" ]; then
-    source "$REPO_ROOT/orchestration/common/logger.sh"
+if [ -f "$REPO_ROOT/lib/logger.sh" ]; then
+    source "$REPO_ROOT/lib/logger.sh"
 else
     log_info() { echo "[INFO] $*"; }
     log_success() { echo "[SUCCESS] $*"; }

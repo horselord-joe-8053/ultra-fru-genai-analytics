@@ -32,6 +32,10 @@ run_with_heartbeat() {
 
     while kill -0 "$pid" 2>/dev/null; do
         sleep "$interval"
+        # Child may have exited during sleep; skip heartbeat and exit so caller can print "done" immediately
+        if ! kill -0 "$pid" 2>/dev/null; then
+            break
+        fi
         local elapsed
         elapsed=$(($(date +%s 2>/dev/null || echo 0) - start_sec))
         echo "  Still running: $desc ... ${elapsed} s elapsed" >&2
