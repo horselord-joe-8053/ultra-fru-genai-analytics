@@ -85,10 +85,11 @@ load_env_file() {
     # Spark + Delta Lake configuration (.env is single source of truth, no defaults)
     export DELTA_LAKE_PACKAGE="${DELTA_LAKE_PACKAGE:-}"  # No default - must be set in .env
     
-    # Analytics scheduler configuration (for Terragrunt get_env())
-    export ENABLE_ANALYTICS_SCHEDULER="${ENABLE_ANALYTICS_SCHEDULER:-}"
-    export ANALYTICS_SCHEDULER_INTERVAL_SECONDS="${ANALYTICS_SCHEDULER_INTERVAL_SECONDS:-}"
-    export SPARK_HOME="${SPARK_HOME:-}"
+    # Analytics scheduler configuration (for Terragrunt get_env() and EKS ConfigMap envsubst)
+    # Defaults so ECS and EKS get same behavior when .env does not set them
+    export ENABLE_ANALYTICS_SCHEDULER="${ENABLE_ANALYTICS_SCHEDULER:-false}"
+    export ANALYTICS_SCHEDULER_INTERVAL_SECONDS="${ANALYTICS_SCHEDULER_INTERVAL_SECONDS:-3600}"
+    export SPARK_HOME="${SPARK_HOME:-/opt/spark}"
     export DELTA_TABLE_PATH="${DELTA_TABLE_PATH:-}"
     
     log_success "Loaded environment variables from $env_path"

@@ -368,6 +368,7 @@ generate_kubernetes_manifests() {
             fi
             
             # Export all variables with defaults BEFORE envsubst (envsubst doesn't understand ${VAR:-default} syntax)
+            # Scheduler vars (ENABLE_ANALYTICS_SCHEDULER, etc.) already exported by load-env.sh above with same defaults for ECS/EKS
             export PGUSER="${PGUSER:-postgres}"
             export AWS_REGION="${AWS_REGION:-us-east-1}"
             export AWS_BEDROCK_INFERENCE_PROFILE_ID="${AWS_BEDROCK_INFERENCE_PROFILE_ID:-}"

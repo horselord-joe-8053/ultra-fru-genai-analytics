@@ -10,6 +10,9 @@ API_VALIDATION_TIMEOUT_SECONDS=300  # 5 minutes (upper bound)
 FRONTEND_VALIDATION_TIMEOUT_SECONDS=60  # 1 minute
 QUERY_ENDPOINT_VALIDATION_TIMEOUT_SECONDS=60  # 1 minute (API should already be up)
 VALIDATION_RETRY_INTERVAL_SECONDS=5  # Check every 5 seconds
+# How long to wait for /analytics to return real data (not "No analytics data available yet")
+# After data-lake setup the first batch run can take up to ANALYTICS_SCHEDULER_INTERVAL_SECONDS (e.g. 180s)
+ANALYTICS_DATA_TIMEOUT_SECONDS="${ANALYTICS_DATA_TIMEOUT_SECONDS:-300}"  # 5 minutes default
 # Fail fast on API errors if we can diagnose a clear cause from ECS/logs
 API_VALIDATION_FAIL_FAST="${API_VALIDATION_FAIL_FAST:-true}"
 
@@ -487,16 +490,50 @@ validate_cloudfront_api_endpoints() {
     log_info "Testing CloudFront API endpoints (critical for frontend functionality)..."
     echo ""
     
-    # Test /analytics endpoint through CloudFront
+    # Test /analytics endpoint through CloudFront: require HTTP 200 and real analytics data
+    # (not just "No analytics data available yet") so we catch scheduler/Spark/Delta issues
     log_info "Testing CloudFront API endpoint: $frontend_url/analytics"
     local analytics_status=""
-    while [ $elapsed -lt $timeout_seconds ]; do
-        analytics_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$frontend_url/analytics" 2>/dev/null || echo "000")
+    local analytics_body=""
+    local analytics_data_timeout="${ANALYTICS_DATA_TIMEOUT_SECONDS:-300}"
+    local analytics_start=$(date +%s)
+    # Wait up to analytics_data_timeout for real data (first batch run can take one scheduler interval)
+    local analytics_loop_timeout=$timeout_seconds
+    [ "$analytics_data_timeout" -gt "$analytics_loop_timeout" ] 2>/dev/null && analytics_loop_timeout=$analytics_data_timeout
+    while [ $elapsed -lt $analytics_loop_timeout ]; do
+        # Single curl: body + status (append \n + http_code so we can split)
+        local curl_out
+        curl_out=$(curl -s --max-time 10 -w "\n%{http_code}" "$frontend_url/analytics" 2>/dev/null || echo "")
+        analytics_status=$(echo "$curl_out" | tail -1)
+        analytics_body=$(echo "$curl_out" | sed '$d')
+        [ -z "$analytics_status" ] && analytics_status="000"
+        # Normalize status to 3 digits
+        analytics_status="$(printf '%s' "$analytics_status" | head -c 3)"
+        [ -z "$analytics_status" ] && analytics_status="000"
         
         if [ "$analytics_status" = "200" ]; then
-            log_success "✓ CloudFront /analytics endpoint is accessible (HTTP 200) after ${elapsed}s"
-            analytics_ok=true
-            break
+            if echo "$analytics_body" | grep -q "No analytics data available yet"; then
+                local data_elapsed=$(($(date +%s) - analytics_start))
+                if [ $data_elapsed -ge "$analytics_data_timeout" ]; then
+                    log_error "✗ CloudFront /analytics returns HTTP 200 but no analytics data after ${data_elapsed}s"
+                    log_error "  Response indicates: 'No analytics data available yet' (batch_analytics table empty)"
+                    log_error "  Possible causes: ENABLE_ANALYTICS_SCHEDULER not true in ECS task, or first batch run failed (Spark/Delta/S3)."
+                    log_error "  Fix: Ensure ENABLE_ANALYTICS_SCHEDULER=true is in env when Terraform was applied; or trigger once: trigger-analytics-aws.sh <cluster> <service>"
+                    return 1
+                fi
+                if [ $((elapsed % 30)) -eq 0 ] && [ $elapsed -gt 0 ]; then
+                    log_info "  /analytics returned 200 but no data yet (waiting for first batch run, ${data_elapsed}s/${analytics_data_timeout}s)..."
+                fi
+            elif echo "$analytics_body" | grep -qE '"sales_by_brand"|"store_performance"|"last_updated_at"|"total_records"'; then
+                log_success "✓ CloudFront /analytics endpoint is accessible (HTTP 200) with analytics data after ${elapsed}s"
+                analytics_ok=true
+                break
+            else
+                # 200 but unknown JSON shape - treat as success (endpoint works)
+                log_success "✓ CloudFront /analytics endpoint is accessible (HTTP 200) after ${elapsed}s"
+                analytics_ok=true
+                break
+            fi
         elif [ "$analytics_status" = "502" ] || [ "$analytics_status" = "503" ] || [ "$analytics_status" = "504" ]; then
             log_error "✗ CloudFront /analytics endpoint returned HTTP $analytics_status (Bad Gateway)"
             log_error "  This indicates CloudFront cannot reach the backend ALB/Ingress"

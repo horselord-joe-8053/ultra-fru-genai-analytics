@@ -642,6 +642,10 @@ deploy_terragrunt() {
         LAYER_TERRAFORM_BASE="$ECS_TERRAFORM_DIR"
         log_step "Deploying application layer (ECS, ALB, Frontend)"
         
+        # Scheduler env: ensure .env loaded so Terragrunt get_env() sees ENABLE_ANALYTICS_SCHEDULER etc. (load-env.sh already exports them with defaults).
+        load_env_file || true
+        log_info "ENABLE_ANALYTICS_SCHEDULER=$ENABLE_ANALYTICS_SCHEDULER (passed to ECS task definition via Terragrunt get_env)"
+        
         # Check if container image is set
         if [ -z "$CONTAINER_IMAGE" ]; then
             log_error "CONTAINER_IMAGE not set. Container image is required for application deployment."

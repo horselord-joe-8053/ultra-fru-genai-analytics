@@ -24,8 +24,8 @@ if [ -z "$CLUSTER_NAME" ] || [ -z "$SERVICE_NAME" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# From helpers/aws/ -> helpers/ -> delta-lake/ -> common/ -> spark_delta-lake_scripts/ -> run_scripts/ -> root (6 levels up)
-REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../../.." && pwd)}"
+# helpers/aws/ -> helpers/ -> delta-lake/ -> common/ -> module_infra_spark/ -> repo root (5 levels up)
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
 source "$REPO_ROOT/lib/logger.sh"
 
 # Get task definition from service

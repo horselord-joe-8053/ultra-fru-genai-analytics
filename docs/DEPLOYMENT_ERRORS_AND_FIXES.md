@@ -104,6 +104,28 @@ This doc summarizes errors seen during `./run.sh aws kube dev` (and related EKS/
 
 ---
 
+## 6. Batch analytics panel stays empty (ENABLE_ANALYTICS_SCHEDULER)
+
+**Symptom:** After deploy, the Batch Analytics panel shows "No analytics data available yet" even though `ENABLE_ANALYTICS_SCHEDULER=true` in `.env` and 30+ minutes have passed. Delta Lake setup (Phase 5 Step 5.1) completed with no errors.
+
+**Root cause:**  
+- The **ECS task definition** gets `enable_analytics_scheduler` from Terraform/Terragrunt via `get_env("ENABLE_ANALYTICS_SCHEDULER", "false")` when the **ECS layer** is applied (Phase 4 Step 4.1 in `orchestration/terraform/deploy.sh`). That value is what the long-running ECS API container sees; the entrypoint only starts the scheduler when `ENABLE_ANALYTICS_SCHEDULER=true`.  
+- If `ENABLE_ANALYTICS_SCHEDULER` is **not exported** in the environment when Terragrunt runs for the ECS layer, the task definition is created with the default `false`, so the scheduler never runs and `batch_analytics` stays empty.  
+- **Phase 5 (data-lake)** runs `module_infra_spark/aws/delta-lake/setup-and-verify.sh`, which sources `load-env.sh` and creates the Delta table in S3. That only affects the one-off ingest job, **not** the ECS task. The one-off Docker run used for Delta table creation may log "ENABLE_ANALYTICS_SCHEDULER is not true → scheduler will NOT run"; that refers to the ingest container, not the long-lived ECS service.
+
+**Fix (no full preempt needed):**  
+1. **Update task definition and roll out:** From repo root, run:  
+   `./orchestration/aws/analytics/fix-batch-analytics-ecs.sh --fix-task-def dev`  
+   This loads `.env`, re-applies only the ECS Terraform layer (so the task definition gets `ENABLE_ANALYTICS_SCHEDULER` from .env), then forces an ECS deployment so new tasks pick up the change. Takes a few minutes, not the full pipeline.  
+2. **Populate data once (without fixing scheduler):**  
+   `./orchestration/aws/analytics/fix-batch-analytics-ecs.sh --trigger-once dev`  
+   Runs a one-off ECS task that executes the analytics job and fills `batch_analytics`. Useful to verify the pipeline or get data immediately.  
+3. **Manual:** Ensure `.env` is loaded before any deploy; re-apply ECS layer: `load_env_file` then `./orchestration/terraform/deploy.sh dev ecs`; then `aws ecs update-service --cluster <cluster> --service <service> --force-new-deployment`.
+
+**Verification:** Auto-verification now requires `/analytics` to return real data (e.g. `sales_by_brand`, `store_performance`, `last_updated_at`) within `ANALYTICS_DATA_TIMEOUT_SECONDS` (default 300). If the response still contains "No analytics data available yet" after that timeout, the run fails with a message pointing to this cause and the fixes above.
+
+---
+
 ## 2b. Teardown / Preempt: Terraform state lock
 
 **Symptom:** During `./run.sh aws kube dev --preempt` (or teardown), Terraform/Terragrunt fails with **"Error acquiring the state lock"** (e.g. `PreconditionFailed: At least one of the pre-conditions you specified did not hold`). Lock Info shows an ID, Path (e.g. `fru-terraform-state-744139897900/dev/eks/terraform.tfstate`), Operation (e.g. `OperationTypeApply`), Who, Created.
@@ -132,3 +154,4 @@ This doc summarizes errors seen during `./run.sh aws kube dev` (and related EKS/
 | Frontend invalid bucket   | frontend-eks not applied; output warning used as name | Phase 5.1b + validate output |
 | Docker daemon not running | Docker not started                | Start Docker |
 | Terraform plugin/checksum | Stale cache vs lock file          | `init-all-layers.sh` (or `terragrunt init -reconfigure`) |
+| Batch analytics empty     | ENABLE_ANALYTICS_SCHEDULER not exported when Terraform ran | Source load-env.sh before deploy; re-apply ECS; or trigger-analytics-aws.sh |
