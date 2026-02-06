@@ -1408,3 +1408,83 @@ We added simple start/end log lines to entrypoint scripts (`run.sh`, `teardown.s
 Use **exec** only when the parent must not run after the child. For dispatchers that need to log "end" or handle exit codes, run the child, capture `$?`, log/cleanup, then exit with that code. Avoid command substitution that captures the only copy of phase output—duplicate to stderr (e.g. `tee file >&2`) so errors stay visible. Prefer **return** over **exit** in shared functions so callers can record and log before exiting.
 
 ---
+
+## 31. Verification Script Stops With No Feedback: set -e and Command Substitution
+
+**creation:** `<260205>`
+**last_updated:** `<260205>`
+
+**keywords:** Bash, set -e, command substitution, terragrunt, Terraform outputs, ECS, verification, exit code, silent failure
+**difficulty:** 7
+**significance:** 8
+
+### 31.1 Context
+
+Running the ECS verification script (`CONTAINER_TYPE=ecs ./orchestration/aws/verification/auto_verify_and_manual_hint.sh "" dev false`) caused the script to exit after printing "Fetching Terraform output: ecs_cluster_id" with **no error message and no further output**. Exit code was 1. Users had no indication of *why* it stopped.
+
+### 31.2 Root Cause
+
+The script uses **set -e** (exit on first non-zero). In the ECS fetch logic we had:
+
+```bash
+tg_output="$(terragrunt output -raw ecs_cluster_id 2>&1)"; tg_status=$?
+if [ $tg_status -ne 0 ] || ...; then
+    log_warning "Could not read ..."
+```
+
+When **terragrunt** failed (e.g. output `ecs_cluster_id` not in Terraform state), the **command substitution** `$(...)` returned non-zero. In Bash, the exit status of an assignment `var="$(cmd)"` is the exit status of `cmd`. So the whole line was considered a failing command; the shell exited immediately due to **set -e** and never ran `tg_status=$?` or the `if` block that would have logged the warning. The script died silently before any error handling could run.
+
+Separately, the ECS Terraform module had outputs named `cluster_id` and `service_name`, but the verification script expected `ecs_cluster_id` and `ecs_service_name`. Those names weren’t in state yet, so terragrunt failed—and the script had no fallback to the existing output names.
+
+### 31.3 Key Insight
+
+> With **set -e**, any command that returns non-zero exits the script. Command substitution **var="$(cmd)"** inherits **cmd**’s exit status—so a failing **cmd** makes the assignment itself "fail" and the script exits before the next statement. For non-fatal captures (e.g. optional Terraform outputs), use **set +e** around the capture block, or design so failure doesn’t propagate (e.g. capture and then check status explicitly before using the value).
+
+### 31.4 Resolution
+
+- **Make terragrunt capture non-fatal:** In `fetch-deployment-info-ecs.sh`, wrapped all terragrunt output captures in **set +e** … **set -e**. Failed terragrunt calls no longer exit the script; the existing `if [ $tg_status -ne 0 ]` logic runs and logs a warning.
+- **Fallback to existing output names:** Try `ecs_cluster_id` first, then **cluster_id**; try `ecs_service_name` first, then **service_name**. Verification works with current Terraform state (no need to add new outputs or run apply) and with future state once the aliases exist.
+- **Sanitize terragrunt output:** Terragrunt sometimes mixes log/ANSI lines into the same stream as the value. Added a small helper that keeps only the last "value" line (drops empty and log-like lines) so **ALB_DNS**, **ECS_CLUSTER_ID**, **ECS_SERVICE_NAME**, and **CLOUDFRONT_DOMAIN** are not polluted—URLs and hints stay correct.
+
+### 31.5 Takeaway
+
+With **set -e**, a failing command substitution in an assignment will exit the script before you can check `$?` or log. Use **set +e** around non-fatal external calls (terragrunt, optional AWS/Terraform reads) so you can handle failure and log. When scripting against Terraform outputs, support both "new" and "legacy" output names so the same script works before and after adding outputs. Sanitize captured output (e.g. last line only) when the tool may mix logs with the value.
+
+---
+
+## 32. API Validation HTTP 000000: Retry Logic Bailing on Ambiguous Status
+
+**creation:** `<260205>`
+**last_updated:** `<260205>`
+
+**keywords:** HTTP status, curl, 000, 000000, retry logic, validation, API health, set -e, normalize
+**difficulty:** 6
+**significance:** 7
+
+### 32.1 Context
+
+During endpoint validation (e.g. ECS or EKS API health), the script sometimes reported **HTTP 000000** and then **stopped or failed** instead of retrying. The API might have been temporarily unreachable (e.g. ALB still provisioning, connection reset), but the validator treated the run as a definitive failure and exited.
+
+### 32.2 Root Cause
+
+The retry logic treated only a small set of status strings as "known": e.g. exactly `200`, `502`, `503`, `504`, `000`. The code used strict string checks: if status is `000` then retry; if `200` then success; **else** (any other value) treat as failure and **return 1** immediately.
+
+Curl (or the pipeline) can produce **000000** instead of **000**—e.g. streaming output mixed with the status code, or formatting that appended extra digits. The string `000000` did **not** match `000`, so it fell into the **else** branch and the script exited with failure instead of retrying. So a transient "no response yet" (effectively 000) was misclassified as a permanent error.
+
+### 32.3 Key Insight
+
+> When parsing HTTP status codes from curl or other tools, **normalize** to a fixed length (e.g. first three digits) before branching. Treat **000** as "no response / transient"—retry, don’t fail. Reserve immediate failure only for **definitive** client errors (e.g. 404, 401, 403); for 5xx and ambiguous values (including 000 and any unexpected string), keep retrying until timeout.
+
+### 32.4 Resolution
+
+- **Normalize status:** In `validate-endpoints.sh`, normalize the HTTP code to the **first three characters** (e.g. `000000` → `000`, `200` → `200`) before any comparison.
+- **000 = retry:** Treat normalized `000` as "no response yet" and continue retrying; do not treat it as success or as a definitive failure.
+- **Immediate fail only for definitive 4xx:** Return 1 (fail) only for statuses that clearly indicate "not available" (e.g. 404, 401, 403). For other 4xx, 5xx, and ambiguous responses (including 000), keep retrying until the configured timeout.
+
+This prevented transient connectivity or "HTTP 000" / "000000" cases from bailing out early and gave the API time to become ready (e.g. ALB propagation).
+
+### 32.5 Takeaway
+
+Don’t use strict string equality (e.g. `"$status" = "000"`) when the tool might output extra digits or padding. Normalize status to three digits first. Treat 000 as retry; only fail fast on definitive 4xx that mean "endpoint not found or forbidden." For 5xx and 000, retry until timeout so temporary unavailability (ALB still coming up, ERR_HTTP2, etc.) doesn’t cause a false failure.
+
+---

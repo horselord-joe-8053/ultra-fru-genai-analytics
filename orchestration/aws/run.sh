@@ -171,6 +171,8 @@ SKIP_BUILD=false
 PREEMPT=false
 FORCE_REFRESH_DATA=false
 RUN_ALL=false          # When true, run deploy for both ecs and eks sequentially
+SKIP_CONFIRMATION=false
+FORCE_RELOAD=false     # When true, skip "Do you want to reload data?" in load_data_aws.sh
 CONTAINER_TYPE=""
 DEPLOY_COMMAND=""
 REMAINING_ARGS=()
@@ -199,6 +201,11 @@ while [ $# -gt 0 ]; do
             ;;
         --force-refresh-data)
         FORCE_REFRESH_DATA=true
+            shift
+            ;;
+        --skip-confirmation)
+        SKIP_CONFIRMATION=true
+        FORCE_RELOAD=true
             shift
             ;;
         --all)
@@ -254,7 +261,8 @@ if [ "$DEPLOY_COMMAND" = "deploy" ] && [ "$RUN_ALL" = false ] && [ -z "$CONTAINE
 fi
 
 # Export flags for sub-scripts (CONTAINER_TYPE may be overridden for --all mode)
-export DRY_RUN SKIP_DATA_LAKE SKIP_BUILD PREEMPT FORCE_REFRESH_DATA RUN_ALL
+# FORCE_RELOAD: when --skip-confirmation, skip "Do you want to reload data?" in load_data_aws.sh
+export DRY_RUN SKIP_DATA_LAKE SKIP_BUILD PREEMPT FORCE_REFRESH_DATA RUN_ALL SKIP_CONFIRMATION FORCE_RELOAD
 
 # Show usage information
 show_usage() {
@@ -296,6 +304,7 @@ ${BLUE}Environments:${NC}
   ${GREEN}--preempt${NC}          Destroy existing infrastructure before deployment (clean slate)
   ${GREEN}--skip-data-lake${NC}   Skip data-lake setup even if analytics scheduler is enabled
   ${GREEN}--force-refresh-data${NC} Force refresh of data resources (database schema, data, Delta tables) without destroying infrastructure
+  ${GREEN}--skip-confirmation${NC} Skip interactive prompts (e.g. \"Do you want to reload data?\"; auto-reload when needed)
 
 ${BLUE}Examples:${NC}
   ${GREEN}Basic Deployments:${NC}
@@ -643,6 +652,9 @@ deploy_ecs_full() {
         log_error "Phase 4: Step 4.1 - Step ${step_num}/${total_steps} FAILED: Application infrastructure deployment failed (took $(format_elapsed_time $elapsed))"
         log_info "Reason: Terraform plan or apply failed for application layer"
         log_info "Check Terraform configuration, AWS permissions, CONTAINER_IMAGE, and plan output above"
+        log_info "To get the frontend URL (CloudFront domain), run from repo root:"
+        log_info "  cd \"$REPO_ROOT/module_infra_frontend/aws/terra/environments/${ENVIRONMENT:-dev}/frontend-ecs\" && terragrunt output -raw cloudfront_domain_name"
+        log_info "Then open https://<cloudfront_domain_name> in your browser."
         exit 1
     fi
     elapsed=$(( $(date +%s) - step_start_time ))
@@ -668,6 +680,9 @@ deploy_ecs_full() {
     rm -f "$phase6_tmp"
     if [ "$phase6_rc" -ne 0 ]; then
         log_error "Phase 6 (Frontend Deployment) failed; exiting"
+        log_info "To get the frontend URL (CloudFront domain), run from repo root:"
+        log_info "  cd \"$REPO_ROOT/module_infra_frontend/aws/terra/environments/${ENVIRONMENT:-dev}/frontend-ecs\" && terragrunt output -raw cloudfront_domain_name"
+        log_info "Then open https://<cloudfront_domain_name> in your browser."
         exit 1
     fi
     
@@ -693,7 +708,7 @@ deploy_eks_full() {
     
     # Get step information from main() (accounts for Phase 0 steps and preempt if enabled)
     local step_num="${CURRENT_STEP:-5}"  # Default to 5 (after Phase 0.1-0.4, or 0.5 if preempt)
-    local total_steps="${TOTAL_STEPS:-13}"  # Default for eks: 4 (Phase 0) + 8 (deploy incl. 5.1b, 5.2b) + 1 (Phase 7)
+    local total_steps="${TOTAL_STEPS:-14}"  # EKS: 4 (Phase 0) + 9 (deploy incl. 5.1b, 5.2b) + 1 (Phase 7) = 14
     log_info "[DEBUG] Starting at step: $step_num/$total_steps"
     
     # ============================================================================
@@ -1032,21 +1047,28 @@ deploy_eks_full() {
         perf_step_start 5 "5.2b" "Updating CloudFront with EKS Ingress hostname"
         step_start_time_5_2b=$(date +%s)
         log_step "Phase 5: Step 5.2b - Step ${step_num}/${total_steps}: Updating CloudFront with EKS Ingress hostname (so UI can reach API)" >&2
+        # Resolve namespace and ingress name from EKS Terraform (same as k8s manifest deploy: fru-api-<env>, fru-api-ingress-<env>)
         INGRESS_NAMESPACE="${NAMESPACE:-}"
-        if [ -z "$INGRESS_NAMESPACE" ]; then
-            INGRESS_NAMESPACE=$(kubectl get pods -l app=fru-api -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null | head -1 || echo "")
-            [ -z "$INGRESS_NAMESPACE" ] && INGRESS_NAMESPACE="default"
-        fi
-        INGRESS_NAME="fru-api-ingress"
-        if [ "$INGRESS_NAMESPACE" != "default" ]; then
-            if kubectl get ingress "fru-api-ingress-${INGRESS_NAMESPACE#fru-api-}" -n "$INGRESS_NAMESPACE" >/dev/null 2>&1; then
-                INGRESS_NAME="fru-api-ingress-${INGRESS_NAMESPACE#fru-api-}"
-            elif kubectl get ingress "fru-api-ingress" -n "$INGRESS_NAMESPACE" >/dev/null 2>&1; then
-                INGRESS_NAME="fru-api-ingress"
+        INGRESS_NAME="${INGRESS_NAME:-}"
+        if [ -z "$INGRESS_NAMESPACE" ] || [ -z "$INGRESS_NAME" ]; then
+            if [ -d "$ENV_DIR/eks" ]; then
+                _ns=$(cd "$ENV_DIR/eks" && terragrunt output -raw namespace 2>/dev/null || echo "")
+                _in=$(cd "$ENV_DIR/eks" && terragrunt output -raw ingress_name 2>/dev/null || echo "")
+                [ -n "$_ns" ] && [ "$_ns" != "null" ] && INGRESS_NAMESPACE="$_ns"
+                [ -n "$_in" ] && [ "$_in" != "null" ] && INGRESS_NAME="$_in"
             fi
         fi
+        if [ -z "$INGRESS_NAMESPACE" ]; then
+            INGRESS_NAMESPACE=$(kubectl get pods -l app=fru-api -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null | head -1 || echo "")
+            # EKS convention: namespace is fru-api-<env>, never default
+            [ -z "$INGRESS_NAMESPACE" ] && INGRESS_NAMESPACE="fru-api-${ENVIRONMENT:-dev}"
+        fi
+        if [ -z "$INGRESS_NAME" ]; then
+            # EKS Terraform uses fru-api-ingress-<env>; do not fall back to fru-api-ingress (wrong for EKS)
+            INGRESS_NAME="fru-api-ingress-${ENVIRONMENT:-dev}"
+        fi
         EKS_INGRESS_HOSTNAME=""
-        EKS_5_2B_TIMEOUT=300
+        EKS_5_2B_TIMEOUT=600
         EKS_5_2B_INTERVAL=10
         ELAPSED_5_2B=0
         log_info "Waiting for Ingress hostname (Ingress: $INGRESS_NAME, namespace: $INGRESS_NAMESPACE, timeout: ${EKS_5_2B_TIMEOUT}s)..." >&2
@@ -1070,6 +1092,8 @@ deploy_eks_full() {
                 perf_step_end 5 "5.2b" "FAILED" "frontend-eks re-apply failed"
                 log_error "Phase 5: Step 5.2b - Step ${step_num}/${total_steps} FAILED: frontend-eks re-apply failed (took $(format_elapsed_time $elapsed_5_2b))" >&2
                 log_error "CloudFront may still point to placeholder; UI /query and /version may not work. Fix: export EKS_ALB_DNS_NAME=<ingress-hostname> and run: orchestration/terraform/deploy.sh $ENVIRONMENT frontend-eks" >&2
+                log_info "To get the frontend URL (CloudFront domain), run from repo root:" >&2
+                log_info "  cd \"$REPO_ROOT/module_infra_frontend/aws/terra/environments/${ENVIRONMENT:-dev}/frontend-eks\" && terragrunt output -raw cloudfront_domain_name" >&2
                 exit 1
             fi
             elapsed_5_2b=$(( $(date +%s) - step_start_time_5_2b ))
@@ -1078,11 +1102,23 @@ deploy_eks_full() {
         else
             elapsed_5_2b=$(( $(date +%s) - step_start_time_5_2b ))
             perf_step_end 5 "5.2b" "FAILED" "Ingress hostname not available (timeout)"
-            log_warning "Phase 5: Step 5.2b - Step ${step_num}/${total_steps}: Ingress hostname not available after ${EKS_5_2B_TIMEOUT}s (took $(format_elapsed_time $elapsed_5_2b))" >&2
-            log_warning "CloudFront still has placeholder; UI /query and /version will not work until you run:" >&2
-            log_warning "  EKS_ALB_DNS_NAME=\$(kubectl get ingress $INGRESS_NAME -n $INGRESS_NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')" >&2
-            log_warning "  export EKS_ALB_DNS_NAME && $REPO_ROOT/orchestration/terraform/deploy.sh $ENVIRONMENT frontend-eks" >&2
-            # Do not exit: deploy succeeded; user can re-run frontend-eks apply once Ingress is ready
+            log_error "Phase 5: Step 5.2b - Step ${step_num}/${total_steps} FAILED: Ingress hostname not available after ${EKS_5_2B_TIMEOUT}s (took $(format_elapsed_time $elapsed_5_2b))" >&2
+            if ! kubectl get ingress "$INGRESS_NAME" -n "$INGRESS_NAMESPACE" >/dev/null 2>&1; then
+                log_error "Ingress '$INGRESS_NAME' not found in namespace '$INGRESS_NAMESPACE' (NotFound). Check that Kubernetes manifests were applied and the Ingress exists." >&2
+                log_info "List ingresses: kubectl get ingress -A" >&2
+                log_info "EKS Terraform uses namespace 'fru-api-${ENVIRONMENT}' and ingress name 'fru-api-ingress-${ENVIRONMENT}'. Try: kubectl get ingress fru-api-ingress-${ENVIRONMENT} -n fru-api-${ENVIRONMENT}" >&2
+            else
+                log_error "Ingress exists but .status.loadBalancer.ingress[0].hostname is not set yet (ALB/NLB may still be provisioning)." >&2
+            fi
+            log_error "Fix: ensure Ingress is created and has a hostname, then run:" >&2
+            log_error "  EKS_ALB_DNS_NAME=\$(kubectl get ingress $INGRESS_NAME -n $INGRESS_NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')" >&2
+            log_error "  export EKS_ALB_DNS_NAME && $REPO_ROOT/orchestration/terraform/deploy.sh $ENVIRONMENT frontend-eks" >&2
+            # Executable sequence to get frontend URL from frontend-eks (run from repo root; works even on timeout/timing issues)
+            local _fe_eks_dir="$REPO_ROOT/module_infra_frontend/aws/terra/environments/${ENVIRONMENT:-dev}/frontend-eks"
+            log_info "To get the frontend URL (CloudFront domain), run this from the repo root:" >&2
+            log_info "  cd \"$_fe_eks_dir\" && terragrunt output -raw cloudfront_domain_name" >&2
+            log_info "Then open https://<cloudfront_domain_name> in your browser." >&2
+            exit 1
         fi
         # step_num already reflects 5.2b (we incremented once before 5.2b); no second increment
     fi
@@ -1187,7 +1223,7 @@ main() {
     
     if [ "$DEPLOY_COMMAND" = "deploy" ]; then
         if [ "$container_type_for_steps" = "eks" ]; then
-        total_steps=13  # 4 (Phase 0) + 8 (deploy incl. 5.1b frontend-eks, 5.2b CloudFront update) + 1 (Phase 7)
+        total_steps=14  # 4 (Phase 0) + 9 (deploy: image, state, infra, db, data-lake, 5.1 eks, 5.1b frontend-eks, 5.2 k8s, 5.2b CloudFront) + 1 (Phase 7)
         fi
     elif [ "$DEPLOY_COMMAND" = "infrastructure" ]; then
         total_steps=6  # 4 (Phase 0) + 2 (infrastructure only)

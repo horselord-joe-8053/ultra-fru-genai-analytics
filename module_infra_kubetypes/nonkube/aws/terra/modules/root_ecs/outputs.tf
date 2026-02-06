@@ -3,6 +3,12 @@ output "cluster_id" {
   value       = aws_ecs_cluster.main.id
 }
 
+# Alias for verification/run scripts that expect ecs_cluster_id
+output "ecs_cluster_id" {
+  description = "ECS cluster ID (alias for cluster_id)"
+  value       = aws_ecs_cluster.main.id
+}
+
 output "cluster_name" {
   description = "ECS cluster name"
   value       = aws_ecs_cluster.main.name
@@ -10,6 +16,12 @@ output "cluster_name" {
 
 output "service_name" {
   description = "ECS service name"
+  value       = aws_ecs_service.fru_api.name
+}
+
+# Alias for verification/run scripts that expect ecs_service_name
+output "ecs_service_name" {
+  description = "ECS service name (alias for service_name)"
   value       = aws_ecs_service.fru_api.name
 }
 

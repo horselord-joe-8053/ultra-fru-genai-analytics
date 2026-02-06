@@ -100,24 +100,23 @@ fetch_eks_deployment_info() {
     
     # Try to get service endpoint from kubectl if available
     if command_exists kubectl && kubectl config current-context >/dev/null 2>&1; then
-        # Determine namespace from environment or discover from pods
+        # Determine namespace and ingress name from EKS Terraform when possible (same as run.sh Step 5.2b)
         local namespace="${NAMESPACE:-}"
-        if [ -z "$namespace" ]; then
-            # Try to discover namespace from existing pods
-            namespace=$(kubectl get pods -l app=fru-api -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null | head -1 || echo "")
-            if [ -z "$namespace" ]; then
-                namespace="default"
-            fi
+        local ingress_name="${INGRESS_NAME:-}"
+        if [ -d "$eks_dir" ] && command_exists terragrunt; then
+            local _ns _in
+            _ns=$(cd "$eks_dir" && terragrunt output -raw namespace 2>/dev/null || echo "")
+            _in=$(cd "$eks_dir" && terragrunt output -raw ingress_name 2>/dev/null || echo "")
+            [ -n "$_ns" ] && [ "$_ns" != "null" ] && namespace="$_ns"
+            [ -n "$_in" ] && [ "$_in" != "null" ] && ingress_name="$_in"
         fi
-        
-        # Determine ingress name from environment or use default pattern
-        local ingress_name="${INGRESS_NAME:-fru-api-ingress}"
-        # Try namespace-specific ingress name pattern if namespace is not default
-        if [ "$namespace" != "default" ]; then
-            # Try namespace-specific ingress name first (e.g., fru-api-ingress-dev)
-            if kubectl get ingress "fru-api-ingress-${namespace#fru-api-}" -n "$namespace" >/dev/null 2>&1; then
-                ingress_name="fru-api-ingress-${namespace#fru-api-}"
-            elif kubectl get ingress "fru-api-ingress" -n "$namespace" >/dev/null 2>&1; then
+        if [ -z "$namespace" ]; then
+            namespace=$(kubectl get pods -l app=fru-api -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null | head -1 || echo "")
+            [ -z "$namespace" ] && namespace="default"
+        fi
+        if [ -z "$ingress_name" ]; then
+            ingress_name="fru-api-ingress-${environment:-dev}"
+            if ! kubectl get ingress "$ingress_name" -n "$namespace" >/dev/null 2>&1; then
                 ingress_name="fru-api-ingress"
             fi
         fi

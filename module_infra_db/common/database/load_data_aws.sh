@@ -244,8 +244,8 @@ load_data_aws() {
         log_info "  - Current schema hash: ${schema_hash:0:16}..."
         
         # For non-interactive mode (automated deployments), auto-reload
-        # For interactive mode, prompt user
-        if [ -t 0 ] && [ "${FORCE_RELOAD:-false}" != "true" ]; then
+        # For interactive mode, prompt user (unless --skip-confirmation / FORCE_RELOAD / SKIP_CONFIRMATION)
+        if [ -t 0 ] && [ "${FORCE_RELOAD:-false}" != "true" ] && [ "${SKIP_CONFIRMATION:-false}" != "true" ]; then
             # Interactive mode: prompt user
             read -p "Do you want to reload data? This will upsert existing rows. (y/N): " -n 1 -r
             echo # Add a newline after the prompt

@@ -42,8 +42,11 @@ validate_api_endpoint() {
     log_info "  Will retry for up to $((timeout_seconds / 60)) minutes..."
     
     while [ $elapsed -lt $timeout_seconds ]; do
-        local api_status
-        api_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$api_endpoint/health" 2>/dev/null || echo "000")
+        local api_status_raw api_status
+        api_status_raw=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$api_endpoint/health" 2>/dev/null || echo "000")
+        # Normalize to first 3 chars so "000", "000000", or concatenated output are treated consistently
+        api_status="$(printf '%s' "$api_status_raw" | head -c 3)"
+        [ -z "$api_status" ] && api_status="000"
         last_status="$api_status"
         
         if [ "$api_status" = "200" ]; then
@@ -72,15 +75,25 @@ validate_api_endpoint() {
                 log_info "  Still waiting... (${elapsed}s elapsed, HTTP $api_status)"
             fi
         elif [ "$api_status" = "000" ]; then
-            # Connection failed, continue retrying
+            # Connection failed or no valid HTTP response (curl returns 000; normalized from 000000 etc.). Keep retrying.
             if [ $((elapsed % 30)) -eq 0 ] && [ $elapsed -gt 0 ]; then
-                log_info "  Connection failed, retrying... (${elapsed}s elapsed)"
+                log_info "  Connection failed / no response (HTTP $api_status), retrying... (${elapsed}s elapsed)"
             fi
-        else
-            # Unexpected status code
+        elif [ "$api_status" = "404" ] || [ "$api_status" = "401" ] || [ "$api_status" = "403" ]; then
+            # Definitive failure: wrong path or auth
             log_warning "⚠ API endpoint returned HTTP $api_status"
             log_info "  Endpoint is reachable but may need configuration."
             return 1
+        elif [[ "$api_status" =~ ^5[0-9][0-9]$ ]]; then
+            # Other 5xx (500, 501, 505, etc.) - 502/503/504 already handled above; retry (could be transient)
+            if [ $((elapsed % 30)) -eq 0 ] && [ $elapsed -gt 0 ]; then
+                log_info "  Server error (HTTP $api_status), retrying... (${elapsed}s elapsed)"
+            fi
+        else
+            # Ambiguous (empty, non-numeric, or unexpected): keep retrying until timeout instead of failing immediately
+            if [ $((elapsed % 30)) -eq 0 ] && [ $elapsed -gt 0 ]; then
+                log_info "  Unexpected response (HTTP ${api_status_raw:-$api_status}), retrying... (${elapsed}s elapsed)"
+            fi
         fi
         
         sleep "$VALIDATION_RETRY_INTERVAL_SECONDS"
@@ -730,6 +743,7 @@ validate_urls() {
         fi
     else
         log_info "API URL not available for validation"
+        log_info "  (EKS: Ingress hostname may be missing if Step 5.2b failed or Ingress not created; ECS: ALB_DNS from Terraform.)"
     fi
     
     echo ""
@@ -745,6 +759,15 @@ validate_urls() {
         fi
     else
         log_info "Frontend URL not available for validation"
+        log_info "  (CloudFront domain from frontend-eks/frontend-ecs Terraform output; ensure that layer is applied and terragrunt output cloudfront_domain_name succeeds.)"
+        if [ -n "${REPO_ROOT:-}" ] && [ -n "${ENVIRONMENT:-dev}" ]; then
+            local _ct="${CONTAINER_TYPE:-ecs}"
+            if [ "$_ct" = "eks" ]; then
+                log_info "  Run: cd \"$REPO_ROOT/module_infra_frontend/aws/terra/environments/$ENVIRONMENT/frontend-eks\" && terragrunt output -raw cloudfront_domain_name"
+            else
+                log_info "  Run: cd \"$REPO_ROOT/module_infra_frontend/aws/terra/environments/$ENVIRONMENT/frontend-ecs\" && terragrunt output -raw cloudfront_domain_name"
+            fi
+        fi
     fi
     
     echo ""
@@ -861,6 +884,7 @@ validate_urls() {
     else
         log_error "✗ Multiple endpoints are not accessible"
         log_error "  Check the error messages above for troubleshooting steps."
+        log_info "  If the frontend page loads but /query or /query/stream fails with ERR_HTTP2_PROTOCOL_ERROR in the browser, the ALB may still be provisioning or targets may not be healthy. Wait 5–10 minutes and retry, or check ALB target health in the AWS console."
         return 1  # Fail if nothing works
     fi
 }

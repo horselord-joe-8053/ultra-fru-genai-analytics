@@ -98,11 +98,15 @@ fetch_terraform_outputs() {
         REPO_ROOT="$(cd "$script_dir/../../.." && pwd)"
     fi
     
-    TERRAFORM_DIR="$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT"
+    # ECS layer lives in module_infra_kubetypes/nonkube; EKS uses its own paths inside fetch-deployment-info-eks
+    local container_type="${CONTAINER_TYPE:-ecs}"
+    if [ "$container_type" = "ecs" ]; then
+        TERRAFORM_DIR="$REPO_ROOT/module_infra_kubetypes/nonkube/aws/terra/environments/$ENVIRONMENT"
+    else
+        TERRAFORM_DIR="$REPO_ROOT/module_infra_basic/aws/terra/environments/$ENVIRONMENT"
+    fi
     
     # Dispatch to container-type-specific deployment info fetching functions
-    local container_type="${CONTAINER_TYPE:-ecs}"
-    
     if [ "$container_type" = "ecs" ]; then
         if [ -f "$REPO_ROOT/module_infra_kubetypes/nonkube/aws/verification/fetch-deployment-info-ecs.sh" ]; then
             # shellcheck source=/dev/null

@@ -64,14 +64,20 @@ fetch_ecs_deployment_info() {
             # Try to read outputs; on failure, log a concise warning instead of
             # treating Terraform's \"Warning: No outputs found\" as a real value.
             # Only fetch if not already set (skip expensive terragrunt calls if we already have the value).
+            # Use set +e so that failed terragrunt output does not exit the script (set -e in caller).
+            # Strip terragrunt log lines: use last non-empty line as value (terragrunt may mix logs into 2>&1).
+            tg_clean() { printf '%s\n' "$1" | sed '/^$/d' | grep -vE '^\[0;|INFO |ERROR|WARN |DEBUG' | tail -1; }
             local terragrunt_error
             local tg_status
             local tg_output
+            local tg_val
+            set +e
             
             if [ -z "${ALB_DNS:-}" ]; then
                 log_info "Fetching Terraform output: alb_dns_name"
                 tg_output="$(terragrunt output -raw alb_dns_name 2>&1)"; tg_status=$?
-                if [ $tg_status -ne 0 ] || printf '%s\n' "$tg_output" | grep -q "Warning: No outputs found"; then
+                tg_val=$(tg_clean "$tg_output")
+                if [ $tg_status -ne 0 ] || [ -z "$tg_val" ] || printf '%s\n' "$tg_output" | grep -q "Warning: No outputs found"; then
                     terragrunt_error="$tg_output"
                     ALB_DNS=""
                     log_warning "Could not read Terraform output 'alb_dns_name' via terragrunt; API URL may be unavailable"
@@ -79,72 +85,80 @@ fetch_ecs_deployment_info() {
                         log_info "Terragrunt output (trimmed): ${terragrunt_error:0:200}"
                     fi
                 else
-                    ALB_DNS="$tg_output"
+                    ALB_DNS="$tg_val"
                     log_info "Output retrieved: alb_dns_name=$ALB_DNS"
                 fi
             fi
             
-            if [ -z "${CLOUDFRONT_DOMAIN:-}" ]; then
-                log_info "Fetching Terraform output: cloudfront_domain_name"
-                tg_output="$(terragrunt output -raw cloudfront_domain_name 2>&1)"; tg_status=$?
-                if [ $tg_status -ne 0 ] || printf '%s\n' "$tg_output" | grep -q "Warning: No outputs found"; then
-                    terragrunt_error="$tg_output"
-                    CLOUDFRONT_DOMAIN=""
-                    log_warning "Could not read Terraform output 'cloudfront_domain_name' via terragrunt; frontend URL may be unavailable"
-                    if command -v log_info >/dev/null 2>&1 && [ -n "$terragrunt_error" ]; then
-                        log_info "Terragrunt output (trimmed): ${terragrunt_error:0:200}"
-                    fi
-                else
-                    CLOUDFRONT_DOMAIN="$tg_output"
-                    log_info "Output retrieved: cloudfront_domain_name=$CLOUDFRONT_DOMAIN"
-                fi
-            fi
-            
+            # cloudfront_domain_name is not in ECS root layer; fetched from frontend-ecs below
             if [ -z "${ECS_CLUSTER_ID:-}" ]; then
-                log_info "Fetching Terraform output: ecs_cluster_id"
+                log_info "Fetching Terraform output: ecs_cluster_id (fallback: cluster_id)"
                 tg_output="$(terragrunt output -raw ecs_cluster_id 2>&1)"; tg_status=$?
-                if [ $tg_status -ne 0 ] || printf '%s\n' "$tg_output" | grep -q "Warning: No outputs found"; then
-                    terragrunt_error="$tg_output"
-                    ECS_CLUSTER_ID=""
-                    log_warning "Could not read Terraform output 'ecs_cluster_id' via terragrunt; ECS hints may be limited"
-                    if command -v log_info >/dev/null 2>&1 && [ -n "$terragrunt_error" ]; then
-                        log_info "Terragrunt output (trimmed): ${terragrunt_error:0:200}"
-                    fi
-                else
-                    ECS_CLUSTER_ID="$tg_output"
+                if [ $tg_status -ne 0 ] || [ -z "$tg_output" ] || printf '%s\n' "$tg_output" | grep -q "Warning: No outputs found\|not found"; then
+                    tg_output="$(terragrunt output -raw cluster_id 2>&1)"; tg_status=$?
+                fi
+                tg_val=$(tg_clean "$tg_output")
+                if [ $tg_status -eq 0 ] && [ -n "$tg_val" ] && ! printf '%s\n' "$tg_output" | grep -q "Warning: No outputs found\|not found"; then
+                    ECS_CLUSTER_ID="$tg_val"
                     log_info "Output retrieved: ecs_cluster_id=${ECS_CLUSTER_ID:0:100}..."
+                else
+                    ECS_CLUSTER_ID=""
+                    log_warning "Could not read ECS cluster ID from Terraform (tried ecs_cluster_id, cluster_id); ECS hints may be limited"
                 fi
             fi
             
             if [ -z "${ECS_SERVICE_NAME:-}" ]; then
-                log_info "Fetching Terraform output: ecs_service_name"
+                log_info "Fetching Terraform output: ecs_service_name (fallback: service_name)"
                 tg_output="$(terragrunt output -raw ecs_service_name 2>&1)"; tg_status=$?
-                if [ $tg_status -ne 0 ] || printf '%s\n' "$tg_output" | grep -q "Warning: No outputs found"; then
-                    terragrunt_error="$tg_output"
-                    ECS_SERVICE_NAME=""
-                    log_warning "Could not read Terraform output 'ecs_service_name' via terragrunt; ECS hints may be limited"
-                    if command -v log_info >/dev/null 2>&1 && [ -n "$terragrunt_error" ]; then
-                        log_info "Terragrunt output (trimmed): ${terragrunt_error:0:200}"
-                    fi
-                else
-                    ECS_SERVICE_NAME="$tg_output"
+                if [ $tg_status -ne 0 ] || [ -z "$tg_output" ] || printf '%s\n' "$tg_output" | grep -q "Warning: No outputs found\|not found"; then
+                    tg_output="$(terragrunt output -raw service_name 2>&1)"; tg_status=$?
+                fi
+                tg_val=$(tg_clean "$tg_output")
+                if [ $tg_status -eq 0 ] && [ -n "$tg_val" ] && ! printf '%s\n' "$tg_output" | grep -q "Warning: No outputs found\|not found"; then
+                    ECS_SERVICE_NAME="$tg_val"
                     log_info "Output retrieved: ecs_service_name=$ECS_SERVICE_NAME"
+                else
+                    ECS_SERVICE_NAME=""
+                    log_warning "Could not read ECS service name from Terraform (tried ecs_service_name, service_name); ECS hints may be limited"
                 fi
             fi
+            set -e
         cd "$orig_dir" 2>/dev/null || true
-        
-        # Extract cluster name from ARN if needed
-        if [ -n "$ECS_CLUSTER_ID" ]; then
-            ECS_CLUSTER_NAME=$(echo "$ECS_CLUSTER_ID" | awk -F'/' '{print $NF}' || echo "")
+    fi
+
+    # Fetch CloudFront domain from frontend-ecs layer (not from ECS root; same pattern as EKS/frontend-eks)
+    local frontend_ecs_dir="$REPO_ROOT/module_infra_frontend/aws/terra/environments/$environment/frontend-ecs"
+    if [ -d "$frontend_ecs_dir" ] && command_exists terragrunt && [ -z "${CLOUDFRONT_DOMAIN:-}" ]; then
+        local _orig_dir _tg_out _tg_st
+        _orig_dir=$(pwd)
+        cd "$frontend_ecs_dir" 2>/dev/null || true
+        if [ "$(pwd)" = "$frontend_ecs_dir" ]; then
+            log_info "Fetching Terraform output: cloudfront_domain_name (from frontend-ecs layer)"
+            set +e
+            _tg_out="$(terragrunt output -raw cloudfront_domain_name 2>&1)"; _tg_st=$?
+            set -e
+            _tg_val=$(printf '%s\n' "$_tg_out" | sed '/^$/d' | grep -vE '^\[0;|INFO |ERROR|WARN |DEBUG' | tail -1)
+            if [ $_tg_st -eq 0 ] && [ -n "$_tg_val" ] && ! printf '%s\n' "$_tg_out" | grep -q "Warning: No outputs found"; then
+                CLOUDFRONT_DOMAIN="$_tg_val"
+                log_info "Output retrieved: cloudfront_domain_name=$CLOUDFRONT_DOMAIN"
+            else
+                log_warning "Could not read Terraform output 'cloudfront_domain_name' from frontend-ecs; frontend URL may be unavailable"
+            fi
         fi
-        
-        # Set API_URL and FRONTEND_URL from discovered values
-        if [ -n "$ALB_DNS" ]; then
-            API_URL="http://$ALB_DNS"
-        fi
-        if [ -n "$CLOUDFRONT_DOMAIN" ]; then
-            FRONTEND_URL="https://$CLOUDFRONT_DOMAIN"
-        fi
+        cd "$_orig_dir" 2>/dev/null || true
+    fi
+
+    # Extract cluster name from ARN if needed
+    if [ -n "${ECS_CLUSTER_ID:-}" ]; then
+        ECS_CLUSTER_NAME=$(echo "$ECS_CLUSTER_ID" | awk -F'/' '{print $NF}' || echo "")
+    fi
+
+    # Set API_URL and FRONTEND_URL from discovered values
+    if [ -n "${ALB_DNS:-}" ]; then
+        API_URL="http://$ALB_DNS"
+    fi
+    if [ -n "${CLOUDFRONT_DOMAIN:-}" ]; then
+        FRONTEND_URL="https://$CLOUDFRONT_DOMAIN"
     fi
 
     # Fallback: if Terragrunt outputs are unavailable, try AWS CLI to infer ALB DNS

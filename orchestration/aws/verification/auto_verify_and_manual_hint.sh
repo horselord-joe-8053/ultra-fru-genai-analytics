@@ -62,6 +62,7 @@ if [ "$DRY_RUN" != "true" ]; then
         log_error "═══════════════════════════════════════════════════════════════════════════════"
         log_error "Critical endpoints are not working. The deployment may not be functional."
         log_error "Please review the error messages above and fix the issues before using the deployment."
+        log_info "If the frontend loads but /query or /query/stream shows ERR_HTTP2_PROTOCOL_ERROR, the ALB may still be provisioning or targets not healthy; wait 5–10 minutes and retry."
         log_error "═══════════════════════════════════════════════════════════════════════════════"
         echo ""
         exit 1  # Fail fast - critical validation failed
