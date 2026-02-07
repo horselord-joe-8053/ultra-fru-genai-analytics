@@ -23,7 +23,7 @@ dependency "infrastructure" {
     private_subnet_ids = ["subnet-aaaaaaaa", "subnet-bbbbbbbb", "subnet-cccccccc"]
   }
   
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "init", "refresh", "state", "destroy", "import"]
 }
 
 # Merge base template inputs with dependency-dependent inputs

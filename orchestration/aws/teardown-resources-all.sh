@@ -179,7 +179,8 @@ run_pre_destroy() {
     if [ "$r" -eq 0 ]; then
         log_success "Pre-destroy ($ct) done"
     else
-        log_warning "Pre-destroy ($ct) had issues (continuing)"
+        log_error "Pre-destroy ($ct) failed (FAIL-FAST). Infrastructure may be in an inconsistent state."
+        exit 1
     fi
     echo ""
 }
@@ -197,12 +198,12 @@ run_import_before_layer_destroy() {
             local eks_dir="$REPO_ROOT/module_infra_kubetypes/kube/aws/terra/environments/$ENVIRONMENT/eks"
             if [ -d "$eks_dir" ] && [ -x "$import_eks" ]; then
                 log_info "Reconciling EKS state (import before destroy)..."
-                "$import_eks" "$ENVIRONMENT" "$PROJECT_NAME" || log_warning "EKS import had issues; continuing."
+                "$import_eks" "$ENVIRONMENT" "$PROJECT_NAME" || { log_error "EKS import failed"; exit 1; }
             fi
             local fe_dir="$REPO_ROOT/module_infra_frontend/aws/terra/environments/$ENVIRONMENT/frontend-eks"
             if [ -d "$fe_dir" ] && [ -x "$import_fe" ]; then
                 log_info "Reconciling frontend-eks state (import before destroy)..."
-                "$import_fe" "$ENVIRONMENT" "$PROJECT_NAME" || log_warning "Frontend-eks import had issues; continuing."
+                "$import_fe" "$ENVIRONMENT" "$PROJECT_NAME" || { log_error "Frontend-eks import failed"; exit 1; }
             fi
             ;;
         ecs)
@@ -211,12 +212,12 @@ run_import_before_layer_destroy() {
             local ecs_dir="$REPO_ROOT/module_infra_kubetypes/nonkube/aws/terra/environments/$ENVIRONMENT/ecs"
             if [ -d "$ecs_dir" ] && [ -x "$import_ecs" ]; then
                 log_info "Reconciling ECS state (import before destroy)..."
-                "$import_ecs" "$ENVIRONMENT" "$PROJECT_NAME" || log_warning "ECS import had issues; continuing."
+                "$import_ecs" "$ENVIRONMENT" "$PROJECT_NAME" || { log_error "ECS import failed"; exit 1; }
             fi
             local fe_dir="$REPO_ROOT/module_infra_frontend/aws/terra/environments/$ENVIRONMENT/frontend-ecs"
             if [ -d "$fe_dir" ] && [ -x "$import_fe" ]; then
                 log_info "Reconciling frontend-ecs state (import before destroy)..."
-                "$import_fe" "$ENVIRONMENT" "$PROJECT_NAME" || log_warning "Frontend-ecs import had issues; continuing."
+                "$import_fe" "$ENVIRONMENT" "$PROJECT_NAME" || { log_error "Frontend-ecs import failed"; exit 1; }
             fi
             ;;
         *) ;;
@@ -237,17 +238,32 @@ run_terraform_teardown_layer() {
     export AWS_PROFILE AWS_REGION CONTAINER_TYPE
     [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && export PREEMPT=true
     local r=0
+    local tmp_output
+    tmp_output="$(mktemp)"
     if type run_with_heartbeat >/dev/null 2>&1; then
-        _run_with_heartbeat_step "Terraform destroy ($ct layer)" -- "$TF_TEARDOWN" "$ENVIRONMENT" "$ct"
-        r=$?
+        _run_with_heartbeat_step "Terraform destroy ($ct layer)" -- bash -c "\"$TF_TEARDOWN\" \"$ENVIRONMENT\" \"$ct\" 2>&1 | tee \"$tmp_output\""
+        r=${PIPESTATUS[0]}
     else
-        "$TF_TEARDOWN" "$ENVIRONMENT" "$ct"
-        r=$?
+        "$TF_TEARDOWN" "$ENVIRONMENT" "$ct" 2>&1 | tee "$tmp_output"
+        r=${PIPESTATUS[0]}
     fi
     if [ "$r" -eq 0 ]; then
         log_success "Terraform teardown ($ct layer) complete"
+        rm -f "$tmp_output"
     else
-        log_warning "Terraform teardown ($ct) had issues (retry or use remove-all-aws-resources as fallback)"
+        log_error "Terraform teardown ($ct) FAILED with exit code $r"
+        log_error "════════════════════════════════════════════════════════════════"
+        log_error "Error output from terraform destroy ($ct):"
+        log_error "════════════════════════════════════════════════════════════════"
+        cat "$tmp_output" | sed 's/^/  /' >&2
+        log_error "════════════════════════════════════════════════════════════════"
+        log_warning "To retry: cd $(dirname $TF_TEARDOWN) && terragrunt destroy (from appropriate env dir)"
+        log_warning "Or use: remove-all-aws-resources as fallback"
+        rm -f "$tmp_output"
+        if [ "$TEARDOWN_FAIL_FAST" = "true" ]; then
+            log_error "TEARDOWN_FAIL_FAST=true: exiting immediately on terraform error"
+            exit 1
+        fi
         return 1
     fi
     echo ""
@@ -265,17 +281,32 @@ run_terraform_teardown_shared() {
     export AWS_PROFILE AWS_REGION CONTAINER_TYPE
     [ "$SKIP_CONFIRMATION" = "true" ] || [ "${PREEMPT:-false}" = "true" ] && export PREEMPT=true
     local r=0
+    local tmp_output
+    tmp_output="$(mktemp)"
     if type run_with_heartbeat >/dev/null 2>&1; then
-        _run_with_heartbeat_step "Terraform destroy (shared)" -- "$TF_TEARDOWN" "$ENVIRONMENT" "infra_basic"
-        r=$?
+        _run_with_heartbeat_step "Terraform destroy (shared)" -- bash -c "\"$TF_TEARDOWN\" \"$ENVIRONMENT\" \"infra_basic\" 2>&1 | tee \"$tmp_output\""
+        r=${PIPESTATUS[0]}
     else
-        "$TF_TEARDOWN" "$ENVIRONMENT" "infra_basic"
-        r=$?
+        "$TF_TEARDOWN" "$ENVIRONMENT" "infra_basic" 2>&1 | tee "$tmp_output"
+        r=${PIPESTATUS[0]}
     fi
     if [ "$r" -eq 0 ]; then
         log_success "Terraform teardown (shared) complete"
+        rm -f "$tmp_output"
     else
-        log_warning "Terraform teardown (shared) had issues"
+        log_error "Terraform teardown (shared) FAILED with exit code $r"
+        log_error "════════════════════════════════════════════════════════════════"
+        log_error "Error output from terraform destroy (shared):"
+        log_error "════════════════════════════════════════════════════════════════"
+        cat "$tmp_output" | sed 's/^/  /' >&2
+        log_error "════════════════════════════════════════════════════════════════"
+        log_warning "To retry: cd $(dirname $TF_TEARDOWN) && terragrunt destroy (from appropriate env dir)"
+        log_warning "Or use: remove-all-aws-resources as fallback"
+        rm -f "$tmp_output"
+        if [ "$TEARDOWN_FAIL_FAST" = "true" ]; then
+            log_error "TEARDOWN_FAIL_FAST=true: exiting immediately on terraform error"
+            exit 1
+        fi
         return 1
     fi
     echo ""

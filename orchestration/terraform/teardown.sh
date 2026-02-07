@@ -112,10 +112,10 @@ teardown_terragrunt() {
         if [ $exit_code -eq 0 ]; then
             return 0
         fi
-        if ! grep -qi "Error acquiring the state lock" "$tmp_out"; then
+        if ! grep -qiE "Error (acquiring|releasing) the state lock" "$tmp_out"; then
             return $exit_code
         fi
-        log_warning "State lock detected for $layer_name. Attempting force-unlock and retry (30s between retries, 2 min timeout)..."
+        log_warning "State lock detected (acquire/release) for $layer_name. Attempting force-unlock and retry (30s between retries, 2 min timeout)..."
         local clean_out
         clean_out="$(mktemp)"
         sed -E 's/\x1B\[[0-9;]*[mK]//g' "$tmp_out" > "$clean_out"
@@ -124,12 +124,15 @@ teardown_terragrunt() {
         lock_id="$(grep -iE 'ID:[[:space:]]+[0-9a-fA-F]{8}-' "$clean_out" | head -1 | grep -Eo '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | head -1)"
         rm -f "$clean_out"
         if [ -z "$lock_id" ]; then
-            log_error "Could not parse lock ID from output. Manual unlock: cd $(pwd) && terragrunt force-unlock <LOCK_ID> -force"
+            log_error "Could not parse lock ID from Terraform output for $layer_name."
+            log_info "This can happen if the S3 lock acquisition failed early (e.g., PreconditionFailed)."
+            log_info "Manual unlock: cd $(pwd) && terragrunt force-unlock <LOCK_ID> -force"
+            log_info "You can find the Lock ID in the Terraform output above (look for 'ID:')."
             return $exit_code
         fi
         log_info "Parsed lock ID: $lock_id; running terragrunt force-unlock -force $lock_id"
         if ! terragrunt force-unlock -force "$lock_id" 2>&1; then
-            log_error "force-unlock failed. Manual: cd $(pwd) && terragrunt force-unlock $lock_id -force"
+            log_error "force-unlock failed for $layer_name. Manual: cd $(pwd) && terragrunt force-unlock $lock_id -force"
             return 1
         fi
         local retry_start

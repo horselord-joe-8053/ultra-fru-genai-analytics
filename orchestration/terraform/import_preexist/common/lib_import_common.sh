@@ -106,33 +106,40 @@ import_one_resource() {
     fi
 
     # State lock: force-unlock and retry once, then re-classify the retry output
-    if grep -qi "Error acquiring the state lock" "$tmp_log"; then
+    if grep -qiE "Error (acquiring|releasing) the state lock" "$tmp_log"; then
         local lock_id
         lock_id="$(import_parse_lock_id_from_file "$tmp_log")"
-        if [ -n "$lock_id" ] && terragrunt force-unlock -force "$lock_id" >/dev/null 2>&1; then
-            log_info "  State lock detected; force-unlocked, retrying import for $addr..."
-            local rc2=0
-            terragrunt import "$addr" "$id" >"$tmp_log" 2>&1 || rc2=$?
-            if [ "$rc2" -eq 0 ]; then
-                if grep -qiE "Import (prepared|successful|complete)|Resource already managed" "$tmp_log"; then
-                    log_success "  OK: $addr (after unlock retry)"
-                elif grep -qiE "Error|error" "$tmp_log"; then
-                    log_warning "  Import may have issues for $addr (after unlock retry)"
-                    tail -5 "$tmp_log" | while IFS= read -r line; do log_info "    $line"; done
-                else
-                    log_success "  OK: $addr (after unlock retry)"
+        if [ -n "$lock_id" ]; then
+            if terragrunt force-unlock -force "$lock_id" >/dev/null 2>&1; then
+                log_info "  State lock detected; force-unlocked, retrying import for $addr..."
+                local rc2=0
+                terragrunt import "$addr" "$id" >"$tmp_log" 2>&1 || rc2=$?
+                if [ "$rc2" -eq 0 ]; then
+                    if grep -qiE "Import (prepared|successful|complete)|Resource already managed" "$tmp_log"; then
+                        log_success "  OK: $addr (after unlock retry)"
+                    elif grep -qiE "Error|error" "$tmp_log"; then
+                        log_warning "  Import may have issues for $addr (after unlock retry)"
+                        tail -5 "$tmp_log" | while IFS= read -r line; do log_info "    $line"; done
+                    else
+                        log_success "  OK: $addr (after unlock retry)"
+                    fi
+                    return 0
                 fi
-                return 0
+                # Non-zero after retry: treat "already managed" and skip patterns as non-fatal
+                if grep -qi "already managed by Terraform\|Resource already managed" "$tmp_log"; then
+                    log_success "  OK (already in state): $addr (Terraform state already tracks this resource; no import needed)"
+                    return 0
+                fi
+                if grep -qiE "$_IMPORT_SKIP_PATTERNS" "$tmp_log"; then
+                    log_info "  Skip (resource does not exist in AWS; safe to ignore for teardown-mode import): $addr"
+                    return 0
+                fi
+            else
+                log_warning "  State lock detected but force-unlock failed for $addr"
             fi
-            # Non-zero after retry: treat \"already managed\" and skip patterns as non-fatal
-            if grep -qi "already managed by Terraform\\|Resource already managed" "$tmp_log"; then
-                log_success "  OK (already in state): $addr (Terraform state already tracks this resource; no import needed)"
-                return 0
-            fi
-            if grep -qiE "$_IMPORT_SKIP_PATTERNS" "$tmp_log"; then
-                log_info "  Skip (resource does not exist in AWS; safe to ignore for teardown-mode import): $addr"
-                return 0
-            fi
+        else
+            log_warning "  State lock detected for $addr but could not parse Lock ID."
+            log_info "    Check for 'ID:' in the output below."
         fi
     fi
 

@@ -30,7 +30,7 @@ dependency "infrastructure" {
   
   # Allow mock outputs when dependency has no outputs (e.g. infra destroyed first).
   # init + state allow EKS teardown to run without needing infrastructure layer.
-  mock_outputs_allowed_terraform_commands = ["validate", "plan", "init", "state", "destroy"]
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "init", "state", "destroy", "import"]
 }
 
 # All inputs (dependency-dependent and non-dependent)

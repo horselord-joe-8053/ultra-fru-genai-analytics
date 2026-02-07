@@ -23,7 +23,7 @@ dependency "app" {
     # EKS ALB DNS comes from Kubernetes Ingress; use placeholder for plan when EKS not applied
     alb_dns_name = "k8s-placeholder.elb.us-east-1.amazonaws.com"
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan", "init", "refresh"]
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "init", "refresh", "state", "destroy", "import"]
 }
 
 # alb_dns_name for EKS: from Kubernetes Ingress after deploy (kubectl get ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
