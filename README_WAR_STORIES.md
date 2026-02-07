@@ -1488,3 +1488,86 @@ This prevented transient connectivity or "HTTP 000" / "000000" cases from bailin
 Don’t use strict string equality (e.g. `"$status" = "000"`) when the tool might output extra digits or padding. Normalize status to three digits first. Treat 000 as retry; only fail fast on definitive 4xx that mean "endpoint not found or forbidden." For 5xx and 000, retry until timeout so temporary unavailability (ALB still coming up, ERR_HTTP2, etc.) doesn’t cause a false failure.
 
 ---
+## 33. Terraform State Lock Ambiguity: "Acquiring" vs "Releasing" and the S3 PreconditionFailed (412) Trap
+
+**creation:** `<260206-215835>`
+**last_updated:** `<260206-215835>`
+
+**keywords:** Terraform, Terragrunt, state lock, S3, PreconditionFailed, 412, force-unlock, teardown, fail-fast, mock_outputs
+**difficulty:** 7
+**significance:** 8
+
+### 33.1 Context
+
+During automated infrastructure teardown using Terragrunt, the system hit a recurring "silent failure" pattern. Some layers (like `frontend-ecs`) were successfully repairing stale state locks, but others (like the shared `infrastructure` layer) reported `[SUCCESS]` even when they actually failed due to a lock. Furthermore, the **EKS layer reconstruction (import)** phase was crashing during teardown because it couldn't resolve its parent dependency's outputs.
+
+### 33.2 Root Cause
+
+1.  **Semantic Lock Blindness:** The teardown script's lock-detection regex was strictly looking for `Error acquiring the state lock`. However, Terraform often fails the check-in process at the end of a destroy, resulting in `Error releasing the state lock`. Because the script didn't recognize "releasing," it didn't trigger the automatic `force-unlock` fallback, and the exit code 1 was eaten by a loop that assumed success.
+2.  **The S3 412 (PreconditionFailed) Trap:** In certain race conditions with the S3 backend, AWS returns a low-level `HTTP 412` error. This "PreconditionFailed" occurs before the high-level Terraform error is rendered, meaning a clean **Lock ID** is never printed to stdout. This broke the automated `force-unlock <LOCK_ID>` parsing, causing the script to guide the user into a dead end.
+3.  **Circular Dependency Crash during Import:** To ensure a clean teardown, we run `import` scripts to reconcile state before `destroy`. Terragrunt's dependency resolution crashes during `import` if the parent layer (e.g., VPC/Infrastructure) has already been destroyed or has no outputs. 
+
+### 33.3 Key Insight
+
+> State lock management is bidirectional (ACQUIRE vs RELEASE). Automation must handle the "check-in" failure as seriously as the "check-out" failure. Additionally, low-level AWS errors (412) can obscure the Lock ID, necessitating a "fail-fast and notify" strategy over a "continue blindly" one.
+
+### 33.4 Resolution
+
+- **Bidirectional Lock Detection:** Updated the teardown and import libraries to use a generalized regex: `Error (acquiring|releasing) the state lock`.
+- **Enforced Fail-Fast:** Converted internal warnings into fatal `exit 1` errors. If a lock repair fails (e.g., because no Lock ID could be parsed from a 412 error), the script now terminates immediately for safety instead of proceeding with an inconsistent state.
+- **Mock Output Expansion:** Updated 8+ `terragrunt.hcl` files to explicitly allow `import`, `state`, and `destroy` commands to use `mock_outputs`:
+  ```hcl
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "init", "state", "destroy", "import"]
+  ```
+  This allowed EKS/ECS layers to reconcile their state using mock VPC IDs even if the physical VPC was already gone.
+
+### 33.5 Takeaway
+
+Automated teardown scripts must be as robust as deployment scripts. Don't just look for "acquiring" locks—detect "release" failures too. Treat low-level AWS S3 errors (412) as deterministic lock failures and never proceed if state reconciliation (`import`) fails. Use `mock_outputs_allowed_terraform_commands` broadly to prevent child layers from crashing when their parents are already deleted during a partial teardown.
+
+---
+
+## 34. Breaking the Dependency Deadlock: Mocking Attributes for Multi-Phase Lifecycle
+
+**creation:** `<260206-220111>`
+**last_updated:** `<260206-220111>`
+
+**keywords:** Terragrunt, mock_outputs, dependency, try(), lifecycle, teardown, import, circular dependency
+**difficulty:** 6
+**significance:** 8
+
+### 34.1 Context
+
+In a complex multi-layered infrastructure (VPC → App Cluster → Frontend), Terragrunt scripts often hit a "Deadlock":
+*   **During Deploy**: You can't `plan` the App Cluster because the VPC (VPC ID, Subnets) doesn't exist yet.
+*   **During Teardown**: You can't `destroy` the App Cluster if the VPC was already accidentally deleted or partially torn down, because the App Cluster's config crashes while looking for the VPC's outputs.
+*   **During Reconciliation**: Our `import` scripts, run before destruction to ensure a clean slate, would crash if the parent infrastructure had no state.
+
+### 34.2 Root Cause
+
+Terragrunt’s `dependency` block is "fail-fast" by default. If the `config_path` points to a module with no `terraform.tfstate` or no `outputs {}` block, Terragrunt terminates with an error. This prevents developers from even *seeing* a plan (Phase 1) or *cleaning up* orphans (Teardown) without the parent being fully standing and "Applied."
+
+### 34.3 Key Insight
+
+> Infrastructure-as-Code must be "Runtime-Optional." The configuration should be able to resolve itself using "Best Effort" data: real outputs when they exist, and "Mocks" when they don't. This decoupling is essential for CI/CD dry-runs and disaster recovery.
+
+### 34.4 Resolution
+
+We implemented a three-tier "Mocking Strategy" to ensure the lifecycle never gets stuck:
+
+1.  **The `mock_outputs` Block**: Provides dummy data (e.g., `vpc-xxxxxxxx`) for Terragrunt to pass to the HCL parser when the real dependency is missing.
+2.  **The Command Whitelist**: Explicitly tells Terragrunt **when** it is allowed to use these mocks. Crucially, we discovered that adding `"import"` to this list is mandatory for automated teardown reconciliation:
+    ```hcl
+    dependency "infrastructure" {
+      config_path = ".../infrastructure"
+      mock_outputs = { vpc_id = "vpc-xxxxxxxx" }
+      mock_outputs_allowed_terraform_commands = ["init", "plan", "destroy", "import"]
+    ```
+3.  **The HCL `try()` Pattern**: In the `inputs` block, we use `try()` to gracefully handle partial states. This prevents "Unsupported attribute" errors if the parent exists but has only *some* outputs:
+    ```hcl
+    vpc_id = try(dependency.infrastructure.outputs.vpc_id, "vpc-xxxxxxxx")
+    ```
+
+### 34.5 Takeaway
+
+Mocking isn't just for testing; it's a structural requirement for complex infrastructure lifecycles. By whitelisting commands like `import` and `destroy` for mock usage, you transform your codebase from a "fragile chain" into a "robust stack" that can be partially destroyed, re-imported, or planned in any order without crashing. Always use the `try()` + `mock_outputs` + `allowed_commands` trio for any cross-module dependency.

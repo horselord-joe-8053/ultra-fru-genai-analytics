@@ -264,7 +264,7 @@ run_terraform_teardown_layer() {
             log_error "TEARDOWN_FAIL_FAST=true: exiting immediately on terraform error"
             exit 1
         fi
-        return 1
+        exit 1
     fi
     echo ""
 }
@@ -307,7 +307,7 @@ run_terraform_teardown_shared() {
             log_error "TEARDOWN_FAIL_FAST=true: exiting immediately on terraform error"
             exit 1
         fi
-        return 1
+        exit 1
     fi
     echo ""
 }
