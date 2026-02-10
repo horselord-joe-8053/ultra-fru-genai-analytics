@@ -40,6 +40,7 @@ build/
 *~
 
 # Generated files
+antigravity_gen/
 cursor_gen/
 study/
 tmp/
