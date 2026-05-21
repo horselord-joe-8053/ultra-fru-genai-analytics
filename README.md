@@ -2,7 +2,7 @@
 
 **(Spark + Delta + OpenAI Embeddings + pgvector + Bedrock + AWS)**
 
-FRU (**Fridges R Us**) is a real, end-to-end **conversational analytics system** built over refrigerator sales data.
+Inspired by real-life industrial usecases and data, **Fridges R Us (FRU)** is an end-to-end  conversational analytics assistant over refrigerator sales data: **`structured`** fields (brand, store, ratings, dates) plus **`unstructured`** customer feedback (long complaints and themes). Users ask questions in plain language; the system returns grounded answers backed by SQL, vector search, and batch aggregates—not free-form hallucination.
 
 
 <h2 id="document-outline" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">📋 Table of Contents</h2>
