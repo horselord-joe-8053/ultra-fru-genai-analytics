@@ -44,6 +44,9 @@ FRU (**Fridges R Us**) is a real, end-to-end **conversational analytics system**
     - [Migration Path](#migration-path)
     - [Rollback](#rollback)
 - [📌 11. Next Steps (Roadmap)](#11-next-steps-roadmap)
+- [🧪 12. Testing (unit + integration)](#testing)
+  - [12.1 Unit tests](#unit-tests)
+  - [12.2 Integration tests (Docker)](#integration-tests)
 - [🙌 Summary](#summary)
 
 ---
@@ -57,6 +60,7 @@ FRU (**Fridges R Us**) is a real, end-to-end **conversational analytics system**
 **Additional Guides:**
 - **[`guides/DELTA_SPARK_VS_POSTGRESQL_FULL_STACK.md`](guides/DELTA_SPARK_VS_POSTGRESQL_FULL_STACK.md)** - Detailed comparison and architecture guide for Delta Lake + Spark vs PostgreSQL + pgvector
 - **[`guides/MANUAL_DEPLOYMENT_AND_TESTING.md`](guides/MANUAL_DEPLOYMENT_AND_TESTING.md)** - Manual deployment and testing procedures
+- **[`tests/README.md`](tests/README.md)** - Unit tests (`pytest`) and integration (`module_test_verification/test_query_*.sh`)
 - **[`guides/PERFORMANCE_BREAKDOWN.md`](guides/PERFORMANCE_BREAKDOWN.md)** - Performance analysis and optimization guide
 - **[`guides/aws_setup_guide.md`](guides/aws_setup_guide.md)** - AWS setup and configuration guide
 - **[`guides/database_setup_explanation.md`](guides/database_setup_explanation.md)** - Database setup and schema explanation
@@ -735,6 +739,105 @@ Set `USE_AGENT_QUERY=false` to disable agent and fall back to original `/query` 
 
 ---
 
+<h2 id="testing" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">🧪 12. Testing (unit + integration)</h2>
+
+**pytest** suite for fast refactors: **unit** tests mock DB/LLM/Bedrock (every PR); **integration** tests hit a live API via shell runners after local Docker deploy or against AWS.
+
+<table>
+<thead>
+<tr style="background:#1565c0;color:white"><th>Layer</th><th>When</th><th>Command</th><th>Needs Docker / stack</th></tr>
+</thead>
+<tbody>
+<tr><td style="background:#e3f2fd"><strong>Unit</strong></td><td style="background:#e8f5e9">Every PR, local dev</td><td style="background:#e8f5e9"><code>pytest</code> or <code>./scripts/run_unit_tests.sh</code></td><td style="background:#e8f5e9"><span style="background:#c8e6c9;padding:2px 4px">no</span></td></tr>
+<tr><td style="background:#e3f2fd"><strong>Integration</strong></td><td style="background:#fff3e0">After local deploy or on AWS</td><td style="background:#fff3e0"><code>module_test_verification/test_query_*.sh --test-env local|aws</code></td><td style="background:#fff3e0"><span style="background:#fff9c4;padding:2px 4px">yes</span></td></tr>
+</tbody>
+</table>
+
+<h3 id="unit-tests" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">12.1 Unit tests</h3>
+
+No Postgres, Bedrock, or Docker required. **~58 tests** under <code>tests/unit/</code> for <code>module_app_core/backend</code> (mocked Flask client, agents, tools, helpers).
+
+<table>
+<thead>
+<tr style="background:#1565c0;color:white"><th>Area</th><th>Examples</th></tr>
+</thead>
+<tbody>
+<tr><td style="background:#e3f2fd"><strong>Flask API</strong></td><td style="background:#e8f5e9"><code>/health</code>, <code>/version</code>, <code>validate_query</code>, <code>/query</code>, <code>/query/stream</code>, analytics route</td></tr>
+<tr><td style="background:#e3f2fd"><strong>Agent</strong></td><td style="background:#fff3e0">QueryAgent, logger, metrics, prompts, SQL / semantic / SQL-generator tools</td></tr>
+<tr><td style="background:#e3f2fd"><strong>Helpers</strong></td><td style="background:#e8f5e9"><code>env_helpers</code>, filesystem utils, Spark config helpers, LLM <code>client_factory</code></td></tr>
+<tr><td style="background:#e3f2fd"><strong>Validators</strong></td><td style="background:#fff3e0">Shared query validators from <code>module_test_verification/python/</code></td></tr>
+</tbody>
+</table>
+
+<table>
+<thead>
+<tr style="background:#1565c0;color:white"><th>Artifact</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td style="background:#e3f2fd"><code>requirements-dev.txt</code>, <code>pytest.ini</code></td><td style="background:#e8f5e9">Dev deps; <code>-m "not integration"</code> by default</td></tr>
+<tr><td style="background:#e3f2fd"><code>tests/conftest.py</code></td><td style="background:#fff3e0">Env vars set before <code>backend.api.app</code> import</td></tr>
+<tr><td style="background:#e3f2fd"><code>.coveragerc</code></td><td style="background:#e8f5e9">Staged <code>fail_under</code> (42% on backend today; target 80%)</td></tr>
+<tr><td style="background:#e3f2fd"><a href=".github/workflows/unit-tests.yml">unit-tests.yml</a></td><td style="background:#fff3e0">CI on push/PR (<code>coverage run -m pytest</code>)</td></tr>
+</tbody>
+</table>
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+# with coverage gate:
+./scripts/run_unit_tests.sh
+```
+
+<h3 id="integration-tests" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">12.2 Integration tests (Docker)</h3>
+
+Live HTTP query checks via <code>module_test_verification/</code>. Scripts can **start** local Docker services if they are down (see <a href="#4-local-quickstart">§4 Local Quickstart</a> or <code>./run.sh local nonkube</code>).
+
+**Prerequisites (local):** Docker Desktop running → stack up (<code>fru_db</code>, <code>fru_api</code>) → API at <code>http://localhost:${LOCAL_SERVER_PORT:-5001}</code>.
+
+**Run (local):**
+
+```bash
+./module_test_verification/test_query_1_AVG.sh --test-env local
+./module_test_verification/test_query_1_TOP.sh --test-env local
+./module_test_verification/test_query_9.sh --test-env local
+# optional streaming:
+./module_test_verification/test_query_1_AVG.sh --test-env local --stream
+```
+
+**Run (AWS):**
+
+```bash
+./module_test_verification/test_query_1_AVG.sh --test-env aws
+./module_test_verification/test_query_1_TOP.sh --test-env aws --use-cached-aws-val
+```
+
+**What runs (<code>module_test_verification/</code>):**
+
+<table>
+<thead>
+<tr style="background:#1565c0;color:white"><th>Script</th><th>Checks</th></tr>
+</thead>
+<tbody>
+<tr><td style="background:#e3f2fd"><code>test_query_1_AVG.sh</code></td><td style="background:#e8f5e9">Average rating query (<code>AVG</code>)</td></tr>
+<tr><td style="background:#e3f2fd"><code>test_query_1_TOP.sh</code></td><td style="background:#fff3e0">Top-N / ranking query (<code>TOP</code>)</td></tr>
+<tr><td style="background:#e3f2fd"><code>test_query_9.sh</code></td><td style="background:#e8f5e9">Broader query suite; <code>--stream</code> for <code>/query/stream</code></td></tr>
+<tr><td style="background:#e3f2fd"><code>*_2way_local.sh</code></td><td style="background:#fff3e0">Two-way local variants (agent on/off paths)</td></tr>
+</tbody>
+</table>
+
+| Flag | Purpose |
+|------|---------|
+| <code>--test-env local\|aws</code> | Target local Docker or deployed AWS stack |
+| <code>--use-cached-aws-val</code> | Reuse cached Terraform/deployment outputs (AWS) |
+| <code>--stream</code> | Use <code>/query/stream</code> (SSE) instead of <code>/query</code> |
+| <code>--force-rebuild-local-img</code> | Rebuild all local images before starting services |
+
+**CI:** Unit tests gate every PR ([unit-tests.yml](.github/workflows/unit-tests.yml)). Integration is run manually before release (not in default CI).
+
+**References:** [tests/README.md](tests/README.md) · [module_test_verification/README.md](module_test_verification/README.md) · [guides/MANUAL_DEPLOYMENT_AND_TESTING.md](guides/MANUAL_DEPLOYMENT_AND_TESTING.md) · evolved stack [ultra-fru-genai-analytics-new](https://github.com/horselord-joe-8053/ultra-fru-genai-analytics-new) (<code>tests/integration/</code>, <code>scripts/run_integration_tests.sh</code>).
+
+---
+
 <h2 id="summary" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">🙌 Summary</h2>
 
 FRU is a **real playground** for experimenting with Spark, Delta, OpenAI embeddings, pgvector, and Bedrock. It demonstrates production-ready GenAI architecture patterns with:
@@ -745,4 +848,4 @@ FRU is a **real playground** for experimenting with Spark, Delta, OpenAI embeddi
 - practical GenAI patterns  
 - ability to ship a working prototype
 
-Use it, extend it, and explore RAG, embeddings, and hybrid AWS + LLM architectures.
+Use it, extend it, and explore RAG, embeddings, and hybrid AWS + LLM architectures. Run <a href="#unit-tests">unit tests</a> on every change and <a href="#integration-tests">integration tests</a> after local deploy or before an AWS release.
