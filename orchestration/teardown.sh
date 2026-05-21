@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Top-level teardown dispatcher: ./orchestration/teardown.sh <local|aws> <kube|nonkube|all> [env] [options...]
+# =============================================================================
+# Delegates to orchestration/local/teardown-resources-all.sh or
+# orchestration/aws/teardown-resources-all.sh.
+#
+# Modes:
+#   local nonkube / kube → Teardown local Docker Compose or Kubernetes
+#   aws nonkube [env]   → Teardown AWS ECS only (shared infra left standing)
+#   aws kube [env]      → Teardown AWS EKS only (shared infra left standing)
+#   aws all [env]       → Teardown EKS + ECS + shared infra (VPC, Aurora, IAM)
+#
+# For problem-free ./run.sh aws kube dev --preempt: preempt uses --container-type
+# all so shared infra is torn down. Teardown runs import-existing-infrastructure
+# before shared destroy (so state is populated and destroy can remove DB subnet
+# group, etc.). Option B: infrastructure has no Secrets Manager; destroy runs in one pass.
+#
+# Options: --force, --dry-run, etc. forwarded to target script.
+# Usage: ./orchestration/teardown.sh [local|aws] [kube|nonkube|all] [dev|prod] [options...]
+# =============================================================================
+
+set -e
+ORCH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${REPO_ROOT:-$(cd "$ORCH_SCRIPT_DIR/.." && pwd)}"
+export REPO_ROOT
+
+source "$REPO_ROOT/lib/logger.sh"
+source "$REPO_ROOT/orchestration/common/env/load-env.sh"
+load_env_file 2>/dev/null || true
+
+log_info "### start of orchestration/teardown.sh ###"
+
+PROVIDER="${1:-}"
+ROUTE="${2:-}"
+shift 2 2>/dev/null || true
+REMAINING=("$@")
+
+show_usage() {
+    echo "Usage: $0 <local|aws> <kube|nonkube|all> [env] [options...]"
+    echo "  local nonkube   → Teardown local Docker Compose"
+    echo "  local kube      → Teardown local Kubernetes"
+    echo "  aws nonkube [env] → Teardown AWS ECS only (env: dev|prod)"
+    echo "  aws kube [env]    → Teardown AWS EKS only"
+    echo "  aws all [env]     → Teardown AWS EKS + ECS + shared infra"
+    echo "Options: --force, --dry-run, etc. forwarded to target script."
+    log_info "### end of orchestration/teardown.sh ###"
+    exit 0
+}
+
+case "$PROVIDER" in
+    help|-h|--help) show_usage ;;
+    local)
+        case "${ROUTE:-nonkube}" in
+            kube|nonkube) ;;
+            all) ROUTE="nonkube" ;;
+            *) log_error "Invalid route for local: $ROUTE"; log_info "### end of orchestration/teardown.sh ###"; exit 1 ;;
+        esac
+        set +e
+        "$REPO_ROOT/orchestration/local/teardown-resources-all.sh" --container-type "${ROUTE:-nonkube}" "${REMAINING[@]}"
+        _rc=$?
+        set -e
+        log_info "### end of orchestration/teardown.sh ###"
+        exit $_rc
+        ;;
+    aws)
+        ENV="${REMAINING[0]:-dev}"
+        if [[ "$ENV" == dev || "$ENV" == prod || "$ENV" == staging ]]; then
+            REST=("${REMAINING[@]:1}")
+        else
+            ENV="dev"
+            REST=("${REMAINING[@]}")
+        fi
+        case "${ROUTE:-}" in
+            nonkube) CT="ecs" ;;
+            kube)    CT="eks" ;;
+            all)     CT="all" ;;
+            *) log_error "Invalid route for aws: $ROUTE (use kube, nonkube, or all)"; log_info "### end of orchestration/teardown.sh ###"; exit 1 ;;
+        esac
+        set +e
+        "$REPO_ROOT/orchestration/aws/teardown-resources-all.sh" "$ENV" --container-type "$CT" "${REST[@]}"
+        _rc=$?
+        set -e
+        log_info "### end of orchestration/teardown.sh ###"
+        exit $_rc
+        ;;
+    "")
+        log_error "Missing provider. Use: $0 <local|aws> <kube|nonkube|all> [env] [options...]"
+        show_usage
+        ;;
+    *)
+        log_error "Unknown provider: $PROVIDER (use local or aws)"
+        log_info "### end of orchestration/teardown.sh ###"
+        exit 1
+        ;;
+esac

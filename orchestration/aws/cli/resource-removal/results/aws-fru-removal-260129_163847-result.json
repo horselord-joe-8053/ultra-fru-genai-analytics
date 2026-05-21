@@ -1,0 +1,191 @@
+{
+  "metadata": {
+    "account_id": "744139897900",
+    "profile": "admin",
+    "region": "us-east-1",
+    "timestamp": "2026-01-29T16:38:47.944040",
+    "result_json_path": "/Users/jameswang9311/Documents/My_PJs/fru-genai-analytics-all/orchestration/aws/cli/resource-removal/../resource-check/results/aws-fru-260129_150206-result.json",
+    "dry_run": false,
+    "keep_state_bucket": true
+  },
+  "summary": {
+    "total_deleted": 24,
+    "total_failed": 10,
+    "total_skipped": 4
+  },
+  "steps": {
+    "cloudfront": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "E25D2HWB9LQXP6",
+          "reason": "already_deleted"
+        },
+        {
+          "id": "E34NAR3WSONVIM",
+          "reason": "already_deleted"
+        }
+      ]
+    },
+    "eks": {
+      "deleted": [
+        "fru-dev-cluster"
+      ],
+      "failed": [],
+      "skipped": []
+    },
+    "ecs": {
+      "deleted": [
+        "fru-dev-cluster"
+      ],
+      "failed": [],
+      "skipped": []
+    },
+    "rds": {
+      "deleted": [
+        "fru-dev-aurora-cluster"
+      ],
+      "failed": [],
+      "skipped": []
+    },
+    "elb": {
+      "deleted": [
+        "a463d79f33c474dae83e2364778a167c",
+        "ad36c0036890a439eae339e83c735cdc",
+        "fru-dev-alb"
+      ],
+      "failed": [],
+      "skipped": []
+    },
+    "ec2_instances": {
+      "deleted": [
+        "i-05d62ffe656215678"
+      ],
+      "failed": [],
+      "skipped": []
+    },
+    "nat_gateways": {
+      "deleted": [
+        "nat-0f48170dea5ce117b",
+        "nat-0d2a9e93d23523a74"
+      ],
+      "failed": [],
+      "skipped": []
+    },
+    "elastic_ips": {
+      "deleted": [],
+      "failed": [
+        {
+          "id": "eipalloc-0a3792ac305ea8393",
+          "error": "An error occurred (AuthFailure) when calling the ReleaseAddress operation: You do not have permission to access the specified resource."
+        },
+        {
+          "id": "eipalloc-078197decd6e8a0ef",
+          "error": "An error occurred (AuthFailure) when calling the ReleaseAddress operation: You do not have permission to access the specified resource."
+        }
+      ],
+      "skipped": [
+        {
+          "id": "eipalloc-042e9835745528646",
+          "reason": "already_deleted"
+        }
+      ]
+    },
+    "internet_gateways": {
+      "deleted": [
+        "igw-010f63b6728db2945",
+        "igw-051b8c18e8f84fc7f",
+        "igw-09b42de500619567c"
+      ],
+      "failed": [],
+      "skipped": []
+    },
+    "subnets": {
+      "deleted": [
+        "subnet-0fabe97167898925e",
+        "subnet-0ba5c2b3f14f4c341",
+        "subnet-041d01b7d2a04d17f",
+        "subnet-0ec041ddd165738c4",
+        "subnet-0af0764522c94b16b"
+      ],
+      "failed": [
+        {
+          "id": "subnet-0d5b88f1c4b2bdf3c",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSubnet operation: The subnet 'subnet-0d5b88f1c4b2bdf3c' has dependencies and cannot be deleted."
+        },
+        {
+          "id": "subnet-0dd347e22665e6b46",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSubnet operation: The subnet 'subnet-0dd347e22665e6b46' has dependencies and cannot be deleted."
+        }
+      ],
+      "skipped": []
+    },
+    "security_groups": {
+      "deleted": [
+        "sg-015b8d444b33a321d",
+        "sg-0a5f3b4c8b04335b2",
+        "sg-043112e82d4b56f80"
+      ],
+      "failed": [
+        {
+          "id": "sg-042b1703bc10f8599",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSecurityGroup operation: resource sg-042b1703bc10f8599 has a dependent object"
+        },
+        {
+          "id": "sg-0d4c397545abd6496",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSecurityGroup operation: resource sg-0d4c397545abd6496 has a dependent object"
+        },
+        {
+          "id": "sg-02ead8655f7598555",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSecurityGroup operation: resource sg-02ead8655f7598555 has a dependent object"
+        },
+        {
+          "id": "sg-0077a06f7e572d8ac",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSecurityGroup operation: resource sg-0077a06f7e572d8ac has a dependent object"
+        },
+        {
+          "id": "sg-016cbb482539c0a37",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSecurityGroup operation: resource sg-016cbb482539c0a37 has a dependent object"
+        }
+      ],
+      "skipped": []
+    },
+    "vpcs": {
+      "deleted": [
+        "vpc-039c08cf088226b07"
+      ],
+      "failed": [
+        {
+          "id": "vpc-0545692b0d032fcfa",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteVpc operation: The vpc 'vpc-0545692b0d032fcfa' has dependencies and cannot be deleted."
+        }
+      ],
+      "skipped": []
+    },
+    "ecr": {
+      "deleted": [
+        "fridge-stats-api",
+        "fridge-stats-ui",
+        "fru-api"
+      ],
+      "failed": [],
+      "skipped": []
+    },
+    "s3": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "fru-terraform-state-744139897900",
+          "reason": "preserve_state_bucket"
+        }
+      ]
+    },
+    "iam": {
+      "deleted": [],
+      "failed": [],
+      "skipped": []
+    }
+  }
+}

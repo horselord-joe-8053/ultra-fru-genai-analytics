@@ -1,0 +1,57 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ${INGRESS_NAME}
+  namespace: ${NAMESPACE}
+  annotations:
+    # NGINX Ingress (cloud-agnostic routing)
+    # No rewrite needed - paths match exactly
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "${CORS_ORIGIN}"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+spec:
+  ingressClassName: fru-nginx-cls
+  rules:
+  # INGRESS_HOST_PLACEHOLDER - will be replaced or removed based on INGRESS_HOST value
+  - host: ${INGRESS_HOST}
+    http:
+      paths:
+      - path: /query
+        pathType: Prefix
+        backend:
+          service:
+            name: fru-api
+            port:
+              number: 80
+      - path: /query/stream
+        pathType: Prefix
+        backend:
+          service:
+            name: fru-api
+            port:
+              number: 80
+      - path: /analytics
+        pathType: Prefix
+        backend:
+          service:
+            name: fru-api
+            port:
+              number: 80
+      - path: /health
+        pathType: Exact
+        backend:
+          service:
+            name: fru-api
+            port:
+              number: 80
+      - path: /version
+        pathType: Exact
+        backend:
+          service:
+            name: fru-api
+            port:
+              number: 80
+

@@ -1,0 +1,195 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fru-api
+  namespace: ${NAMESPACE}
+  labels:
+    app: fru-api
+    component: backend
+spec:
+  replicas: ${BACKEND_KUBE_REPLICA_COUNT}
+  # Deployment strategy: Terminate old pods before creating new ones to prevent resource contention
+  # maxSurge: 0 - Don't create new pods until old ones are terminated (prevents memory/CPU exhaustion)
+  # maxUnavailable: 1 - Allow 1 pod to be unavailable during update (maintains service availability)
+  # Note: BACKEND_KUBE_REPLICA_COUNT can be set via environment variable (e.g., in .env) or Terraform output (defaults to 2)
+  # This ensures old pods are deleted before new ones are created, preventing "Insufficient memory" errors
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: fru-api
+  template:
+    metadata:
+      labels:
+        app: fru-api
+        component: backend
+    spec:
+      # DNS configuration for Fargate pods to resolve VPC DNS
+      # EKS Fargate pods need VPC DNS resolver to resolve RDS/Aurora endpoints
+      # Use Default policy to use VPC DNS directly (like ECS tasks do)
+      # This bypasses CoreDNS which may not be available in Fargate
+      dnsPolicy: Default
+      dnsConfig:
+        nameservers:
+        - "169.254.169.253"  # VPC DNS resolver (required for RDS/Aurora endpoint resolution)
+        searches:
+        - default.svc.cluster.local
+        - svc.cluster.local
+        - cluster.local
+        options:
+        - name: ndots
+          value: "2"
+        - name: edns0
+      containers:
+      - name: fru-api
+        image: ${CONTAINER_IMAGE}
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 5000
+          protocol: TCP
+        env:
+        # Database configuration
+        - name: PGHOST
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: pghost
+        - name: PGPORT
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: pgport
+        - name: PGDATABASE
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: pgdatabase
+        - name: PGUSER
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: pguser
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: fru-secrets
+              key: db-password
+        # AWS/Bedrock configuration
+        - name: AWS_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: aws-region
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: fru-secrets
+              key: aws-access-key-id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: fru-secrets
+              key: aws-secret-access-key
+        - name: AWS_BEDROCK_INFERENCE_PROFILE_ID
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: aws-bedrock-inference-profile-id
+        - name: AWS_BEDROCK_MODEL_ID
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: aws-bedrock-model-id
+        # OpenAI configuration
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: fru-secrets
+              key: openai-api-key
+        - name: OPENAI_EMBED_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: openai-embed-model
+              optional: true
+        # Optional feature flags
+        - name: USE_AGENT_QUERY
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: use-agent-query
+              optional: true
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: log-level
+              optional: true
+        - name: ENABLE_ANALYTICS_SCHEDULER
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: enable-analytics-scheduler
+              optional: true
+        - name: ANALYTICS_SCHEDULER_INTERVAL_SECONDS
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: analytics-scheduler-interval-seconds
+              optional: true
+        - name: DELTA_TABLE_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: delta-table-path
+              optional: true
+        - name: CONTAINER_TYPE
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: container-type
+              optional: true
+        - name: DELTA_LAKE_PACKAGE
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: delta-lake-package
+              optional: true
+        - name: ALLOWED_ORIGINS
+          valueFrom:
+            configMapKeyRef:
+              name: fru-config
+              key: allowed-origins
+        # Container image version (for /version endpoint)
+        - name: CONTAINER_IMAGE
+          value: ${CONTAINER_IMAGE}
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      # Service account for IAM role (if using IRSA)
+      # serviceAccountName: fru-api-sa
+

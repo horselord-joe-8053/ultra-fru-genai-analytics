@@ -1,0 +1,161 @@
+{
+  "metadata": {
+    "account_id": "744139897900",
+    "profile": "admin",
+    "region": "us-east-1",
+    "timestamp": "2026-01-29T19:40:35.503461",
+    "total_resources": 15
+  },
+  "results": {
+    "ec2": {
+      "instances": [],
+      "vpcs": [
+        {
+          "region": "us-east-1",
+          "id": "vpc-0545692b0d032fcfa",
+          "cidr": "10.0.0.0/16",
+          "state": "available"
+        }
+      ],
+      "subnets": [
+        {
+          "region": "us-east-1",
+          "id": "subnet-0d5b88f1c4b2bdf3c",
+          "vpc_id": "vpc-0545692b0d032fcfa",
+          "cidr": "10.0.11.0/24",
+          "availability_zone": "us-east-1b"
+        },
+        {
+          "region": "us-east-1",
+          "id": "subnet-0dd347e22665e6b46",
+          "vpc_id": "vpc-0545692b0d032fcfa",
+          "cidr": "10.0.10.0/24",
+          "availability_zone": "us-east-1a"
+        }
+      ],
+      "security_groups": [
+        {
+          "region": "us-east-1",
+          "id": "sg-042b1703bc10f8599",
+          "name": "fru-dev-vpc-endpoint-sg",
+          "vpc_id": "vpc-0545692b0d032fcfa"
+        },
+        {
+          "region": "us-east-1",
+          "id": "sg-02ead8655f7598555",
+          "name": "fru-dev-eks-nodes-sg",
+          "vpc_id": "vpc-0545692b0d032fcfa"
+        },
+        {
+          "region": "us-east-1",
+          "id": "sg-016cbb482539c0a37",
+          "name": "fru-dev-eks-cluster-sg",
+          "vpc_id": "vpc-0545692b0d032fcfa"
+        }
+      ],
+      "internet_gateways": [],
+      "nat_gateways": [],
+      "elastic_ips": [],
+      "network_interfaces": [
+        {
+          "region": "us-east-1",
+          "id": "eni-0af41e9d8b084f0d3",
+          "status": "in-use",
+          "vpc_id": "vpc-0545692b0d032fcfa",
+          "subnet_id": "subnet-0d5b88f1c4b2bdf3c",
+          "attachment_id": "ela-attach-04fc51a5d84c05f6f"
+        },
+        {
+          "region": "us-east-1",
+          "id": "eni-026128bf599d05257",
+          "status": "in-use",
+          "vpc_id": "vpc-0545692b0d032fcfa",
+          "subnet_id": "subnet-0dd347e22665e6b46",
+          "attachment_id": "ela-attach-0c720c50e58fc23bb"
+        }
+      ],
+      "vpc_endpoints": [
+        {
+          "region": "us-east-1",
+          "id": "vpce-0382b4ac2e50794a0",
+          "type": "Interface",
+          "state": "available",
+          "vpc_id": "vpc-0545692b0d032fcfa"
+        }
+      ]
+    },
+    "s3": {
+      "buckets": [
+        {
+          "name": "fru-terraform-state-744139897900",
+          "creation_date": "2025-12-14T23:06:38+00:00"
+        }
+      ]
+    },
+    "ecs": {
+      "clusters": [],
+      "task_definitions": []
+    },
+    "eks": {
+      "clusters": []
+    },
+    "rds": {
+      "instances": [],
+      "aurora_clusters": []
+    },
+    "elb": {
+      "load_balancers": []
+    },
+    "lambda": {
+      "functions": []
+    },
+    "api_gateway": {
+      "rest_apis": []
+    },
+    "cloudfront": {
+      "distributions": []
+    },
+    "ecr": {
+      "repositories": []
+    },
+    "iam": {
+      "roles": [],
+      "policies": []
+    },
+    "secrets_manager": {
+      "secrets": [
+        {
+          "region": "us-east-1",
+          "name": "fru/dev/aurora-db-password",
+          "arn": "arn:aws:secretsmanager:us-east-1:744139897900:secret:fru/dev/aurora-db-password-XrR8i7"
+        },
+        {
+          "region": "us-east-1",
+          "name": "fru/dev/openai-api-key",
+          "arn": "arn:aws:secretsmanager:us-east-1:744139897900:secret:fru/dev/openai-api-key-0lcEk4"
+        },
+        {
+          "region": "us-east-1",
+          "name": "fru/dev/aurora-db-username",
+          "arn": "arn:aws:secretsmanager:us-east-1:744139897900:secret:fru/dev/aurora-db-username-wKIxX2"
+        },
+        {
+          "region": "us-east-1",
+          "name": "fru/dev/aurora-db-password-plain",
+          "arn": "arn:aws:secretsmanager:us-east-1:744139897900:secret:fru/dev/aurora-db-password-plain-KtZ7i8"
+        },
+        {
+          "region": "us-east-1",
+          "name": "fru/dev/openai-api-key-plain",
+          "arn": "arn:aws:secretsmanager:us-east-1:744139897900:secret:fru/dev/openai-api-key-plain-mQ8HZ8"
+        }
+      ]
+    },
+    "sqs": {
+      "queues": []
+    },
+    "sns": {
+      "topics": []
+    }
+  }
+}

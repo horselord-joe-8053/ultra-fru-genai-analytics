@@ -1,0 +1,115 @@
+{
+  "metadata": {
+    "account_id": "744139897900",
+    "profile": "admin",
+    "region": "us-east-1",
+    "timestamp": "2026-01-11T00:16:55.773690",
+    "total_resources": 8
+  },
+  "results": {
+    "ec2": {
+      "instances": [],
+      "vpcs": [
+        {
+          "region": "us-east-1",
+          "id": "vpc-0545692b0d032fcfa",
+          "cidr": "10.0.0.0/16",
+          "state": "available"
+        }
+      ],
+      "subnets": [
+        {
+          "region": "us-east-1",
+          "id": "subnet-0d5b88f1c4b2bdf3c",
+          "vpc_id": "vpc-0545692b0d032fcfa",
+          "cidr": "10.0.11.0/24",
+          "availability_zone": "us-east-1b"
+        },
+        {
+          "region": "us-east-1",
+          "id": "subnet-0dd347e22665e6b46",
+          "vpc_id": "vpc-0545692b0d032fcfa",
+          "cidr": "10.0.10.0/24",
+          "availability_zone": "us-east-1a"
+        }
+      ],
+      "security_groups": [
+        {
+          "region": "us-east-1",
+          "id": "sg-0d4c397545abd6496",
+          "name": "fru-dev-ecs-tasks-sg",
+          "vpc_id": "vpc-0545692b0d032fcfa"
+        }
+      ],
+      "internet_gateways": [
+        {
+          "region": "us-east-1",
+          "id": "igw-051b8c18e8f84fc7f",
+          "state": "available"
+        }
+      ],
+      "nat_gateways": [],
+      "elastic_ips": []
+    },
+    "s3": {
+      "buckets": [
+        {
+          "name": "fru-terraform-state-744139897900",
+          "creation_date": "2025-12-14T23:06:38+00:00"
+        }
+      ]
+    },
+    "ecs": {
+      "clusters": [
+        {
+          "region": "us-east-1",
+          "name": "fru-dev-cluster",
+          "arn": "arn:aws:ecs:us-east-1:744139897900:cluster/fru-dev-cluster"
+        }
+      ],
+      "task_definitions": []
+    },
+    "eks": {
+      "clusters": []
+    },
+    "rds": {
+      "instances": [],
+      "aurora_clusters": []
+    },
+    "elb": {
+      "load_balancers": []
+    },
+    "lambda": {
+      "functions": []
+    },
+    "api_gateway": {
+      "rest_apis": []
+    },
+    "cloudfront": {
+      "distributions": []
+    },
+    "ecr": {
+      "repositories": [
+        {
+          "region": "us-east-1",
+          "name": "fru-api",
+          "registry_id": "744139897900",
+          "uri": "744139897900.dkr.ecr.us-east-1.amazonaws.com/fru-api"
+        }
+      ]
+    },
+    "iam": {
+      "roles": [],
+      "policies": []
+    },
+    "secrets_manager": {
+      "secrets": []
+    },
+    "sqs": {
+      "queues": []
+    },
+    "sns": {
+      "topics": []
+    }
+  }
+}

@@ -1,0 +1,212 @@
+{
+  "metadata": {
+    "account_id": "744139897900",
+    "profile": "admin",
+    "region": "us-east-1",
+    "timestamp": "2026-02-01T01:15:17.539699",
+    "result_json_path": "/Users/jameswang9311/Documents/My_PJs/fru-genai-analytics-all/orchestration/aws/cli/resource-removal/../resource-check/results/aws-fru-260201_003036-result.json",
+    "dry_run": false,
+    "keep_state_bucket": true
+  },
+  "summary": {
+    "total_deleted": 16,
+    "total_failed": 11,
+    "total_skipped": 8
+  },
+  "steps": {
+    "cloudfront": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "EUBW12QB4ZR3R",
+          "reason": "already_deleted"
+        }
+      ]
+    },
+    "eks": {
+      "deleted": [],
+      "failed": [],
+      "skipped": []
+    },
+    "ecs": {
+      "deleted": [
+        "fru-dev-cluster"
+      ],
+      "failed": [],
+      "skipped": []
+    },
+    "rds": {
+      "deleted": [],
+      "failed": [],
+      "skipped": []
+    },
+    "elb": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "fru-dev-alb",
+          "reason": "already_deleted"
+        }
+      ]
+    },
+    "ec2_instances": {
+      "deleted": [],
+      "failed": [],
+      "skipped": []
+    },
+    "nat_gateways": {
+      "deleted": [
+        "nat-0ced79d92f7307302",
+        "nat-0a8078cd4d005fc60"
+      ],
+      "failed": [],
+      "skipped": []
+    },
+    "elastic_ips": {
+      "deleted": [
+        "eipalloc-0065c5f98e3fabd15",
+        "eipalloc-02bfb112ce503de9a"
+      ],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "eipalloc-0ca848fb7aed3ee81",
+          "reason": "already_deleted"
+        }
+      ]
+    },
+    "internet_gateways": {
+      "deleted": [
+        "igw-0629e7283f93d05e5"
+      ],
+      "failed": [],
+      "skipped": []
+    },
+    "network_interfaces": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "eni-0af41e9d8b084f0d3",
+          "reason": "pending_aws_elb_cleanup"
+        },
+        {
+          "id": "eni-026128bf599d05257",
+          "reason": "pending_aws_elb_cleanup"
+        },
+        {
+          "id": "eni-00b4e68703a4f0e72",
+          "reason": "pending_aws_elb_cleanup"
+        },
+        {
+          "id": "eni-045cb9263010678ed",
+          "reason": "pending_aws_elb_cleanup"
+        }
+      ]
+    },
+    "subnets": {
+      "deleted": [
+        "subnet-001c334971f778f7a",
+        "subnet-0814601ab30dbfb6f"
+      ],
+      "failed": [
+        {
+          "id": "subnet-0d5b88f1c4b2bdf3c",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSubnet operation: The subnet 'subnet-0d5b88f1c4b2bdf3c' has dependencies and cannot be deleted."
+        },
+        {
+          "id": "subnet-04259caec8d9570a0",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSubnet operation: The subnet 'subnet-04259caec8d9570a0' has dependencies and cannot be deleted."
+        },
+        {
+          "id": "subnet-0dd347e22665e6b46",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSubnet operation: The subnet 'subnet-0dd347e22665e6b46' has dependencies and cannot be deleted."
+        },
+        {
+          "id": "subnet-0e8f1b492a71535d0",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSubnet operation: The subnet 'subnet-0e8f1b492a71535d0' has dependencies and cannot be deleted."
+        }
+      ],
+      "skipped": []
+    },
+    "security_groups": {
+      "deleted": [
+        "sg-04491900b05953777",
+        "sg-0f3de505cfa84ee18",
+        "sg-0ddfdb3a230099b72"
+      ],
+      "failed": [
+        {
+          "id": "sg-042b1703bc10f8599",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSecurityGroup operation: resource sg-042b1703bc10f8599 has a dependent object"
+        },
+        {
+          "id": "sg-050561cdeedad409f",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSecurityGroup operation: resource sg-050561cdeedad409f has a dependent object"
+        },
+        {
+          "id": "sg-02ead8655f7598555",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSecurityGroup operation: resource sg-02ead8655f7598555 has a dependent object"
+        },
+        {
+          "id": "sg-0c2fb4250b40330fa",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSecurityGroup operation: resource sg-0c2fb4250b40330fa has a dependent object"
+        },
+        {
+          "id": "sg-016cbb482539c0a37",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteSecurityGroup operation: resource sg-016cbb482539c0a37 has a dependent object"
+        }
+      ],
+      "skipped": []
+    },
+    "vpc_endpoints": {
+      "deleted": [
+        "vpce-0382b4ac2e50794a0",
+        "vpce-05bfbb192165b7f13"
+      ],
+      "failed": [],
+      "skipped": []
+    },
+    "vpcs": {
+      "deleted": [],
+      "failed": [
+        {
+          "id": "vpc-0545692b0d032fcfa",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteVpc operation: The vpc 'vpc-0545692b0d032fcfa' has dependencies and cannot be deleted."
+        },
+        {
+          "id": "vpc-066847e7b4b16e0af",
+          "error": "An error occurred (DependencyViolation) when calling the DeleteVpc operation: The vpc 'vpc-066847e7b4b16e0af' has dependencies and cannot be deleted."
+        }
+      ],
+      "skipped": []
+    },
+    "ecr": {
+      "deleted": [
+        "fru-api"
+      ],
+      "failed": [],
+      "skipped": []
+    },
+    "s3": {
+      "deleted": [
+        "fru-dev-analytics-data-744139897900",
+        "fru-dev-frontend-ecs-744139897900"
+      ],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "fru-terraform-state-744139897900",
+          "reason": "preserve_state_bucket"
+        }
+      ]
+    },
+    "iam": {
+      "deleted": [],
+      "failed": [],
+      "skipped": []
+    }
+  }
+}

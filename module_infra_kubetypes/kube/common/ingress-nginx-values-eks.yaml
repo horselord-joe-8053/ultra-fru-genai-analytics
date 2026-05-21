@@ -1,0 +1,21 @@
+# NGINX Ingress Controller Helm values for EKS (AWS)
+# Controller Service type LoadBalancer provisions an NLB via the in-tree AWS cloud provider.
+# The NLB hostname is written to Ingress status by the NGINX controller.
+
+controller:
+  service:
+    type: LoadBalancer
+    annotations:
+      # Use Network Load Balancer (EKS in-tree provider)
+      service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+      # Internet-facing so CloudFront can reach it
+      service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+  ingressClassResource:
+    name: fru-nginx-cls
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

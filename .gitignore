@@ -20,6 +20,9 @@ env/
 venv/
 ENV/
 .venv
+# Exception: orchestration common env scripts (load-env.sh etc.) — do track
+!orchestration/common/env/
+!orchestration/common/env/**
 
 # Node/React
 node_modules/
@@ -37,18 +40,52 @@ build/
 *~
 
 # Generated files
+antigravity_gen/
 cursor_gen/
+study/
+tmp/
+data/analytics/backup_analytics_summary.json
+# Delta Lake tables (ignore directory and all subdirectories/contents)
+data/delta/
+data/delta/**
 
 # Logs
 *.log
 logs/
 
+# Test results
+test/test_results/
+
+# AWS resource removal results (generated JSON)
+run_scripts/main_application_scripts/aws/shared/cli/resource-removal/results/
+
 # AWS/Terraform
 .terraform/
 *.tfstate
 *.tfstate.backup
-.terraform.lock.hcl
+# Note: .terraform.lock.hcl should be committed (removed from gitignore)
+# to ensure consistent provider versions across team members
+.terragrunt-cache/
+temp_terra_gen/
 
 # PostgreSQL
 pgdata/
 
+.env.bak
+
+# Test cache files (local, should not be committed)
+test/cache_files/
+.env.bak*
+data/raw/*.backup*
+
+# Backup files
+.env.example.bk1
+
+# Kubernetes generated files (may contain secrets; do not commit)
+infra/k8s/generated/
+module_infra_kubetypes/kube/common/generated/
+
+# Deployment state files (Phase 5: Deployment State Tracking)
+.frontend-version.txt
+.cloudfront-invalidations.log
+.deployment-state.json

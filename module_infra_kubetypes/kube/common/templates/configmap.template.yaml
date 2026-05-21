@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fru-config
+  namespace: ${NAMESPACE}
+data:
+  # Database configuration (from Terraform outputs)
+  # These should be set from Terraform outputs or .env
+  # Note: Default values are set in kubernetes-manifests.sh before envsubst runs
+  pghost: "${PGHOST}"
+  pgport: "5432"
+  pgdatabase: "fru_db"
+  pguser: "${PGUSER}"
+  
+  # AWS configuration
+  aws-region: "${AWS_REGION}"
+  aws-bedrock-inference-profile-id: "${AWS_BEDROCK_INFERENCE_PROFILE_ID}"
+  aws-bedrock-model-id: "${AWS_BEDROCK_MODEL_ID}"
+  
+  # OpenAI configuration
+  openai-embed-model: "${OPENAI_EMBED_MODEL}"
+  
+  # Optional feature flags
+  use-agent-query: "${USE_AGENT_QUERY}"
+  log-level: "${LOG_LEVEL}"
+  enable-analytics-scheduler: "${ENABLE_ANALYTICS_SCHEDULER}"
+  analytics-scheduler-interval-seconds: "${ANALYTICS_SCHEDULER_INTERVAL_SECONDS}"
+  
+  # Spark batch analytics (required when ENABLE_ANALYTICS_SCHEDULER=true)
+  delta-table-path: "${DELTA_TABLE_PATH}"
+  container-type: "${CONTAINER_TYPE}"
+  delta-lake-package: "${DELTA_LAKE_PACKAGE}"
+  
+  # CORS configuration
+  allowed-origins: "${ALLOWED_ORIGINS}"
+

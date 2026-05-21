@@ -1,0 +1,89 @@
+services:
+  db:
+    image: ankane/pgvector:latest
+    container_name: fru_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PGUSER:-postgres}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-postgres}
+      POSTGRES_DB: ${PGDATABASE:-fru_db}
+    ports:
+      - "55432:5432"
+    volumes:
+      # persistent local DB
+      - ./pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 8s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ../../
+      dockerfile: ./module_app_core/pack_with_docker/Dockerfile.api
+      args:
+        # Pass Spark and Hadoop versions from .env (source of truth)
+        # Defaults ensure builds work even if .env variables are missing
+        SPARK_VERSION: ${SPARK_VERSION:-4.0.1}
+        HADOOP_VERSION: ${HADOOP_VERSION:-3}
+    container_name: fru_api
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGUSER: ${PGUSER:-postgres}
+      PGPASSWORD: ${PGPASSWORD:-postgres}
+      PGDATABASE: ${PGDATABASE:-fru_db}
+
+      # OpenAI embeddings
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_EMBED_MODEL: ${OPENAI_EMBED_MODEL:-text-embedding-3-small}
+
+      # Bedrock (uses AWS profile for credentials)
+      AWS_PROFILE: ${AWS_PROFILE:-admin}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      # Primary: Inference Profile ID (for Claude 3.5)
+      AWS_BEDROCK_INFERENCE_PROFILE_ID: ${AWS_BEDROCK_INFERENCE_PROFILE_ID:-}
+      # Fallback: Model ID (for ON_DEMAND models)
+      AWS_BEDROCK_MODEL_ID: ${AWS_BEDROCK_MODEL_ID:-}
+      
+      # Claude API (for local dev - mimics Bedrock)
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
+
+      # Application configuration
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+
+      # Optional: Feature flags (single source of truth: .env file)
+      USE_AGENT_QUERY: ${USE_AGENT_QUERY}
+      USE_AGENT_QUERY_PERCENTAGE: ${USE_AGENT_QUERY_PERCENTAGE:-0}
+      USE_AGENT_QUERY_WHITELIST: ${USE_AGENT_QUERY_WHITELIST:-}
+      
+      # Analytics scheduler configuration
+      ENABLE_ANALYTICS_SCHEDULER: ${ENABLE_ANALYTICS_SCHEDULER:-false}
+      ANALYTICS_SCHEDULER_INTERVAL_SECONDS: ${ANALYTICS_SCHEDULER_INTERVAL_SECONDS:-}
+      SPARK_HOME: ${SPARK_HOME:-/opt/spark}
+      DELTA_TABLE_PATH: ${DELTA_TABLE_PATH:-data/delta/fru_sales}
+      DELTA_LAKE_PACKAGE: ${DELTA_LAKE_PACKAGE}
+      
+      # Batch analytics limits
+      NUM_FOR_BATCH_ANALYTICS_TOP_SPARK_COMPUTE: ${NUM_FOR_BATCH_ANALYTICS_TOP_SPARK_COMPUTE:-20}
+      NUM_FOR_BATCH_ANALYTICS_TOP_QUERY: ${NUM_FOR_BATCH_ANALYTICS_TOP_QUERY:-8}
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    ports:
+      - "${LOCAL_SERVER_PORT}:5000"
+    
+    volumes:
+      # Mount AWS credentials so container can access AWS_PROFILE
+      - ~/.aws:/root/.aws:ro
+      # Mount backend code for development (changes picked up on restart)
+      - ../../module_app_core/backend:/app/backend:ro
+      # Mount spark_jobs for development (changes picked up on restart)
+      - ../../module_app_core/spark_jobs:/app/spark_jobs:ro
+      # Mount data directory for Spark jobs (Delta tables)
+      - ../../module_app_core/data:/app/data:rw

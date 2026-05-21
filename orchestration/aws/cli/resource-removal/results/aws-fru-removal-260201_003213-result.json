@@ -1,0 +1,268 @@
+{
+  "metadata": {
+    "account_id": "744139897900",
+    "profile": "admin",
+    "region": "us-east-1",
+    "timestamp": "2026-02-01T00:32:13.083172",
+    "result_json_path": "/Users/jameswang9311/Documents/My_PJs/fru-genai-analytics-all/orchestration/aws/cli/resource-removal/../resource-check/results/aws-fru-260201_003036-result.json",
+    "dry_run": true,
+    "keep_state_bucket": true
+  },
+  "summary": {
+    "total_deleted": 0,
+    "total_failed": 0,
+    "total_skipped": 38
+  },
+  "steps": {
+    "cloudfront": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "EUBW12QB4ZR3R",
+          "reason": "dry_run"
+        }
+      ]
+    },
+    "eks": {
+      "deleted": [],
+      "failed": [],
+      "skipped": []
+    },
+    "ecs": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "fru-dev-cluster",
+          "reason": "dry_run"
+        }
+      ]
+    },
+    "rds": {
+      "deleted": [],
+      "failed": [],
+      "skipped": []
+    },
+    "elb": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "fru-dev-alb",
+          "reason": "dry_run"
+        }
+      ]
+    },
+    "ec2_instances": {
+      "deleted": [],
+      "failed": [],
+      "skipped": []
+    },
+    "nat_gateways": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "nat-0ced79d92f7307302",
+          "reason": "dry_run"
+        },
+        {
+          "id": "nat-0a8078cd4d005fc60",
+          "reason": "dry_run"
+        }
+      ]
+    },
+    "elastic_ips": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "eipalloc-0065c5f98e3fabd15",
+          "reason": "dry_run"
+        },
+        {
+          "id": "eipalloc-0ca848fb7aed3ee81",
+          "reason": "dry_run"
+        },
+        {
+          "id": "eipalloc-02bfb112ce503de9a",
+          "reason": "dry_run"
+        }
+      ]
+    },
+    "internet_gateways": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "igw-0629e7283f93d05e5",
+          "reason": "dry_run"
+        }
+      ]
+    },
+    "network_interfaces": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "eni-0af41e9d8b084f0d3",
+          "reason": "dry_run"
+        },
+        {
+          "id": "eni-026128bf599d05257",
+          "reason": "dry_run"
+        },
+        {
+          "id": "eni-0247584d3e718a89c",
+          "reason": "dry_run"
+        },
+        {
+          "id": "eni-045cb9263010678ed",
+          "reason": "dry_run"
+        },
+        {
+          "id": "eni-0e47d738fadbc248c",
+          "reason": "dry_run"
+        },
+        {
+          "id": "eni-023af092f0322bbe5",
+          "reason": "dry_run"
+        },
+        {
+          "id": "eni-00b4e68703a4f0e72",
+          "reason": "dry_run"
+        }
+      ]
+    },
+    "subnets": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "subnet-0d5b88f1c4b2bdf3c",
+          "reason": "dry_run"
+        },
+        {
+          "id": "subnet-04259caec8d9570a0",
+          "reason": "dry_run"
+        },
+        {
+          "id": "subnet-001c334971f778f7a",
+          "reason": "dry_run"
+        },
+        {
+          "id": "subnet-0dd347e22665e6b46",
+          "reason": "dry_run"
+        },
+        {
+          "id": "subnet-0e8f1b492a71535d0",
+          "reason": "dry_run"
+        },
+        {
+          "id": "subnet-0814601ab30dbfb6f",
+          "reason": "dry_run"
+        }
+      ]
+    },
+    "security_groups": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "sg-042b1703bc10f8599",
+          "reason": "dry_run"
+        },
+        {
+          "id": "sg-050561cdeedad409f",
+          "reason": "dry_run"
+        },
+        {
+          "id": "sg-02ead8655f7598555",
+          "reason": "dry_run"
+        },
+        {
+          "id": "sg-0c2fb4250b40330fa",
+          "reason": "dry_run"
+        },
+        {
+          "id": "sg-04491900b05953777",
+          "reason": "dry_run"
+        },
+        {
+          "id": "sg-0f3de505cfa84ee18",
+          "reason": "dry_run"
+        },
+        {
+          "id": "sg-016cbb482539c0a37",
+          "reason": "dry_run"
+        },
+        {
+          "id": "sg-0ddfdb3a230099b72",
+          "reason": "dry_run"
+        }
+      ]
+    },
+    "vpc_endpoints": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "vpce-0382b4ac2e50794a0",
+          "reason": "dry_run"
+        },
+        {
+          "id": "vpce-05bfbb192165b7f13",
+          "reason": "dry_run"
+        }
+      ]
+    },
+    "vpcs": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "vpc-0545692b0d032fcfa",
+          "reason": "dry_run"
+        },
+        {
+          "id": "vpc-066847e7b4b16e0af",
+          "reason": "dry_run"
+        }
+      ]
+    },
+    "ecr": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "fru-api",
+          "reason": "dry_run"
+        }
+      ]
+    },
+    "s3": {
+      "deleted": [],
+      "failed": [],
+      "skipped": [
+        {
+          "id": "fru-dev-analytics-data-744139897900",
+          "reason": "dry_run"
+        },
+        {
+          "id": "fru-dev-frontend-ecs-744139897900",
+          "reason": "dry_run"
+        },
+        {
+          "id": "fru-terraform-state-744139897900",
+          "reason": "preserve_state_bucket"
+        }
+      ]
+    },
+    "iam": {
+      "deleted": [],
+      "failed": [],
+      "skipped": []
+    }
+  }
+}
