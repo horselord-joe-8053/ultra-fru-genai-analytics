@@ -1,0 +1,251 @@
+---
+description: >-
+  Filename **mrkd-markdown-authoring.mdc**. Keyword **mrkd** (Markdown): portable **.md** / **.mdc**
+  authoring — hierarchical TOC (hyperlink bullets), README section emojis, three-level HTML heading palette,
+  fenced code, HTML comparison tables, Mermaid diagrams. Include **mrkd** or **@** this rule when editing Markdown or rule bodies.
+globs:
+  - "**/*.md"
+  - "**/*.mdc"
+alwaysApply: true
+---
+
+<h1 id="gma-title" style="color:#0d47a1;font-size:1.5em;font-weight:700;border-bottom:2px solid #90caf9;padding-bottom:0.25em;margin-top:0">Generic Markdown authoring (portable)</h1>
+
+Copy into any repo’s **`.cursor/rules/`** for consistent, **scannable** long-form **`*.md`** and **`.mdc`** (YAML frontmatter + Markdown body).
+
+**When to apply:** Whenever you **create, edit, or review** a **`*.md`** file or a **`.mdc`** rule whose body is Markdown.
+
+**Trigger:** This rule has **`alwaysApply: true`** in this workspace so it **stays in agent context** by default—apply this spec to **all** new or edited **`*.md`** / **`.mdc`** files here. You can still include **`mrkd`** or **@**‑mention **`mrkd-markdown-authoring`** to stress the rule for a specific edit. (Cursor does not auto-enforce formatting in the editor; consistency depends on following this rule when authoring.)
+
+**Portable copy:** You can copy **this single rule** into another repo’s **`.cursor/rules/`**; it already includes outline conventions plus **tables** and **Mermaid** (section 6).
+
+<h2 id="gma-outline" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">Document outline</h2>
+
+1. [Non-negotiable: hierarchy, numbers, size, color](#gma-non-negotiable) — **read first** for `.md` / `.mdc` output.
+2. [Structure principles](#gma-structure) — depth, section length.
+3. [Document outline section](#gma-outline-section) — TOC pattern.
+4. [Markdown heading syntax](#gma-md-headings) — `#` / `##` / `###` baseline.
+5. [HTML headings for color and size](#gma-html-headings) — when and how.
+6. [Visual aids: tables and Mermaid](#gma-visual-aids) — HTML tables, diagrams; patterns live in this rule.
+    6.1 [HTML comparison tables](#gma-tables) — layout, badges, exemplar.
+    6.2 [Mermaid diagrams](#gma-mermaid) — layout, colors, font, snippet.
+7. [Colored inline text](#gma-inline-color) — badges, restraint.
+8. [Fenced code blocks](#gma-fences) — language tags.
+9. [Self-check before saving](#gma-self-check) — merge checklist.
+
+---
+
+<h2 id="gma-non-negotiable" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">1. Non-negotiable: hierarchy, numbers, size, and color</h2>
+
+Generated or hand-edited **`.md`** and **`.mdc`** bodies (everything below YAML `---` in `.mdc`) **must** make section levels **instantly distinguishable** in preview: **numeration**, **different effective sizes**, and **different title colors** across levels. Do **not** ship flat walls of same-sized gray `##` headings without an outline and without level styling.
+
+**1 — Outline and body numbering (required for multi-section docs)**
+
+- Include **`## Table of Contents`** / **`## Document outline`** (or equivalent) using a **hierarchical bullet list** of **hyperlinks** only—see [Document outline section](#gma-outline-section). **Do not** prefix TOC rows with a **Markdown ordered-list marker** (`1.`, `2.`, …) when the **link label** already carries the section number (that duplicates numeration). Indent with **`  -`** / **`    -`** for subsections.
+- In the **body**, prefer **explicit numbers in major section titles** (e.g. **`## 3. Implementation`**, **`### 3.1 Data model`**) so the doc reads top-to-bottom; numbering lives in the **heading text**, not as a separate TOC list index. Short one-screen notes may omit body numbering **only** if the outline is omitted per the exception below.
+
+**2 — Different sizes (required)**
+
+- Use **at most three levels:** **`#` → `##` → `###`**. Never fake depth with bold lines instead of real headings.
+- **`#`** = document title (one per file, largest). **`##`** = major sections (clearly smaller than `#`). **`###`** = subsections (clearly smaller than `##`). Do not skip levels for the same conceptual depth.
+
+**3 — Different font colors for section titles (required in Cursor-rich previews)**
+
+- Default Markdown **`#` / `##` / `###`** does **not** set custom colors—renderers pick one neutral palette. For **visible color differentiation between levels**, use **HTML headings** with inline `style` **or** the **portable palette** below.
+
+- **Portable default palette** (subtle, high-contrast blues/teals—reuse for every doc unless the repo defines its own):
+
+```html
+<h1 id="doc-title" style="color:#0d47a1;font-size:1.5em;font-weight:700;border-bottom:2px solid #90caf9;padding-bottom:0.25em;margin-top:0">Document title</h1>
+
+<h2 id="major-section" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">2. Major section</h2>
+
+<h3 id="subsection" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">3.1 Subsection</h3>
+```
+
+- **Rules:** set matching **`id="..."`** on every HTML heading used in the outline links; **one palette per file**; do not rainbow-tint body paragraphs—**titles only** unless a callout pattern is documented in-repo.
+
+**4 — `.mdc` rule files**
+
+- After frontmatter, treat the body like any other Markdown spec: **`## Document outline`** first (**bullet** hyperlink TOC per [§3](#gma-outline-section)), then body sections using **number + HTML color/size** so long rules remain scannable in Cursor.
+
+**Exception:** A trivial one-screen note may skip the outline and optional HTML headings; **default** is full hierarchy + outline for anything longer or multi-topic.
+
+---
+
+<h2 id="gma-structure" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">2. Structure principles</h2>
+
+- Organize content into a **clear outline** that follows the reader’s mental model (overview → detail → reference).
+- Prefer **short sections** with descriptive titles over long undifferentiated blocks.
+
+---
+
+<h2 id="gma-outline-section" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">3. Document outline section (for long docs)</h2>
+
+The **first section after the document title** (and optional one-line type/status) should be **`## Table of Contents`** / **`## Document outline`** (pick one name per file and stay consistent).
+
+- **List shape:** **Unordered** Markdown bullets (`-`) at the top level; **indent** subsections with **`  -`** and deeper items with **`    -`**. Every entry is a **`[Title](#anchor)`** hyperlink (optionally with section numbers **inside** the link text, e.g. `[3. Implementation](#implementation)`).
+- **No redundant TOC numeration:** Do **not** use a leading **`1.`** / **`2.`** ordered-list marker **and** the same number inside the link—that renders as duplicated numbering in preview. Use **either** bullets with numbered link labels **or** (rarely) ordered lists with unnumbered link text—not both.
+- **Hierarchy:** Nesting expresses structure; subsection labels such as **`5.1`** belong **in the link text**, not as a second Markdown list index.
+- **Anchors must work:** **`#anchor`** must match the heading slug or explicit **`id`** on HTML headings (prefer explicit **`id`** when titles include emoji or punctuation).
+- **Exception:** Trivial one-screen notes can skip the outline; **default** is a full TOC for anything longer or multi-topic.
+
+<h3 id="gma-readme-emoji" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">3.1 README files (`README.md`)</h3>
+
+- For **repository or package `README.md`**, prefix each **major** section title (top-level body sections—typically **`##`** or styled **`h2`**) with **one professional emoji** that fits the topic (e.g. 🧠 concept, 🧩 architecture, 🔥 analytics, 🦾 integrations, 🏗 deployment).
+- Use the **same emoji** in the **TOC link** and the **body heading**; keep subsections mostly emoji-free unless one icon aids scan (e.g. 📐 diagram).
+- Prefer **clear, restrained** symbols—one emoji per major section, not decorative stacks.
+
+**Example (pattern only — hierarchical hyperlinks, numbers inside links, no `1.` list markers):**
+
+```markdown
+## 📋 Table of Contents
+
+- [🧠 1. Concept](#1-concept)
+- [🧩 2. Architecture Overview](#2-architecture-overview)
+  - [System layers](#system-layers)
+  - [5.1 Data model](#data-model)
+- [🔥 5. Analytics](#5-analytics)
+  - [5.1 Ingest](#51-ingest)
+```
+
+---
+
+<h2 id="gma-md-headings" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">4. Markdown heading syntax</h2>
+
+- Use **`#` / `##` / `###`** so every renderer shows **distinct default sizes** even when HTML styling is stripped.
+- Keep **one consistent scheme** per document (do not mix unrelated palettes with HTML).
+
+---
+
+<h2 id="gma-html-headings" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">5. HTML headings for color and size</h2>
+
+- Use HTML **`<h1>` / `<h2>` / `<h3>`** with **`id`** when you need **color and precise size** in Cursor preview or static sites that allow inline CSS.
+- Prefer the **portable palette** in [Non-negotiable](#gma-non-negotiable).
+
+---
+
+<h2 id="gma-visual-aids" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">6. Visual aids: tables and Mermaid</h2>
+
+Use **HTML tables** and **Mermaid** when they clarify structure—**not** in every doc. Follow **[6.1](#gma-tables)** and **[6.2](#gma-mermaid)** so visuals stay consistent within a file or doc set.
+
+<h3 id="gma-tables" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">6.1 HTML comparison tables</h3>
+
+Use this pattern for comparison and option tables so they stay consistent and easy to scan.
+
+<h4 id="gma-table-visual" style="color:#00695c;font-size:1em;font-weight:600;margin-top:0.75em">6.1.1 Visual and layout</h4>
+
+- **Header row:** Dark blue background, white text (`background:#1565c0;color:white`).
+- **Column headers:** Clear labels; add a small subtitle in `<small>` where helpful (e.g. "where code lives", "where it deploys").
+- **Body rows:** Alternating or strategy-specific background colors (e.g. green `#e8f5e9`, amber `#fff3e0`, red tint `#ffebee`).
+- **Aspect / left column:** Light blue `#e3f2fd` for the "Aspect" or "Strategy" column so it stands out.
+
+<h4 id="gma-table-text" style="color:#00695c;font-size:1em;font-weight:600;margin-top:0.75em">6.1.2 Text and structure</h4>
+
+- **Numeration:** Use ① ② ③ (or 1. 2. 3.) for strategies, options, or aspects.
+- **Bullets:** Use `•` and `<br>` to break multi-item content into short lines.
+- **Badges:**
+  - <span style="background:#c8e6c9;padding:2px 4px">✓</span> (green) for pros / advantages / "yes".
+  - <span style="background:#ffcdd2;padding:2px 4px">⚠</span> (red) for cons / risks / warnings.
+  - <span style="background:#fff9c4;padding:2px 4px">manual</span> (yellow) for manual steps.
+  - <span style="background:#c8e6c9;padding:2px 4px">auto</span> (green) for automatic.
+- **Inline labels:** Use short colored spans to distinguish concepts (e.g. <span style="background:#e3f2fd;padding:1px 3px">branch</span> vs <span style="background:#fff3e0;padding:1px 3px">env</span> for source branch vs target environment).
+- **Recommendation:** Use a small badge like <span style="background:#2e7d32;color:white;padding:1px 4px">recommended</span> for the preferred option.
+
+<h4 id="gma-table-distinguish" style="color:#00695c;font-size:1em;font-weight:600;margin-top:0.75em">6.1.3 Distinguishing concepts</h4>
+
+- When the table mixes **source** (e.g. Git branch, config file) and **target** (e.g. deployment environment):
+  - Add a **legend** above the table: e.g. "**Source branch** = Git branch (where code lives). **Target env** = deployment environment (dev, staging, prod)."
+  - Use **column headers** that say "Source branch(es)" and "Target env (deploy trigger)" (or similar).
+  - In cells, use inline labels (e.g. "branch <code>main</code> → env dev") so branch vs env are visually distinct.
+
+<h4 id="gma-table-exemplar" style="color:#00695c;font-size:1em;font-weight:600;margin-top:0.75em">6.1.4 Exemplar (minimal table)</h4>
+
+Self-contained example (generic criteria × options); copy the pattern, not the cell text.
+
+<table>
+<thead>
+<tr style="background:#1565c0;color:white"><th>Aspect</th><th>Option A</th><th>Option B</th></tr>
+</thead>
+<tbody>
+<tr><td style="background:#e3f2fd">Latency</td><td style="background:#e8f5e9">low</td><td style="background:#fff3e0">higher</td></tr>
+<tr><td style="background:#e3f2fd">Operate cost</td><td style="background:#fff3e0">lower</td><td style="background:#e8f5e9">higher</td></tr>
+</tbody>
+</table>
+
+<h3 id="gma-mermaid" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">6.2 Mermaid diagrams</h3>
+
+Use this style for Mermaid in documentation so diagrams stay consistent, colorful, and easy to read (including in Cursor preview). Example node labels below are **illustrative**—replace with your domain.
+
+<h4 id="gma-mermaid-layout" style="color:#00695c;font-size:1em;font-weight:600;margin-top:0.75em">6.2.1 Layout</h4>
+
+- Prefer **simple flows**:
+  - `graph TD` for top-down flows (e.g. release steps).
+  - `graph LR` for left-to-right flows (e.g. data paths).
+- Keep diagrams focused:
+  - 5–11 nodes per diagram is ideal.
+  - Use multiple diagrams instead of one huge one when needed.
+- For long labels, use `\n` to break lines inside a node (e.g. `Deploy\nto staging`).
+
+<h4 id="gma-mermaid-colors" style="color:#00695c;font-size:1em;font-weight:600;margin-top:0.75em">6.2.2 Colors and shapes</h4>
+
+- Reuse the following **semantic** color mapping (adapt node labels to your domain):
+  - **Blue (`#e3f2fd` + `#1976d2`):** Sources / triggers (e.g. PRs, branches, orchestration entry).
+  - **Orange/amber (`#fff3e0` / `#fff8e1` + `#e65100` / `#ff8f00`):** CI / decision points.
+  - **Green (`#e8f5e9` + `#2e7d32`):** Successful steps and verification.
+  - **Purple (`#ede7f6` + `#5e35b1`):** Staging / intermediate environments.
+  - **Red/pink (`#ffebee` + `#c62828`):** Production, approval, or high-risk steps.
+- Use consistent node shapes:
+  - Rectangles for actions.
+  - Diamonds for decisions (e.g. `{Merge}`).
+
+<h4 id="gma-mermaid-font" style="color:#00695c;font-size:1em;font-weight:600;margin-top:0.75em">6.2.3 Font and sizing</h4>
+
+- Use **`font-size:9px`** for all diagram `style` lines (balances readability with density):
+  - Example: `style A fill:#e3f2fd,stroke:#1976d2,stroke-width:1px,font-size:9px`
+- Use **`stroke-width:1px`** consistently across diagrams in the same document (or doc set).
+
+<h4 id="gma-mermaid-snippets" style="color:#00695c;font-size:1em;font-weight:600;margin-top:0.75em">6.2.4 Style snippets</h4>
+
+**Illustrative** flow (CI/CD-shaped labels); replace nodes with your own domain (e.g. ingest → transform → store).
+
+```mermaid
+graph TD
+  A[PR to main] --> B[CI: lint, unit tests]
+  B --> C{Merge}
+  C --> D[Deploy to dev]
+  D --> E[Verify dev]
+
+  style A fill:#e3f2fd,stroke:#1976d2,stroke-width:1px,font-size:9px
+  style B fill:#fff3e0,stroke:#e65100,stroke-width:1px,font-size:9px
+  style C fill:#fff8e1,stroke:#ff8f00,stroke-width:1px,font-size:9px
+  style D fill:#e8f5e9,stroke:#2e7d32,stroke-width:1px,font-size:9px
+  style E fill:#e8f5e9,stroke:#2e7d32,stroke-width:1px,font-size:9px
+```
+
+---
+
+<h2 id="gma-inline-color" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">7. Colored inline text</h2>
+
+- Use **`<span style="...">`** badges **only** for short labels (warnings, recommended, optional)—same restraint as [table badges](#gma-table-text).
+- Prefer **bold** before color; never rainbow-highlight long paragraphs.
+
+---
+
+<h2 id="gma-fences" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">8. Fenced code blocks</h2>
+
+- Always use a **language tag** on the opening fence: **`bash`**, **`python`**, **`yaml`**, **`json`**, **`text`**, **`mermaid`**, etc.
+- Use **`text`** for logs and mixed snippets. Shell transcripts may use **`$`** / **`#`** prefixes when mimicking a session.
+
+---
+
+<h2 id="gma-self-check" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">9. Self-check before saving</h2>
+
+- [ ] **[Non-negotiable](#gma-non-negotiable)** satisfied: hierarchical TOC hyperlinks (no duplicate list + label numbering) + body numbering in headings (or justified exception) + three-level depth + **visible** title size/color.
+- [ ] **Table of contents** is the **first** section (after title/metadata); **bullet** hierarchy; anchors match **`id`** or slug rules.
+- [ ] **`README.md`:** major sections use **one matching emoji** in TOC and body headings ([3.1](#gma-readme-emoji)).
+- [ ] No more than **three** heading levels unless justified.
+- [ ] **Code fences** use the correct **language identifier** where applicable.
+- [ ] **Tables** (if used): header **`#1565c0`**, aspect column **`#e3f2fd`**, body rows distinct—see [6.1](#gma-tables).
+- [ ] **Mermaid** (if used): semantic colors, **`font-size:9px`**, consistent **`stroke-width`**—see [6.2](#gma-mermaid).
+- [ ] Inline color/HTML extras stay **few** and purposeful—not the default for every line.

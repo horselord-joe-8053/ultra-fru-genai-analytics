@@ -1,14 +1,16 @@
-# 📦 FRU GenAI Analytics Overview 
+<h1 id="fru-readme-title" style="color:#0d47a1;font-size:1.5em;font-weight:700;border-bottom:2px solid #90caf9;padding-bottom:0.25em;margin-top:0">FRU GenAI Analytics Overview</h1>
+
 **(Spark + Delta + OpenAI Embeddings + pgvector + Bedrock + AWS)**
 
 FRU (**Fridges R Us**) is a real, end-to-end **conversational analytics system** built over refrigerator sales data.
 
-## 📋 Table of Contents
+
+<h2 id="document-outline" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">📋 Table of Contents</h2>
 
 - [🧠 1. Concept](#1-concept)
 - [🧩 2. Architecture Overview](#2-architecture-overview)
   - [System layers](#system-layers)
-  - [📐 Architecture Diagram (Textual)](#architecture-diagram-textual)
+  - [📐 Architecture Diagram](#architecture-diagram)
 - [🗂 3. Project Layout](#3-project-layout)
 - [⚡️ 4. Local Quickstart](#4-local-quickstart)
 - [🔥 5. Analytics with Spark + Delta](#5-analytics-with-spark-delta)
@@ -46,7 +48,7 @@ FRU (**Fridges R Us**) is a real, end-to-end **conversational analytics system**
 
 ---
 
-## 📚 Documentation Guide
+<h2 id="documentation-guide" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">📚 Documentation Guide</h2>
 
 **Main Documentation:**
 - **[`docs/README_RUN.md`](docs/README_RUN.md)** - Quick start guide for running FRU locally and on AWS
@@ -72,25 +74,30 @@ FRU (**Fridges R Us**) is a real, end-to-end **conversational analytics system**
 
 ---
 
-It demonstrates:
 
-- ✔️ **Enterprise GenAI architecture**
-- ✔️ **Separation of offline vs online compute**
-- ✔️ **RAG over structured + unstructured data**
-- ✔️ **Low-cost inference at scale**
-- ✔️ **AWS-native deployment story**
-- ✔️ **Infrastructure as Code (Terraform + Terragrunt)** - Production-ready IaC with modular architecture, environment management, and security best practices
-- ⭐ **Agent-based query processing** (optional) - Autonomous ReAct agent for complex queries - **See [Section 10](#10-query-processing-architecture) for detailed architecture**
-- ✔️ **Optimized deployment** - Redundant operations eliminated for faster deployments (~15-30s saved)
-- ✔️ **Enhanced frontend** - Build version tracking, improved error handling with detailed console logging, configurable resizable panels, and environment-based width configuration
+**What this repo demonstrates:**
+
+<table>
+<thead>
+<tr style="background:#1565c0;color:white"><th style="padding:8px">Layer</th><th style="padding:8px">Technology</th><th style="padding:8px">Role</th></tr>
+</thead>
+<tbody>
+<tr><td style="background:#e3f2fd;padding:8px"><strong>Batch</strong></td><td style="background:#e8f5e9;padding:8px">Spark + Delta Lake</td><td style="background:#e8f5e9;padding:8px">Ingest, analytics, NLQ→SQL training data</td></tr>
+<tr><td style="background:#e3f2fd;padding:8px"><strong>Interactive</strong></td><td style="background:#fff3e0;padding:8px">OpenAI embeddings + pgvector</td><td style="background:#fff3e0;padding:8px">Low-latency semantic search and SQL filters</td></tr>
+<tr><td style="background:#e3f2fd;padding:8px"><strong>Narrative</strong></td><td style="background:#e8f5e9;padding:8px">AWS Bedrock Claude</td><td style="background:#e8f5e9;padding:8px">Grounded explanations over retrieved facts</td></tr>
+<tr><td style="background:#e3f2fd;padding:8px"><strong>Deploy</strong></td><td style="background:#fff3e0;padding:8px">Terraform + Terragrunt, ECS/EKS</td><td style="background:#fff3e0;padding:8px">Modular IaC and environment management</td></tr>
+</tbody>
+</table>
+
+- ⭐ **Agent-based query processing** (optional) — Autonomous ReAct agent for complex queries. See [Section 10](#10-query-processing-architecture).
+- ✔️ **Optimized deployment** — Redundant operations eliminated for faster deployments (~15–30s saved).
+- ✔️ **Enhanced frontend** — Build version tracking, improved error handling, configurable resizable panels.
 
 It is designed as a working prototype that demonstrates production-ready GenAI architecture patterns.
 
 ---
 
-<a id="1-concept"></a>
-
-# 🧠 1. Concept
+<h2 id="1-concept" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">🧠 1. Concept</h2>
 FRU (**Fridges R Us**) is a **conversational analytics assistant** for fridge sales.
 
 Typical user asks:
@@ -102,11 +109,9 @@ The system produces grounded insights using **real sales + feedback data**, not 
 
 ---
 
-<a id="2-architecture-overview"></a>
+<h2 id="2-architecture-overview" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">🧩 2. Architecture Overview</h2>
 
-# 🧩 2. Architecture Overview
-
-### 🔵 *The Golden Separation*
+<h3 id="golden-separation" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">🔵 The Golden Separation</h3>
 
 > **Spark does batch intelligence.  
 > pgvector does interactive intelligence.  
@@ -114,9 +119,7 @@ The system produces grounded insights using **real sales + feedback data**, not 
 
 This separation is a fundamental architectural principle that enables scalable, cost-effective analytics.
 
-<a id="system-layers"></a>
-
-### System layers
+<h3 id="system-layers" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">System layers</h3>
 
 **Offline Factory (heavy)**
 - CSV → Delta
@@ -131,46 +134,33 @@ This separation is a fundamental architectural principle that enables scalable, 
 
 ---
 
-<a id="architecture-diagram-textual"></a>
+<h3 id="architecture-diagram" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">📐 Architecture Diagram</h3>
 
-## 📐 Architecture Diagram (Textual)
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontSize': '11px', 'fontFamily': 'sans-serif' }, 'flowchart': { 'padding': 8, 'nodeSpacing': 25, 'rankSpacing': 30 }}}%%
+graph TD
+  Spark["Spark + Delta Lake\n• ingest CSV\n• analytics\n• NLQ→SQL dataset"]
+  Emb["OpenAI Embeddings\n(offline batch)\nCSV → vectors per feedback"]
+  PG["Postgres + pgvector\nANN search + SQL filters"]
+  API["Flask API\n(ECS / Fargate)"]
+  Claude["Bedrock Claude\nSummarization"]
 
-```text
-                              ┌──────────────────────┐
-                              │ Spark + Delta Lake   │
-                              │ ▸ ingest CSV         │
-                              │ ▸ analytics          │
-                              │ ▸ NLQ→SQL dataset    │
-                              └──────────┬───────────┘
-                                         │
-                                         ▼
-                      ┌────────────────────────────────────┐
-                      │  OpenAI Embeddings (offline batch)  │
-                      │  CSV => vectors per feedback        │
-                      └──────────────┬──────────────────────┘
-                                     │
-                                     ▼
-                         ┌──────────────────────────┐
-                         │ Postgres + pgvector      │
-                         │ ANN search + SQL filters │
-                         └───────────┬──────────────┘
-                                     │
-                                     ▼
-                        ┌────────────────────────────┐
-                        │ Flask API (ECS / Fargate)  │
-                        └──────────┬─────────────────┘
-                                    │
-                                    ▼
-                      ┌──────────────────────────────────┐
-                      │ Bedrock Claude Summarization      │
-                      └──────────────────────────────────┘
+  Spark --> Emb
+  Emb --> PG
+  PG --> API
+  API --> Claude
+
+  style Spark fill:#fff3e0,stroke:#e65100,stroke-width:1px,font-size:9px
+  style Emb fill:#fff8e1,stroke:#ff8f00,stroke-width:1px,font-size:9px
+  style PG fill:#e8f5e9,stroke:#2e7d32,stroke-width:1px,font-size:9px
+  style API fill:#ede7f6,stroke:#5e35b1,stroke-width:1px,font-size:9px
+  style Claude fill:#ffebee,stroke:#c62828,stroke-width:1px,font-size:9px
 ```
+
 
 ---
 
-<a id="3-project-layout"></a>
-
-# 🗂 3. Project Layout
+<h2 id="3-project-layout" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">🗂 3. Project Layout</h2>
 
 ```text
 fru-genai-analytics-all/
@@ -255,9 +245,7 @@ fru-genai-analytics-all/
 
 ---
 
-<a id="4-local-quickstart"></a>
-
-# ⚡️ 4. Local Quickstart
+<h2 id="4-local-quickstart" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">⚡️ 4. Local Quickstart</h2>
 
 For detailed instructions on running FRU locally, see **[`docs/README_RUN.md`](docs/README_RUN.md)**.
 
@@ -268,15 +256,11 @@ For detailed instructions on running FRU locally, see **[`docs/README_RUN.md`](d
 
 ---
 
-<a id="5-analytics-with-spark-delta"></a>
-
-# 🔥 5. Analytics with Spark + Delta
+<h2 id="5-analytics-with-spark-delta" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">🔥 5. Analytics with Spark + Delta</h2>
 
 > This is your enterprise “big data platform” story.
 
-<a id="51-ingest-csv-delta-lake"></a>
-
-## 5.1 Ingest CSV → Delta Lake
+<h3 id="51-ingest-csv-delta-lake" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">5.1 Ingest CSV → Delta Lake</h3>
 
 ```bash
 spark-submit   --packages io.delta:delta-spark_2.12:3.2.0   spark_jobs/ingest_delta.py   data/raw/fridge_sales_with_rating.csv   data/delta/fru_sales
@@ -284,9 +268,7 @@ spark-submit   --packages io.delta:delta-spark_2.12:3.2.0   spark_jobs/ingest_de
 
 ---
 
-<a id="52-generate-nlqsql-examples-for-lora"></a>
-
-## 5.2 Generate NLQ→SQL examples for LoRA
+<h3 id="52-generate-nlqsql-examples-for-lora" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">5.2 Generate NLQ→SQL examples for LoRA</h3>
 
 ```bash
 spark-submit   --packages io.delta:delta-spark_2.12:3.2.0   spark_jobs/generate_training_data.py   data/delta/fru_sales   data/synthetic/nlq_training_pairs.jsonl
@@ -306,17 +288,13 @@ You can later use this JSONL to:
 
 ---
 
-<a id="6-intelligence-model-openai-embeddings-pgvector"></a>
-
-# 🧠 6. Intelligence Model: OpenAI Embeddings + pgvector
+<h2 id="6-intelligence-model-openai-embeddings-pgvector" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">🧠 6. Intelligence Model: OpenAI Embeddings + pgvector</h2>
 
 > The beating heart of FRU.
 
 pgvector serves as the **inference-time semantic engine** for FRU. It enables low-latency nearest-neighbor retrieval over embeddings inside a transactional database, complementing Spark + Delta Lake for batch processing.
 
-<a id="61-overview"></a>
-
-## 6.1 Overview
+<h3 id="61-overview" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">6.1 Overview</h3>
 
 FRU separates concerns into three major layers:
 
@@ -326,9 +304,7 @@ FRU separates concerns into three major layers:
 
 > **Key Principle**: Spark does batch intelligence; pgvector does interactive intelligence.
 
-<a id="62-embedding-generation-offline-factory"></a>
-
-## 6.2 Embedding Generation (Offline Factory)
+<h3 id="62-embedding-generation-offline-factory" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">6.2 Embedding Generation (Offline Factory)</h3>
 
 1. Ingest `data/raw/fridge_sales_with_rating.csv` into a Delta table via Spark.
 2. Use an OpenAI embedding model (`text-embedding-3-small`) over `CUSTOMER_FEEDBACK`.
@@ -336,9 +312,7 @@ FRU separates concerns into three major layers:
 
 The ETL process (`backend/etl/load_openai_embeddings_to_pgvector.py`) handles this offline, generating embeddings for all customer feedback before queries arrive.
 
-<a id="63-pgvector-schema"></a>
-
-## 6.3 pgvector Schema
+<h3 id="63-pgvector-schema" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">6.3 pgvector Schema</h3>
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -364,9 +338,7 @@ WITH (lists = 100);
 
 The `ivfflat` index enables fast approximate nearest neighbor (ANN) search for semantic similarity queries.
 
-<a id="64-inference-time-flow"></a>
-
-## 6.4 Inference-Time Flow
+<h3 id="64-inference-time-flow" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">6.4 Inference-Time Flow</h3>
 
 **Example user question:**
 > "Which LG fridge do customers complain the most about delivery problems?"
@@ -397,9 +369,7 @@ ORDER BY complaints DESC;
 4. **Take result rows** and sample `customer_feedback` snippets.
 5. **Ask Bedrock Claude** to summarize the findings, using numbers from SQL and context from snippets.
 
-<a id="65-llm-prompt-pattern"></a>
-
-## 6.5 LLM Prompt Pattern
+<h3 id="65-llm-prompt-pattern" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">6.5 LLM Prompt Pattern</h3>
 
 Instead of letting the LLM invent SQL or guess facts, we:
 
@@ -419,9 +389,7 @@ User:
 { "question": "...", "structured": {...}, "snippets": [ ... ] }
 ```
 
-<a id="66-why-pgvector-vs-spark-sql"></a>
-
-## 6.6 Why pgvector vs Spark SQL?
+<h3 id="66-why-pgvector-vs-spark-sql" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">6.6 Why pgvector vs Spark SQL?</h3>
 
 **Spark + Delta Lake** remains the backbone for:
 - large-scale ETL / ELT
@@ -447,18 +415,14 @@ You could attempt to use Spark SQL directly at inference time, but downsides inc
 
 ---
 
-<a id="7-integrating-bedrock-claude"></a>
-
-# 🦾 7. Integrating Bedrock Claude
+<h2 id="7-integrating-bedrock-claude" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">🦾 7. Integrating Bedrock Claude</h2>
 
 Claude sees:
 
 - Structured facts (`stats`, `sample_records`)  
 - The original business question  
 
-<a id="prompt-logic-conceptual"></a>
-
-### Prompt logic (conceptual)
+<h3 id="prompt-logic-conceptual" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">Prompt logic (conceptual)</h3>
 
 System prompt (simplified):
 
@@ -487,9 +451,7 @@ Claude returns:
 
 ---
 
-<a id="8-full-aws-deployment"></a>
-
-# 🏗 8. Full AWS Deployment
+<h2 id="8-full-aws-deployment" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">🏗 8. Full AWS Deployment</h2>
 
 For detailed instructions on deploying FRU to AWS, see **[`docs/README_RUN.md`](docs/README_RUN.md)** and **[`docs/README_INFRA.md`](docs/README_INFRA.md)**.
 
@@ -501,9 +463,7 @@ For detailed instructions on deploying FRU to AWS, see **[`docs/README_RUN.md`](
 
 ---
 
-<a id="9-governance-safety"></a>
-
-# 🛡 9. Governance & Safety
+<h2 id="9-governance-safety" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">🛡 9. Governance &amp; Safety</h2>
 
 - **OpenAI** only used for **offline + query-time embeddings**, not for final narrative.
 - **Claude** (Bedrock) used for answers:
@@ -526,11 +486,7 @@ Add:
 
 ---
 
----
-
-<a id="10-query-processing-architecture"></a>
-
-# 🤖 10. Query Processing Architecture
+<h2 id="10-query-processing-architecture" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">🤖 10. Query Processing Architecture</h2>
 
 <div align="center">
 
@@ -550,13 +506,9 @@ Add:
 
 FRU's query processing has evolved from a simple keyword-based system to an intelligent, agent-based autonomous system. This section describes the current implementation and the evolution path.
 
-<a id="101-current-implementation"></a>
+<h3 id="101-current-implementation" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">10.1 Current Implementation</h3>
 
-## 10.1 Current Implementation
-
-<a id="architecture"></a>
-
-### Architecture
+<h3 id="architecture" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">Architecture</h3>
 - **Classification**: Simple keyword-based (`is_qualitative()` function)
 - **Query Processing**: Single path - pgvector semantic search only
 - **Limitations**:
@@ -565,10 +517,8 @@ FRU's query processing has evolved from a simple keyword-based system to an inte
   - No SQL generation capability
   - Fixed execution path
 
-<a id="flow"></a>
-
-### Flow
-```
+<h3 id="flow" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">Flow</h3>
+```text
 User Query → Keyword Check → pgvector Search → Stats → Claude Explanation
 ```
 
@@ -578,13 +528,9 @@ Query: "Which region has the biggest sales?"
 - Problem: Doesn't aggregate all sales data, only samples
 - Result: Inaccurate or incomplete answer
 
-<a id="102-evolution-path-enhancement_a-b-c"></a>
+<h3 id="102-evolution-path-enhancement_a-b-c" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">10.2 Evolution Path: Enhancement_A → B → C</h3>
 
-## 10.2 Evolution Path: Enhancement_A → B → C
-
-<a id="enhancement_a-llm-classification-sql-generation"></a>
-
-### Enhancement_A: LLM Classification + SQL Generation
+<h3 id="enhancement_a-llm-classification-sql-generation" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">Enhancement_A: LLM Classification + SQL Generation</h3>
 
 **What It Adds:**
 - **LLM-based classification**: Claude/Bedrock classifies queries as `quantitative`, `qualitative`, or `hybrid`
@@ -592,7 +538,7 @@ Query: "Which region has the biggest sales?"
 - **Dual execution paths**: Different handling for quantitative vs qualitative queries
 
 **Architecture:**
-```
+```text
 User Query → LLM Classify → Route Decision
                 │
     ┌───────────┴───────────┐
@@ -613,9 +559,7 @@ Return Answer
 - Maintains qualitative strength: Still uses pgvector for feedback queries
 - Schema-aware: LLM receives table structure for accurate SQL generation
 
-<a id="enhancement_b-hybrid-query-processing"></a>
-
-### Enhancement_B: Hybrid Query Processing
+<h3 id="enhancement_b-hybrid-query-processing" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">Enhancement_B: Hybrid Query Processing</h3>
 
 **What It Adds:**
 - **Two-phase execution**: Quantitative analysis first, then qualitative analysis filtered by results
@@ -623,7 +567,7 @@ Return Answer
 - **Coordinated execution**: SQL results guide semantic search
 
 **Architecture:**
-```
+```text
 User Query → Classify as "hybrid"
     │
     ├─ Phase 1: Quantitative
@@ -642,9 +586,7 @@ Query: "How to improve sales where sales were low?"
 2. **Phase 2**: Semantic search for feedback ONLY from Store A and Store B
 3. **Phase 3**: Claude synthesizes recommendations based on both quantitative and qualitative findings
 
-<a id="enhancement_c-agent-based-autonomous-planning-implemented"></a>
-
-### Enhancement_C: Agent-Based Autonomous Planning (Implemented)
+<h3 id="enhancement_c-agent-based-autonomous-planning-implemented" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">Enhancement_C: Agent-Based Autonomous Planning (Implemented)</h3>
 
 **What It Adds:**
 - **Autonomous planning**: LLM decides what analysis is needed
@@ -653,7 +595,7 @@ Query: "How to improve sales where sales were low?"
 - **Dynamic adaptation**: Adapts to novel queries without fixed patterns
 
 **Architecture:**
-```
+```text
 User Query → Agent Planning
     │
     ├─ Agent thinks: "What do I need?"
@@ -679,13 +621,9 @@ User Query → Agent Planning
 - **Iterative**: Can refine based on intermediate results
 - **Extensible**: Easy to add new tools
 
-<a id="103-agent-based-system-enhancement_c-implementation"></a>
+<h3 id="103-agent-based-system-enhancement_c-implementation" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">10.3 Agent-Based System (Enhancement_C) - Implementation</h3>
 
-## 10.3 Agent-Based System (Enhancement_C) - Implementation
-
-<a id="components"></a>
-
-### Components
+<h3 id="components" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">Components</h3>
 
 1. **Tools** (`backend/agents/tools/`)
    - `SQLTool`: Execute SQL queries safely
@@ -712,9 +650,7 @@ User Query → Agent Planning
    - `/metrics/agent` endpoint
    - Feature flag: `USE_AGENT_QUERY`
 
-<a id="usage"></a>
-
-### Usage
+<h3 id="usage" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">Usage</h3>
 
 **Enable Agent:**
 Set environment variable:
@@ -736,26 +672,20 @@ curl -X POST http://localhost:5000/query-v2 \
 curl http://localhost:5000/metrics/agent
 ```
 
-<a id="feature-flags"></a>
-
-### Feature Flags
+<h3 id="feature-flags" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">Feature Flags</h3>
 
 - `USE_AGENT_QUERY`: Master switch (default: false)
 - `USE_AGENT_QUERY_PERCENTAGE`: Gradual rollout percentage (0-100)
 - `USE_AGENT_QUERY_WHITELIST`: Comma-separated user IDs for testing
 
-<a id="debugging"></a>
-
-### Debugging
+<h3 id="debugging" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">Debugging</h3>
 
 When `FLASK_DEBUG=true`, the `/query-v2` response includes:
 - `debug_info`: Complete execution trace
 - `tool_calls`: All tool executions with inputs/outputs
 - `agent_thoughts`: Agent reasoning
 
-<a id="performance-considerations"></a>
-
-### Performance Considerations
+<h3 id="performance-considerations" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">Performance Considerations</h3>
 
 **Latency:**
 - **Current**: ~500-800ms (single pgvector search)
@@ -775,26 +705,20 @@ When `FLASK_DEBUG=true`, the `/query-v2` response includes:
 - Use Claude Haiku for planning, Sonnet for synthesis
 - Limit agent iterations (max 5 steps)
 
-<a id="migration-path"></a>
-
-### Migration Path
+<h3 id="migration-path" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">Migration Path</h3>
 
 1. **Phase 1**: Test with feature flag disabled (default)
 2. **Phase 2**: Enable for specific users (whitelist)
 3. **Phase 3**: Gradual rollout (percentage)
 4. **Phase 4**: Full rollout (if metrics are good)
 
-<a id="rollback"></a>
-
-### Rollback
+<h3 id="rollback" style="color:#00695c;font-size:1.05em;font-weight:600;margin-top:0.85em">Rollback</h3>
 
 Set `USE_AGENT_QUERY=false` to disable agent and fall back to original `/query` endpoint.
 
 ---
 
-<a id="11-next-steps-roadmap"></a>
-
-# 📌 11. Next Steps (Roadmap)
+<h2 id="11-next-steps-roadmap" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">📌 11. Next Steps (Roadmap)</h2>
 
 - ✅ **React UI** - Already implemented with Chat interface, Batch Analytics Panel, and Query Stats
   - Configurable panel widths via environment variables (`VITE_FRONTEND_EXEC_LOG_PANEL_WIDTH_PERCENT`, `VITE_FRONTEND_BATCH_ANALYTIC_PANEL_WIDTH_PERCENT`)
@@ -811,9 +735,7 @@ Set `USE_AGENT_QUERY=false` to disable agent and fall back to original `/query` 
 
 ---
 
-<a id="summary"></a>
-
-# 🙌 Summary
+<h2 id="summary" style="color:#1565c0;font-size:1.22em;font-weight:650;border-left:4px solid #42a5f5;padding-left:10px;margin-top:1.1em">🙌 Summary</h2>
 
 FRU is a **real playground** for experimenting with Spark, Delta, OpenAI embeddings, pgvector, and Bedrock. It demonstrates production-ready GenAI architecture patterns with:
 
