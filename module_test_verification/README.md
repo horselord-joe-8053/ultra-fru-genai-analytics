@@ -9,6 +9,11 @@ Tests and verification: query tests (test_query_*.sh), common_sh (test_setup, te
 - **test_query_*.sh** – Query tests (1_AVG, 1_TOP, 9, 2way_local variants)
 - **test_results/**, **cache_files/** – Output dirs
 
+## Unit vs integration
+
+- **Unit tests (fast, mocked):** repo-root `tests/` — see [`tests/README.md`](../tests/README.md). Run `pytest` before opening a PR.
+- **Integration tests (this module):** shell runners hit a **live** API (`local` or `aws`).
+
 ## Usage
 
 - Run query tests: `./module_test_verification/test_query_1_AVG.sh --test-env local` (or from repo root; scripts resolve REPO_ROOT)

@@ -73,6 +73,12 @@ pgdata/
 
 .env.bak
 
+# pytest / coverage artifacts
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
 # Test cache files (local, should not be committed)
 test/cache_files/
 .env.bak*

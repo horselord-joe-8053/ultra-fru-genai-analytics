@@ -1,0 +1,14 @@
+[run]
+source = module_app_core/backend
+omit =
+    */pack_with_docker/*
+    */etl/*
+    */__init__.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+skip_empty = True
+fail_under = 42
+show_missing = True
